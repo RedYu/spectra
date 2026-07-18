@@ -1,0 +1,49 @@
+name: ESP-IDF Build
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+  pull_request:
+    branches:
+      - main
+      - develop
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build firmware
+    runs-on: ubuntu-latest
+
+    container:
+      image: espressif/idf:v6.0.2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Show ESP-IDF version
+        run: idf.py --version
+
+      - name: Build project
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py build
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: spectra-firmware
+          path: |
+            build/*.bin
+            build/*.elf
+            build/*.map
+            build/bootloader/*.bin
+            build/partition_table/*.bin
+          if-no-files-found: error
