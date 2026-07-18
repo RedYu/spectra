@@ -2,4 +2,4 @@
 
 #include "lvgl.h"
 
-LV_IMAGE_DECLARE(logo_cpg);
+LV_IMAGE_DECLARE(dev_logo);

@@ -1,7 +1,7 @@
 # Spectra
 
 <div align="center">
-
+![ESP-IDF Build](https://github.com/RedYu/spectra/actions/workflows/build.yml/badge.svg)
 ![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.x-E7352C?logo=espressif)
 ![LVGL](https://img.shields.io/badge/LVGL-v9-00AEEF)
 ![Platform](https://img.shields.io/badge/Platform-ESP32--S3-blue)

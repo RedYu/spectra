@@ -1,5 +1,9 @@
 #pragma once
 
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
+#include "driver/i2c_master.h"
+
 #define LCD_H_RES              480
 #define LCD_V_RES              320
 

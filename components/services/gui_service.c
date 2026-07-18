@@ -10,12 +10,12 @@
 
 #include "lvgl.h"
 
-#include "assets/logo_cpg.h"
+#include "assets/dev_logo.h"
 #include "display_driver.h"
 
 #include "esp_random.h"
 
-#include "gui/screens/settings_screen.h"
+#include "settings_screen.h"
 
 static const char *TAG = "gui_service";
 
@@ -47,7 +47,7 @@ static void gui_create_splash_screen(void)
 
     lv_obj_t *logo_image = lv_image_create(s_splash_screen);
 
-    lv_image_set_src(logo_image, &logo_cpg);
+    lv_image_set_src(logo_image, &dev_logo);
 
     lv_obj_align(
         logo_image,
