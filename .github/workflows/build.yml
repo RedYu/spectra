@@ -28,12 +28,16 @@ jobs:
           submodules: recursive
 
       - name: Show ESP-IDF version
-        run: idf.py --version
+        shell: bash
+        run: |
+          source /opt/esp/idf/export.sh
+          idf.py --version
 
       - name: Build project
         shell: bash
         run: |
-          . $IDF_PATH/export.sh
+          source /opt/esp/idf/export.sh
+          idf.py set-target esp32s3
           idf.py build
 
       - name: Upload firmware artifacts
