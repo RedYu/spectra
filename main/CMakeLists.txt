@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS 
         "main.c"
-        "images/logo_cpg.c"
+        "assets/logo_cpg.c"
         "drivers/display_driver.c"
         "drivers/touch_driver.c"
         "gui/lvgl_port.c"
@@ -9,7 +9,7 @@ idf_component_register(
         "gui/screens/settings_screen.c"
     INCLUDE_DIRS 
         "."
-        "images"
+        "assets"
         "drivers"
         "gui"
         "gui/screens"

@@ -10,7 +10,7 @@
 
 #include "lvgl.h"
 
-#include "images/logo_cpg.h"
+#include "assets/logo_cpg.h"
 #include "display_driver.h"
 
 #include "esp_random.h"
