@@ -1,0 +1,20 @@
+idf_component_register(
+    SRCS 
+        "main.c"
+        "images/logo_cpg.c"
+        "drivers/display_driver.c"
+        "drivers/touch_driver.c"
+        "gui/lvgl_port.c"
+        "services/gui_service.c"
+        "gui/screens/settings_screen.c"
+    INCLUDE_DIRS 
+        "."
+        "images"
+        "drivers"
+        "gui"
+        "gui/screens"
+        "services"
+    REQUIRES 
+        lvgl
+        esp_timer
+)
