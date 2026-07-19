@@ -12,4 +12,5 @@ idf_component_register(
         lvgl_port
         gui
         services
+        freertos
 )
