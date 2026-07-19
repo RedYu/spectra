@@ -8,7 +8,7 @@
 ![Platform](https://img.shields.io/badge/Platform-ESP32--S3-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-Modern Automotive CAN Analyzer
+Modern Automotive CAN Analyzer <br />
 Modular ESP32-S3 automotive diagnostic platform built with ESP-IDF, FreeRTOS and LVGL.
 
 </div>
