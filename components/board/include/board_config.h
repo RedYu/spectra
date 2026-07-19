@@ -4,6 +4,8 @@
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
 
+#define BOARD_HARDWARE_VERSION "Rev A"
+
 #define LCD_H_RES              480
 #define LCD_V_RES              320
 

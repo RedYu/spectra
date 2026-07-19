@@ -14,6 +14,10 @@
 #include "touch_driver.h"
 #include "lvgl_port.h"
 
+#include "system_model.h"
+
+#include "app_config.h"
+#include "system_service.h"
 #include "storage_service.h"
 #include "settings_service.h"
 #include "gui_service.h"
@@ -39,6 +43,8 @@ void app_main(void)
 {
     ESP_ERROR_CHECK(board_init());
 
+    ESP_ERROR_CHECK(system_model_init());
+
     ESP_LOGI(TAG, "Application starting");
 
     esp_err_t err = storage_service_init();
@@ -49,6 +55,8 @@ void app_main(void)
             "Internal storage is unavailable, continuing with defaults"
         );
     }
+
+    start_service("System", system_service_start);
 
     err = settings_service_init();
 

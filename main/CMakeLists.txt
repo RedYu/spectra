@@ -6,6 +6,7 @@ idf_component_register(
         "."
 
     PRIV_REQUIRES
+        app
         board
         drivers
         models

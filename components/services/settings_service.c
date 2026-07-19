@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 
+#include "system_model.h"
 #include "settings_model.h"
 #include "storage_service.h"
 
@@ -129,6 +130,7 @@ static esp_err_t parse_config(
         return ESP_ERR_INVALID_ARG;
     }
 
+    esp_err_t result = ESP_OK;
     cJSON *root = cJSON_Parse(json_text);
 
     if (root == NULL) {
@@ -137,7 +139,9 @@ static esp_err_t parse_config(
         ESP_LOGE(
             TAG,
             "Invalid JSON near: %s",
-            error_position != NULL ? error_position : "unknown position"
+            error_position != NULL
+                ? error_position
+                : "unknown position"
         );
 
         return ESP_ERR_INVALID_RESPONSE;
@@ -145,17 +149,23 @@ static esp_err_t parse_config(
 
     if (!cJSON_IsObject(root)) {
         ESP_LOGE(TAG, "Configuration root must be a JSON object");
-        cJSON_Delete(root);
-        return ESP_ERR_INVALID_RESPONSE;
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
     }
 
+    /*
+     * Validate schema version.
+     */
     const cJSON *schema_version =
-        cJSON_GetObjectItemCaseSensitive(root, "schema_version");
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "schema_version"
+        );
 
     if (!cJSON_IsNumber(schema_version)) {
-        ESP_LOGE(TAG, "Missing schema_version");
-        cJSON_Delete(root);
-        return ESP_ERR_INVALID_VERSION;
+        ESP_LOGE(TAG, "Missing or invalid schema_version");
+        result = ESP_ERR_INVALID_VERSION;
+        goto cleanup;
     }
 
     const uint32_t version =
@@ -168,27 +178,107 @@ static esp_err_t parse_config(
             (unsigned int)version
         );
 
-        cJSON_Delete(root);
-        return ESP_ERR_INVALID_VERSION;
+        result = ESP_ERR_INVALID_VERSION;
+        goto cleanup;
     }
 
-    settings->schema_version = version;
-
+    /*
+     * Validate device identity before applying configuration.
+     */
     const cJSON *device =
         cJSON_GetObjectItemCaseSensitive(root, "device");
 
-    if (cJSON_IsObject(device)) {
-        parse_string(
-            device,
-            "name",
-            settings->device.name,
-            sizeof(settings->device.name)
-        );
+    if (!cJSON_IsObject(device)) {
+        ESP_LOGE(TAG, "Missing device configuration");
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
     }
 
-    cJSON_Delete(root);
+    const cJSON *device_target =
+        cJSON_GetObjectItemCaseSensitive(device, "target");
 
-    return ESP_OK;
+    if (!cJSON_IsString(device_target) ||
+        device_target->valuestring == NULL) {
+
+        ESP_LOGE(TAG, "Missing or invalid device.target");
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
+    }
+
+    system_model_t system_model;
+
+    result = system_model_get_snapshot(&system_model);
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to read system model: %s",
+            esp_err_to_name(result)
+        );
+
+        goto cleanup;
+    }
+
+    if (strcmp(
+            device_target->valuestring,
+            system_model.device_id
+        ) != 0) {
+
+        ESP_LOGE(
+            TAG,
+            "Configuration device mismatch: "
+            "expected='%s', received='%s'",
+            system_model.device_id,
+            device_target->valuestring
+        );
+
+        result = ESP_ERR_NOT_SUPPORTED;
+        goto cleanup;
+    }
+
+    
+    const cJSON *device_name =
+        cJSON_GetObjectItemCaseSensitive(device, "name");
+
+    if (!cJSON_IsString(device_name) ||
+        device_name->valuestring == NULL) {
+
+        ESP_LOGE(TAG, "Missing or invalid device.name");
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
+    }
+
+    /*
+     * The configuration belongs to this device.
+     * It is now safe to apply its values.
+     */
+    settings->schema_version = version;
+
+    strlcpy(
+        settings->device.target,
+        device_target->valuestring,
+        sizeof(settings->device.target)
+    );
+
+    strlcpy(
+        settings->device.name,
+        device_name->valuestring,
+        sizeof(settings->device.name)
+    );
+
+    /*
+     * Parse the remaining configuration fields here.
+     */
+
+    ESP_LOGI(
+        TAG,
+        "Configuration validated for device: %s",
+        system_model.device_id
+    );
+
+cleanup:
+    cJSON_Delete(root);
+    return result;
 }
 
 esp_err_t settings_service_reload(void)

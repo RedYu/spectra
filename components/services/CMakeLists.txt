@@ -3,6 +3,7 @@ idf_component_register(
         "gui_service.c"
         "storage_service.c"
         "settings_service.c"
+        "system_service.c"
 
     INCLUDE_DIRS
         "include"
@@ -11,9 +12,11 @@ idf_component_register(
         models
 
     PRIV_REQUIRES
+        app
+        gui
+        esp_app_format
         drivers
         lvgl_port
-        gui
         freertos
         nvs_flash
         fatfs

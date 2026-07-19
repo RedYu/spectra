@@ -2,6 +2,7 @@
     "schema_version": 1,
 
     "device": {
-        "name": "Spectra"
+        "target": "spectra",
+		"name": "Modern Automotive CAN Analyzer"
     }
 }

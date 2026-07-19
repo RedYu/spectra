@@ -5,9 +5,11 @@
 #include <stdint.h>
 
 #define SETTINGS_DEVICE_NAME_MAX_LENGTH  32
+#define SETTINGS_DEVICE_TARGET_MAX_LENGTH  32
 
 typedef struct
 {
+    char target[SETTINGS_DEVICE_TARGET_MAX_LENGTH];
     char name[SETTINGS_DEVICE_NAME_MAX_LENGTH];
 } device_settings_t;
 

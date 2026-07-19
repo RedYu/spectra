@@ -1,4 +1,5 @@
 #include "storage_service.h"
+#include "system_model.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,6 +36,8 @@ esp_err_t storage_service_init(void)
             esp_err_to_name(err)
         );
 
+        system_model_set_storage_ready(false);
+
         return err;
     }
 
@@ -54,6 +57,8 @@ esp_err_t storage_service_init(void)
             esp_err_to_name(err)
         );
 
+        system_model_set_storage_ready(false);
+
         esp_vfs_spiffs_unregister(STORAGE_PARTITION_LABEL);
         return err;
     }
@@ -67,6 +72,8 @@ esp_err_t storage_service_init(void)
         (unsigned int)used_bytes
     );
 
+    system_model_set_storage_ready(true);
+
     return ESP_OK;
 }
 
@@ -78,6 +85,8 @@ void storage_service_deinit(void)
 
     esp_vfs_spiffs_unregister(STORAGE_PARTITION_LABEL);
     s_is_mounted = false;
+
+    system_model_set_storage_ready(false);
 }
 
 bool storage_service_is_mounted(void)
