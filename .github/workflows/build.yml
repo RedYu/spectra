@@ -26,12 +26,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Show ESP-IDF version
         shell: bash
         run: |
           source /opt/esp/idf/export.sh
           idf.py --version
+
+      - name: Show firmware version
+        shell: bash
+        run: |
+          git describe --tags --always --dirty
 
       - name: Build project
         shell: bash
