@@ -18,3 +18,4 @@ dependencies:
   espressif/esp_lcd_touch_gt911: '*'
   atanisoft/esp_lcd_ili9488: '*'
   espressif/esp_lcd_touch: ^1.2.1
+  espressif/cjson: '*'
