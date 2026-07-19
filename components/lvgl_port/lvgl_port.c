@@ -272,7 +272,7 @@ static void lvgl_touch_read_cb(
         y = LCD_V_RES - 1;
     }
 
-    ESP_LOGI(TAG, "x=%u y=%u", x, y);
+    //ESP_LOGI(TAG, "x=%u y=%u", x, y);
 
     data->point.x = x;
     data->point.y = y;
