@@ -1,13 +1,15 @@
 idf_component_register(
     SRCS
+        "screens/splash_screen.c"
+        "screens/main_screen.c"
         "screens/settings_screen.c"
+
+        "widgets/toolbar.c"
+
         "assets/dev_logo.c"
 
     INCLUDE_DIRS
         "include"
-        "include/screens"
-        "include/widgets"
-        "include/assets"
 
     REQUIRES
         lvgl
@@ -15,3 +17,4 @@ idf_component_register(
     PRIV_REQUIRES
         models
 )
+
