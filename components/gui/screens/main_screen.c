@@ -2,19 +2,21 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "system_model.h"
-#include "screens/settings_screen.h"
 #include "widgets/toolbar.h"
 #include "assets/gui_images.h"
 
+#include "screen_manager.h"
 
 #define TOOLBAR_HEIGHT          56
 #define MAIN_SCREEN_UPDATE_MS   1000
 
 typedef struct
 {
-    lv_obj_t *screen;
+    lv_obj_t *root;
+    lv_timer_t *update_timer;
 
     toolbar_t toolbar;
 
@@ -31,27 +33,16 @@ typedef struct
     lv_obj_t *storage_label;
     lv_obj_t *ota_label;
 
-    lv_timer_t *update_timer;
-
 } main_screen_context_t;
 
-static main_screen_context_t s_context;
+static main_screen_context_t s_context = {0};
 
-static void open_settings_screen(void)
+static void main_screen_settings_action(void)
 {
-    lv_obj_t *settings_screen =
-        settings_screen_create();
-
-    if (settings_screen == NULL) {
-        return;
-    }
-
-    lv_screen_load_anim(
-        settings_screen,
-        LV_SCR_LOAD_ANIM_NONE,
-        0,
-        0,
-        true
+    screen_manager_show(
+        SCREEN_ID_SETTINGS,
+        LV_SCR_LOAD_ANIM_MOVE_LEFT,
+        200
     );
 }
 
@@ -97,7 +88,7 @@ static void format_uptime(
 
 static void main_screen_update(void)
 {
-    if (s_context.screen == NULL) {
+    if (s_context.root == NULL) {
         return;
     }
 
@@ -236,7 +227,7 @@ static void main_screen_delete_event_cb(
         s_context.update_timer = NULL;
     }
 
-    s_context.screen = NULL;
+    s_context.root = NULL;
 
     s_context.device_name_label = NULL;
     s_context.device_id_label = NULL;
@@ -293,7 +284,7 @@ lv_obj_t *main_screen_create(void)
     lv_obj_t *screen =
         lv_obj_create(NULL);
 
-    s_context.screen = screen;
+    s_context.root = screen;
 
     lv_obj_add_event_cb(
         screen,
@@ -323,13 +314,13 @@ lv_obj_t *main_screen_create(void)
     );
 
     const toolbar_config_t toolbar_config = {
-        .title = "SPECTRA",
+        .title = "Spectra",
 
         .left_icon = NULL,
         .left_action = NULL,
         
         .right_icon = &icons8_settings_32,
-        .right_action = open_settings_screen,
+        .right_action = main_screen_settings_action,
 
         .show_sd_status = true,
         .show_ota_status = true,
@@ -550,4 +541,58 @@ lv_obj_t *main_screen_create(void)
     );
 
     return screen;
+}
+
+
+void main_screen_on_show(
+    lv_obj_t *screen
+)
+{
+    (void)screen;
+
+    main_screen_update();
+
+    if (s_context.update_timer == NULL) {
+        s_context.update_timer =
+            lv_timer_create(
+                main_screen_update_timer_cb,
+                1000,
+                NULL
+            );
+    }
+}
+
+void main_screen_on_hide(
+    lv_obj_t *screen
+)
+{
+    (void)screen;
+
+    if (s_context.update_timer != NULL) {
+        lv_timer_delete(
+            s_context.update_timer
+        );
+
+        s_context.update_timer =
+            NULL;
+    }
+}
+
+void main_screen_destroy(
+    lv_obj_t *screen
+)
+{
+    main_screen_on_hide(
+        screen
+    );
+
+    lv_obj_delete(
+        screen
+    );
+
+    memset(
+        &s_context,
+        0,
+        sizeof(s_context)
+    );
 }

@@ -1,27 +1,17 @@
 #include "screens/settings_screen.h"
 
-#include "screens/main_screen.h"
+#include "screen_manager.h"
 #include "widgets/toolbar.h"
 
 #include "assets/gui_images.h"
 
 #define TOOLBAR_HEIGHT 56
 
-static void return_to_main_screen(void)
+static void settings_screen_back_action(void)
 {
-    lv_obj_t *main_screen =
-        main_screen_create();
-
-    if (main_screen == NULL) {
-        return;
-    }
-
-    lv_screen_load_anim(
-        main_screen,
-        LV_SCR_LOAD_ANIM_NONE,
-        0,
-        0,
-        true
+    screen_manager_back(
+        LV_SCR_LOAD_ANIM_MOVE_RIGHT,
+        200
     );
 }
 
@@ -51,7 +41,7 @@ lv_obj_t *settings_screen_create(void)
         .title = "Settings",
 
         .left_icon = &icons8_back_32,
-        .left_action = return_to_main_screen,
+        .left_action = settings_screen_back_action,
 
         .right_icon = NULL,
         .right_action = NULL,
@@ -147,5 +137,32 @@ lv_obj_t *settings_screen_create(void)
         );
 
     return screen;
+}
+
+void settings_screen_on_show(
+    lv_obj_t *screen
+)
+{
+    (void)screen;
+
+    /*
+     * Refresh settings values here.
+     */
+}
+
+void settings_screen_on_hide(
+    lv_obj_t *screen
+)
+{
+    (void)screen;
+}
+
+void settings_screen_destroy(
+    lv_obj_t *screen
+)
+{
+    lv_obj_delete(
+        screen
+    );
 }
 

@@ -1,34 +1,72 @@
 #include "screens/splash_screen.h"
 
+#include <string.h>
+
 #include "assets/gui_images.h"
 
-static lv_obj_t *s_screen;
+#include "screen_manager.h"
+
 static lv_obj_t *s_progress_bar;
 static lv_obj_t *s_status_label;
 
+typedef struct
+{
+    lv_obj_t *root;
+    lv_timer_t *timer;
+
+} splash_screen_context_t;
+
+static splash_screen_context_t s_context = {0};
+
+static void splash_screen_timer_cb(
+    lv_timer_t *timer
+)
+{
+    (void)timer;
+
+    s_context.timer = NULL;
+
+    screen_manager_clear_history();
+
+    screen_manager_show(
+        SCREEN_ID_MAIN,
+        LV_SCR_LOAD_ANIM_FADE_IN,
+        300
+    );
+}
+
 lv_obj_t *splash_screen_create(void)
 {
-    s_screen = lv_obj_create(NULL);
+    lv_obj_t *screen =
+            lv_obj_create(NULL);
+
+    s_context.root =
+        screen;
 
     lv_obj_remove_flag(
-        s_screen,
+        screen,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    lv_obj_remove_flag(
+        screen,
         LV_OBJ_FLAG_SCROLLABLE
     );
 
     lv_obj_set_style_bg_color(
-        s_screen,
+        screen,
         lv_color_hex(0xFFFFFF),
         LV_PART_MAIN
     );
 
     lv_obj_set_style_bg_opa(
-        s_screen,
+        screen,
         LV_OPA_COVER,
         LV_PART_MAIN
     );
 
     lv_obj_t *logo_image =
-        lv_image_create(s_screen);
+        lv_image_create(screen);
 
     lv_image_set_src(
         logo_image,
@@ -43,7 +81,7 @@ lv_obj_t *splash_screen_create(void)
     );
 
     lv_obj_t *title_label =
-        lv_label_create(s_screen);
+        lv_label_create(screen);
 
     lv_label_set_text(
         title_label,
@@ -70,7 +108,7 @@ lv_obj_t *splash_screen_create(void)
     );
 
     s_status_label =
-        lv_label_create(s_screen);
+        lv_label_create(screen);
 
     lv_label_set_text(
         s_status_label,
@@ -97,7 +135,7 @@ lv_obj_t *splash_screen_create(void)
     );
 
     s_progress_bar =
-        lv_bar_create(s_screen);
+        lv_bar_create(screen);
 
     lv_obj_set_size(
         s_progress_bar,
@@ -124,7 +162,7 @@ lv_obj_t *splash_screen_create(void)
         LV_ANIM_OFF
     );
 
-    return s_screen;
+    return screen;
 }
 
 void splash_screen_set_progress(
@@ -154,4 +192,60 @@ void splash_screen_set_progress(
             status
         );
     }
+}
+
+void splash_screen_on_show(
+    lv_obj_t *screen
+)
+{
+    (void)screen;
+
+    if (s_context.timer == NULL) {
+        s_context.timer =
+            lv_timer_create(
+                splash_screen_timer_cb,
+                1500,
+                NULL
+            );
+
+        lv_timer_set_repeat_count(
+            s_context.timer,
+            1
+        );
+    }
+}
+
+void splash_screen_on_hide(
+    lv_obj_t *screen
+)
+{
+    (void)screen;
+
+    if (s_context.timer != NULL) {
+        lv_timer_delete(
+            s_context.timer
+        );
+
+        s_context.timer =
+            NULL;
+    }
+}
+
+void splash_screen_destroy(
+    lv_obj_t *screen
+)
+{
+    splash_screen_on_hide(
+        screen
+    );
+
+    lv_obj_delete(
+        screen
+    );
+
+    memset(
+        &s_context,
+        0,
+        sizeof(s_context)
+    );
 }

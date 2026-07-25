@@ -1,117 +1,132 @@
 #include "gui_service.h"
 
-#include "display_driver.h"
-#include "lvgl_port.h"
-
 #include "screens/main_screen.h"
 #include "screens/splash_screen.h"
+#include "screens/settings_screen.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "esp_check.h"
 #include "esp_err.h"
 #include "esp_log.h"
 
 #include "lvgl.h"
+#include "screen_manager.h"
 
 static const char *TAG = "gui_service";
 
 #define GUI_TASK_STACK_SIZE 8192
 #define GUI_TASK_PRIORITY   5
 
-static lv_obj_t *s_splash_screen;
-
-static void gui_service_show_main_screen(void)
+static esp_err_t gui_register_screens(void)
 {
-    lv_obj_t *main_screen =
-        main_screen_create();
+    static const screen_desc_t splash_descriptor = {
+        .id = SCREEN_ID_SPLASH,
+        .name = "Splash",
 
-    if (main_screen == NULL) {
-        ESP_LOGE(
-            TAG,
-            "Failed to create main screen"
-        );
+        .create = splash_screen_create,
+        .on_show = splash_screen_on_show,
+        .on_hide = splash_screen_on_hide,
+        .destroy = splash_screen_destroy,
+    };
 
-        return;
-    }
+    static const screen_desc_t main_descriptor = {
+        .id = SCREEN_ID_MAIN,
+        .name = "Main",
 
-    lv_screen_load_anim(
-        main_screen,
-        LV_SCR_LOAD_ANIM_FADE_IN,
-        300,
-        0,
-        true
+        .create = main_screen_create,
+        .on_show = main_screen_on_show,
+        .on_hide = main_screen_on_hide,
+        .destroy = main_screen_destroy,
+    };
+
+    static const screen_desc_t settings_descriptor = {
+        .id = SCREEN_ID_SETTINGS,
+        .name = "Settings",
+
+        .create = settings_screen_create,
+        .on_show = settings_screen_on_show,
+        .on_hide = settings_screen_on_hide,
+        .destroy = settings_screen_destroy,
+    };
+
+    ESP_RETURN_ON_ERROR(
+        screen_manager_register(
+            &splash_descriptor
+        ),
+        TAG,
+        "Failed to register splash screen"
     );
 
-    s_splash_screen = NULL;
+    ESP_RETURN_ON_ERROR(
+        screen_manager_register(
+            &main_descriptor
+        ),
+        TAG,
+        "Failed to register main screen"
+    );
+
+    ESP_RETURN_ON_ERROR(
+        screen_manager_register(
+            &settings_descriptor
+        ),
+        TAG,
+        "Failed to register settings screen"
+    );
+
+    return ESP_OK;
 }
 
-void gui_service_set_loading_progress(
-    uint8_t progress,
-    const char *status
-)
+static esp_err_t gui_initialize_screens(void)
 {
-    splash_screen_set_progress(
-        progress,
-        status
-    );
-}
-
-static void splash_test_timer_cb(
-    lv_timer_t *timer
-)
-{
-    static uint8_t progress;
-
-    progress += 10;
-
-    gui_service_set_loading_progress(
-        progress,
-        "Loading..."
+    ESP_RETURN_ON_ERROR(
+        screen_manager_init(),
+        TAG,
+        "Failed to initialize screen manager"
     );
 
-    if (progress >= 100) {
-        progress = 0;
+    ESP_RETURN_ON_ERROR(
+        gui_register_screens(),
+        TAG,
+        "Failed to register screens"
+    );
 
-        lv_timer_delete(timer);
+    ESP_RETURN_ON_ERROR(
+        screen_manager_show(
+            SCREEN_ID_SPLASH,
+            LV_SCR_LOAD_ANIM_NONE,
+            0
+        ),
+        TAG,
+        "Failed to show splash screen"
+    );
 
-        gui_service_show_main_screen();
-    }
+    return ESP_OK;
 }
 
 static void gui_task(void *argument)
 {
     (void)argument;
 
-    s_splash_screen =
-        splash_screen_create();
+    /*
+     * Initialize display, input and LVGL here.
+     */
 
-    if (s_splash_screen == NULL) {
-        ESP_LOGE(
-            TAG,
-            "Failed to create splash screen"
-        );
-
-        vTaskDelete(NULL);
-        return;
-    }
-
-    lv_screen_load(s_splash_screen);
-
-    lv_timer_create(
-        splash_test_timer_cb,
-        200,
-        NULL
+    ESP_ERROR_CHECK(
+        gui_initialize_screens()
     );
-
-    display_driver_set_backlight(true);
 
     while (true) {
         uint32_t delay_ms =
-            lvgl_port_handler();
+            lv_timer_handler();
 
-        if (delay_ms == 0) {
-            delay_ms = 1;
+        if (delay_ms < 5) {
+            delay_ms = 5;
+        }
+
+        if (delay_ms > 20) {
+            delay_ms = 20;
         }
 
         vTaskDelay(
