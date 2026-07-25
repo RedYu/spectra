@@ -133,6 +133,8 @@ esp_err_t system_service_start(void)
 
     system_model_t model = {0};
 
+    system_model_get_snapshot(&model);
+
     const esp_app_desc_t *app =
         esp_app_get_description();
 

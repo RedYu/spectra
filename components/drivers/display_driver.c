@@ -71,7 +71,7 @@ static esp_err_t display_spi_bus_init(void)
         .quadwp_io_num = GPIO_NUM_NC,
         .quadhd_io_num = GPIO_NUM_NC,
 
-        .max_transfer_sz = LCD_H_RES * LCD_DRAW_BUFFER_LINES * 3,
+        .max_transfer_sz = LCD_H_RES * LCD_DRAW_BUFFER_LINES * sizeof(uint16_t),
     };
 
     ESP_RETURN_ON_ERROR(
@@ -101,7 +101,7 @@ static esp_err_t display_panel_io_init(void)
         .spi_mode = 0,
         .pclk_hz = LCD_SPI_CLOCK_HZ,
 
-        .trans_queue_depth = 10,
+        .trans_queue_depth = 1,
 
         /*
         * The ILI9488 uses 8-bit commands

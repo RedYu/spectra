@@ -3,6 +3,8 @@
 #include "screens/main_screen.h"
 #include "widgets/toolbar.h"
 
+#include "assets/gui_images.h"
+
 #define TOOLBAR_HEIGHT 56
 
 static void return_to_main_screen(void)
@@ -48,7 +50,7 @@ lv_obj_t *settings_screen_create(void)
     const toolbar_config_t toolbar_config = {
         .title = "Settings",
 
-        .left_icon = LV_SYMBOL_LEFT,
+        .left_icon = &icons8_back_32,
         .left_action = return_to_main_screen,
 
         .right_icon = NULL,
@@ -120,6 +122,29 @@ lv_obj_t *settings_screen_create(void)
     );
 
     lv_obj_center(label);
+
+
+    lv_obj_t *img =
+        lv_image_create(screen);
+
+    lv_image_set_src(
+        img,
+        &icons8_micro_sd_32
+    );
+
+    lv_obj_center(img);
+
+    lv_obj_set_style_image_recolor(
+            img,
+            lv_color_hex(0x4B77D1),
+            LV_PART_MAIN
+        );
+
+        lv_obj_set_style_image_recolor_opa(
+            img,
+            LV_OPA_COVER,
+            LV_PART_MAIN
+        );
 
     return screen;
 }

@@ -7,6 +7,10 @@ idf_component_register(
         "widgets/toolbar.c"
 
         "assets/dev_logo.c"
+        "assets/icons8_alarm_clock_32.c"
+        "assets/icons8_micro_sd_32.c"
+        "assets/icons8_settings_32.c"
+        "assets/icons8_back_32.c"
 
     INCLUDE_DIRS
         "include"

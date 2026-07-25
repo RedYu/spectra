@@ -1,6 +1,6 @@
 #include "screens/splash_screen.h"
 
-#include "assets/dev_logo.h"
+#include "assets/gui_images.h"
 
 static lv_obj_t *s_screen;
 static lv_obj_t *s_progress_bar;

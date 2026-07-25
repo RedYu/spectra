@@ -101,6 +101,21 @@ esp_err_t system_model_set_storage_ready(bool ready)
     return ESP_OK;
 }
 
+esp_err_t system_model_set_sd_card_mounted(bool mounted)
+{
+    esp_err_t err = lock_model();
+
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_model.sd_card_mounted = mounted;
+
+    xSemaphoreGive(s_mutex);
+
+    return ESP_OK;
+}
+
 esp_err_t system_model_set_update_available(bool available)
 {
     esp_err_t err = lock_model();

@@ -74,11 +74,9 @@ static void lvgl_display_flush_cb(
     }
 
     /*
-    * LVGL uses inclusive end coordinates.
-    *
-    * esp_lcd expects exclusive end coordinates,
-    * so add 1 to x2 and y2.
-    */
+     * LVGL uses inclusive end coordinates.
+     * esp_lcd uses exclusive end coordinates.
+     */
     esp_err_t err = esp_lcd_panel_draw_bitmap(
         panel,
         area->x1,
@@ -96,17 +94,17 @@ static void lvgl_display_flush_cb(
         );
 
         /*
-        * Release the LVGL draw buffer even if an error occurs.
-        * Otherwise, LVGL will wait indefinitely for the flush to complete.
-        */
+         * No transfer-complete callback will be generated
+         * if the transfer was not queued successfully.
+         */
         lv_display_flush_ready(display);
+        return;
     }
 
     /*
-    * Do not call lv_display_flush_ready() here.
-    * It will be called from lvgl_color_transfer_done_cb()
-    * after the DMA transfer has completed.
-    */
+     * lv_display_flush_ready() will be called from
+     * lvgl_color_transfer_done_cb() after DMA completes.
+     */
 }
 
 static bool lvgl_color_transfer_done_cb(
@@ -124,10 +122,6 @@ static bool lvgl_color_transfer_done_cb(
         lv_display_flush_ready(display);
     }
 
-    /*
-    * Return false to indicate that the callback
-    * did not wake a higher-priority FreeRTOS task.
-    */
     return false;
 }
 
@@ -174,11 +168,6 @@ static esp_err_t lvgl_display_register(void)
             TAG,
             "Failed to allocate LVGL draw buffer"
         );
-
-        if (s_draw_buffer_1 != NULL) {
-            heap_caps_free(s_draw_buffer_1);
-            s_draw_buffer_1 = NULL;
-        }
 
         return ESP_ERR_NO_MEM;
     }

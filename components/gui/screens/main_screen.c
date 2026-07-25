@@ -6,6 +6,8 @@
 #include "system_model.h"
 #include "screens/settings_screen.h"
 #include "widgets/toolbar.h"
+#include "assets/gui_images.h"
+
 
 #define TOOLBAR_HEIGHT          56
 #define MAIN_SCREEN_UPDATE_MS   1000
@@ -13,6 +15,8 @@
 typedef struct
 {
     lv_obj_t *screen;
+
+    toolbar_t toolbar;
 
     lv_obj_t *device_name_label;
     lv_obj_t *device_id_label;
@@ -102,6 +106,16 @@ static void main_screen_update(void)
     if (system_model_get_snapshot(&model) != ESP_OK) {
         return;
     }
+    
+    toolbar_set_sd_mounted(
+        &s_context.toolbar,
+        model.sd_card_mounted
+    );
+
+    toolbar_set_ota_available(
+        &s_context.toolbar,
+        model.ota_available
+    );
 
     char buffer[96];
     char uptime_buffer[32];
@@ -175,12 +189,36 @@ static void main_screen_update(void)
     );
 }
 
+static uint32_t count = 0;
+
 static void main_screen_update_timer_cb(
     lv_timer_t *timer
 )
 {
     (void)timer;
 
+    count++;
+    if (count == 5) {
+        system_model_set_storage_ready(true);
+    }
+    if (count == 10) {
+        system_model_set_sd_card_mounted(true);
+    }
+    if (count == 15) {
+        system_model_set_update_available(true);
+    }
+    if (count == 20) {
+        system_model_set_update_available(false);
+    }
+    if (count == 25) {
+        system_model_set_sd_card_mounted(false);
+    }
+    if (count == 30) {
+        system_model_set_storage_ready(false);
+    }
+    if (count > 35) {
+        count = 0;
+    }
     main_screen_update();
 }
 
@@ -212,6 +250,8 @@ static void main_screen_delete_event_cb(
     s_context.cpu_label = NULL;
     s_context.storage_label = NULL;
     s_context.ota_label = NULL;
+
+    s_context.toolbar = (toolbar_t){0};
 }
 
 static lv_obj_t *create_info_label(
@@ -287,15 +327,19 @@ lv_obj_t *main_screen_create(void)
 
         .left_icon = NULL,
         .left_action = NULL,
-
-        .right_icon = LV_SYMBOL_SETTINGS,
+        
+        .right_icon = &icons8_settings_32,
         .right_action = open_settings_screen,
+
+        .show_sd_status = true,
+        .show_ota_status = true,
     };
 
-    toolbar_create(
-        screen,
-        &toolbar_config
-    );
+    s_context.toolbar =
+        toolbar_create(
+            screen,
+            &toolbar_config
+        );
 
     /*
      * Main scrollable content container.
@@ -496,6 +540,14 @@ lv_obj_t *main_screen_create(void)
             MAIN_SCREEN_UPDATE_MS,
             NULL
         );
+
+    lv_obj_update_layout(
+        s_context.toolbar.root
+    );
+
+    lv_obj_move_foreground(
+        s_context.toolbar.root
+    );
 
     return screen;
 }

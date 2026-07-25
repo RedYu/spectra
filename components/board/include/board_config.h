@@ -10,7 +10,7 @@
 #define LCD_V_RES              320
 
 #define LCD_SPI_HOST           SPI2_HOST
-#define LCD_SPI_CLOCK_HZ       (60 * 1000 * 1000)
+#define LCD_SPI_CLOCK_HZ       (40 * 1000 * 1000)
 #define LCD_PIN_MOSI           GPIO_NUM_15
 #define LCD_PIN_MISO           GPIO_NUM_16
 #define LCD_PIN_SCLK           GPIO_NUM_17

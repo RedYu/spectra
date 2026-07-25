@@ -33,6 +33,8 @@ typedef struct
 
     bool storage_ready;
 
+    bool sd_card_mounted;
+
     bool ota_available;
 
 } system_model_t;
@@ -49,6 +51,10 @@ esp_err_t system_model_get_snapshot(
 
 esp_err_t system_model_set_storage_ready(
     bool ready
+);
+
+esp_err_t system_model_set_sd_card_mounted(
+    bool mounted
 );
 
 esp_err_t system_model_set_update_available(
