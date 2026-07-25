@@ -1,7 +1,9 @@
 #include "gui_service.h"
 
-#include "screens/main_screen.h"
+#include <string.h>
+
 #include "screens/splash_screen.h"
+#include "screens/main_screen.h"
 #include "screens/settings_screen.h"
 
 #include "freertos/FreeRTOS.h"
@@ -18,6 +20,52 @@ static const char *TAG = "gui_service";
 
 #define GUI_TASK_STACK_SIZE 8192
 #define GUI_TASK_PRIORITY   5
+
+#define GUI_BOOT_STATUS_LENGTH 48
+#define GUI_BOOT_QUEUE_LENGTH  8
+
+typedef struct
+{
+    uint8_t progress;
+    char status[GUI_BOOT_STATUS_LENGTH];
+
+} gui_boot_message_t;
+
+static QueueHandle_t s_boot_queue = NULL;
+static bool s_main_screen_opened = false;
+
+static void gui_service_process_boot_progress(void)
+{
+    if (s_boot_queue == NULL) {
+        return;
+    }
+
+    gui_boot_message_t message;
+
+    while (xQueueReceive(
+            s_boot_queue,
+            &message,
+            0
+        ) == pdTRUE) {
+
+        splash_screen_set_progress(
+            message.progress,
+            message.status
+        );
+
+        if (message.progress >= 100 &&
+            !s_main_screen_opened) {
+
+            s_main_screen_opened = true;
+
+            screen_manager_show(
+                SCREEN_ID_MAIN,
+                LV_SCR_LOAD_ANIM_FADE_IN,
+                300
+            );
+        }
+    }
+}
 
 static esp_err_t gui_register_screens(void)
 {
@@ -105,9 +153,31 @@ static esp_err_t gui_initialize_screens(void)
     return ESP_OK;
 }
 
+esp_err_t gui_service_init(void) 
+{
+    s_boot_queue =
+        xQueueCreate(
+            GUI_BOOT_QUEUE_LENGTH,
+            sizeof(gui_boot_message_t)
+        );
+
+    if (s_boot_queue == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create boot progress queue"
+        );
+
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
+}
+
 static void gui_task(void *argument)
 {
     (void)argument;
+
+    
 
     /*
      * Initialize display, input and LVGL here.
@@ -118,6 +188,8 @@ static void gui_task(void *argument)
     );
 
     while (true) {
+        gui_service_process_boot_progress();
+
         uint32_t delay_ms =
             lv_timer_handler();
 
@@ -160,4 +232,49 @@ esp_err_t gui_service_start(void)
     ESP_LOGI(TAG, "GUI service started");
 
     return ESP_OK;
+}
+
+void gui_service_set_boot_progress(
+    uint8_t progress,
+    const char *status
+)
+{
+    if (s_boot_queue == NULL) {
+        return;
+    }
+
+    gui_boot_message_t message = {
+        .progress = progress,
+    };
+
+    strlcpy(
+        message.status,
+        status != NULL ? status : "",
+        sizeof(message.status)
+    );
+
+    if (xQueueSend(
+            s_boot_queue,
+            &message,
+            0
+        ) != pdTRUE) {
+
+        /*
+         * If the queue is full, remove the oldest message
+         * and preserve the newest progress value.
+         */
+        gui_boot_message_t discarded;
+
+        xQueueReceive(
+            s_boot_queue,
+            &discarded,
+            0
+        );
+
+        xQueueSend(
+            s_boot_queue,
+            &message,
+            0
+        );
+    }
 }

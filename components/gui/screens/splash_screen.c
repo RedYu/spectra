@@ -6,13 +6,12 @@
 
 #include "screen_manager.h"
 
-static lv_obj_t *s_progress_bar;
-static lv_obj_t *s_status_label;
-
 typedef struct
 {
     lv_obj_t *root;
     lv_timer_t *timer;
+    lv_obj_t *progress_bar;
+    lv_obj_t *status_label;
 
 } splash_screen_context_t;
 
@@ -80,84 +79,57 @@ lv_obj_t *splash_screen_create(void)
         -45
     );
 
-    lv_obj_t *title_label =
+    s_context.status_label =
         lv_label_create(screen);
 
     lv_label_set_text(
-        title_label,
-        "SPECTRA"
+        s_context.status_label,
+        "Initializing"
     );
 
     lv_obj_set_style_text_font(
-        title_label,
-        &lv_font_montserrat_20,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        title_label,
-        lv_color_hex(0x808080),
-        LV_PART_MAIN
-    );
-
-    lv_obj_align(
-        title_label,
-        LV_ALIGN_CENTER,
-        0,
-        55
-    );
-
-    s_status_label =
-        lv_label_create(screen);
-
-    lv_label_set_text(
-        s_status_label,
-        "Starting system..."
-    );
-
-    lv_obj_set_style_text_font(
-        s_status_label,
+        s_context.status_label,
         &lv_font_montserrat_16,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_text_color(
-        s_status_label,
+        s_context.status_label,
         lv_color_hex(0xA0A8B0),
         LV_PART_MAIN
     );
 
     lv_obj_align(
-        s_status_label,
+        s_context.status_label,
         LV_ALIGN_BOTTOM_MID,
         0,
         -48
     );
 
-    s_progress_bar =
+    s_context.progress_bar =
         lv_bar_create(screen);
 
     lv_obj_set_size(
-        s_progress_bar,
+        s_context.progress_bar,
         280,
         8
     );
 
     lv_obj_align(
-        s_progress_bar,
+        s_context.progress_bar,
         LV_ALIGN_BOTTOM_MID,
         0,
         -25
     );
 
     lv_bar_set_range(
-        s_progress_bar,
+        s_context.progress_bar,
         0,
         100
     );
 
     lv_bar_set_value(
-        s_progress_bar,
+        s_context.progress_bar,
         0,
         LV_ANIM_OFF
     );
@@ -170,7 +142,7 @@ void splash_screen_set_progress(
     const char *status
 )
 {
-    if (s_progress_bar == NULL) {
+    if (s_context.progress_bar == NULL) {
         return;
     }
 
@@ -179,16 +151,16 @@ void splash_screen_set_progress(
     }
 
     lv_bar_set_value(
-        s_progress_bar,
+        s_context.progress_bar,
         progress,
         LV_ANIM_ON
     );
 
     if (status != NULL &&
-        s_status_label != NULL) {
+        s_context.status_label != NULL) {
 
         lv_label_set_text(
-            s_status_label,
+            s_context.status_label,
             status
         );
     }
