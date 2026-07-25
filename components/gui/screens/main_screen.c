@@ -30,8 +30,6 @@ typedef struct
     lv_obj_t *heap_label;
     lv_obj_t *minimum_heap_label;
     lv_obj_t *cpu_label;
-    lv_obj_t *storage_label;
-    lv_obj_t *ota_label;
 
 } main_screen_context_t;
 
@@ -164,23 +162,7 @@ static void main_screen_update(void)
         s_context.cpu_label,
         buffer
     );
-
-    lv_label_set_text(
-        s_context.storage_label,
-        model.storage_ready
-            ? "Storage: Ready"
-            : "Storage: Not ready"
-    );
-
-    lv_label_set_text(
-        s_context.ota_label,
-        model.ota_available
-            ? "Update available"
-            : "Firmware is up to date"
-    );
 }
-
-static uint32_t count = 0;
 
 static void main_screen_update_timer_cb(
     lv_timer_t *timer
@@ -188,28 +170,6 @@ static void main_screen_update_timer_cb(
 {
     (void)timer;
 
-    count++;
-    if (count == 5) {
-        system_model_set_storage_ready(true);
-    }
-    if (count == 10) {
-        system_model_set_sd_card_mounted(true);
-    }
-    if (count == 15) {
-        system_model_set_update_available(true);
-    }
-    if (count == 20) {
-        system_model_set_update_available(false);
-    }
-    if (count == 25) {
-        system_model_set_sd_card_mounted(false);
-    }
-    if (count == 30) {
-        system_model_set_storage_ready(false);
-    }
-    if (count > 35) {
-        count = 0;
-    }
     main_screen_update();
 }
 
@@ -239,8 +199,6 @@ static void main_screen_delete_event_cb(
     s_context.heap_label = NULL;
     s_context.minimum_heap_label = NULL;
     s_context.cpu_label = NULL;
-    s_context.storage_label = NULL;
-    s_context.ota_label = NULL;
 
     s_context.toolbar = (toolbar_t){0};
 }
@@ -506,18 +464,6 @@ lv_obj_t *main_screen_create(void)
         );
 
     s_context.cpu_label =
-        create_info_label(
-            content,
-            ""
-        );
-
-    s_context.storage_label =
-        create_info_label(
-            content,
-            ""
-        );
-
-    s_context.ota_label =
         create_info_label(
             content,
             ""

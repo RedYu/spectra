@@ -96,6 +96,94 @@ static esp_err_t system_service_load_serial_number(
     return err;
 }
 
+static uint8_t system_service_get_cpu_usage(void)
+{
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+
+    const UBaseType_t task_count =
+        uxTaskGetNumberOfTasks();
+
+    TaskStatus_t *task_status =
+        calloc(
+            task_count,
+            sizeof(TaskStatus_t)
+        );
+
+    if (task_status == NULL) {
+        return 0;
+    }
+
+    configRUN_TIME_COUNTER_TYPE total_run_time = 0;
+
+    const UBaseType_t received_task_count =
+        uxTaskGetSystemState(
+            task_status,
+            task_count,
+            &total_run_time
+        );
+
+    if (received_task_count == 0 ||
+        total_run_time == 0) {
+
+        free(task_status);
+        return 0;
+    }
+
+    uint64_t idle_run_time = 0;
+
+    for (UBaseType_t i = 0;
+         i < received_task_count;
+         i++) {
+
+        if (strncmp(
+                task_status[i].pcTaskName,
+                "IDLE",
+                4
+            ) == 0) {
+
+            idle_run_time +=
+                task_status[i].ulRunTimeCounter;
+        }
+    }
+
+    free(task_status);
+
+    /*
+     * ESP32-S3 has two CPU cores. Each core contributes its own
+     * available runtime, so total CPU capacity is twice the timer
+     * runtime.
+     */
+    const uint64_t total_cpu_time =
+        (uint64_t)total_run_time *
+        CONFIG_FREERTOS_NUMBER_OF_CORES;
+
+    if (idle_run_time >= total_cpu_time) {
+        return 0;
+    }
+
+    const uint64_t active_run_time =
+        total_cpu_time -
+        idle_run_time;
+
+    uint32_t cpu_usage =
+        (uint32_t)(
+            active_run_time * 100ULL /
+            total_cpu_time
+        );
+
+    if (cpu_usage > 100) {
+        cpu_usage = 100;
+    }
+
+    return (uint8_t)cpu_usage;
+
+#else
+
+    return 0;
+
+#endif
+}
+
 static void system_service_update_runtime(void)
 {
     system_model_t model;
@@ -110,6 +198,9 @@ static void system_service_update_runtime(void)
 
     model.minimum_free_heap =
         heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
+
+    model.cpu_usage =
+        system_service_get_cpu_usage();
 
     system_model_set(&model);
 }

@@ -8,19 +8,52 @@
 #include "settings_model.h"
 #include "settings_service.h"
 
+#include "esp_log.h"
+#include "esp_err.h"
+#include "esp_check.h"
+
 #define TOOLBAR_HEIGHT 56
 
+static const char *TAG = "settings_screen";
+
+static lv_obj_t *s_brightness_slider = NULL;
 static lv_obj_t *s_brightness_value_label = NULL;
 
 static void settings_screen_back_action(void)
 {
-    screen_manager_back(
+    esp_err_t result =
+        settings_service_save();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to save settings: %s",
+            esp_err_to_name(result)
+        );
+
+        /*
+         * Do not leave the screen if saving failed.
+         */
+        return;
+    }
+
+    result = screen_manager_back(
         LV_SCR_LOAD_ANIM_MOVE_RIGHT,
         200
     );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to return to previous screen: %s",
+            esp_err_to_name(result)
+        );
+    }
 }
 
-static void brightness_slider_event_cb(lv_event_t *event)
+static void brightness_slider_event_cb(
+    lv_event_t *event
+)
 {
     lv_obj_t *slider =
         lv_event_get_target_obj(event);
@@ -28,13 +61,26 @@ static void brightness_slider_event_cb(lv_event_t *event)
     const uint8_t brightness =
         (uint8_t)lv_slider_get_value(slider);
 
-    settings_service_set_brightness(
-        brightness
-    );
+    esp_err_t result =
+        settings_service_set_brightness(
+            brightness
+        );
 
-    if (s_brightness_value_label != NULL) {
-        const app_settings_t *settings =
-            settings_model_get();
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply brightness: %s",
+            esp_err_to_name(result)
+        );
+
+        return;
+    }
+
+    const app_settings_t *settings =
+        settings_model_get();
+
+    if (settings != NULL &&
+        s_brightness_value_label != NULL) {
 
         lv_label_set_text_fmt(
             s_brightness_value_label,
@@ -293,78 +339,78 @@ lv_obj_t *settings_screen_create(void)
     /*
      * Brightness slider.
      */
-    lv_obj_t *brightness_slider =
+    s_brightness_slider =
         lv_slider_create(brightness_card);
 
     lv_obj_set_size(
-        brightness_slider,
+        s_brightness_slider,
         LV_PCT(100),
         12
     );
 
     lv_obj_align(
-        brightness_slider,
+        s_brightness_slider,
         LV_ALIGN_BOTTOM_MID,
         0,
         -6
     );
 
     lv_slider_set_range(
-        brightness_slider,
+        s_brightness_slider,
         SETTINGS_DISPLAY_BRIGHTNESS_MIN,
         SETTINGS_DISPLAY_BRIGHTNESS_MAX
     );
 
     lv_slider_set_value(
-        brightness_slider,
+        s_brightness_slider,
         settings->display.brightness,
         LV_ANIM_OFF
     );
 
     lv_obj_set_style_bg_color(
-        brightness_slider,
+        s_brightness_slider,
         lv_color_hex(0xD9DEE5),
         LV_PART_MAIN
     );
 
     lv_obj_set_style_bg_opa(
-        brightness_slider,
+        s_brightness_slider,
         LV_OPA_COVER,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_bg_color(
-        brightness_slider,
+        s_brightness_slider,
         lv_color_hex(0x4B77D1),
         LV_PART_INDICATOR
     );
 
     lv_obj_set_style_bg_opa(
-        brightness_slider,
+        s_brightness_slider,
         LV_OPA_COVER,
         LV_PART_INDICATOR
     );
 
     lv_obj_set_style_bg_color(
-        brightness_slider,
+        s_brightness_slider,
         lv_color_hex(0x4B77D1),
         LV_PART_KNOB
     );
 
     lv_obj_set_style_bg_opa(
-        brightness_slider,
+        s_brightness_slider,
         LV_OPA_COVER,
         LV_PART_KNOB
     );
 
     lv_obj_set_style_pad_all(
-        brightness_slider,
+        s_brightness_slider,
         5,
         LV_PART_KNOB
     );
 
     lv_obj_add_event_cb(
-        brightness_slider,
+        s_brightness_slider,
         brightness_slider_event_cb,
         LV_EVENT_VALUE_CHANGED,
         NULL
@@ -379,9 +425,28 @@ void settings_screen_on_show(
 {
     (void)screen;
 
-    /*
-     * Refresh settings values here.
-     */
+    const app_settings_t *settings =
+        settings_model_get();
+
+    if (settings == NULL) {
+        return;
+    }
+
+    if (s_brightness_slider != NULL) {
+        lv_slider_set_value(
+            s_brightness_slider,
+            settings->display.brightness,
+            LV_ANIM_OFF
+        );
+    }
+
+    if (s_brightness_value_label != NULL) {
+        lv_label_set_text_fmt(
+            s_brightness_value_label,
+            "%u%%",
+            settings->display.brightness
+        );
+    }
 }
 
 void settings_screen_on_hide(

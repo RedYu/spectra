@@ -10,3 +10,6 @@ esp_err_t settings_service_set_brightness(
     uint8_t brightness
 );
 
+esp_err_t settings_service_save(void);
+
+esp_err_t settings_service_apply(void);

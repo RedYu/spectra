@@ -18,6 +18,9 @@ static const char *TAG = "settings_service";
 static const char *CONFIG_FILE_PATH =
     "/storage/device_config.json";
 
+static const char *CONFIG_FILE_PATH_TMP =
+    "/storage/device_config.json.tmp";
+
 static const uint32_t SUPPORTED_SCHEMA_VERSION = 1;
 
 static void parse_string(
@@ -134,10 +137,13 @@ static esp_err_t parse_config(
     }
 
     esp_err_t result = ESP_OK;
-    cJSON *root = cJSON_Parse(json_text);
+
+    cJSON *root =
+        cJSON_Parse(json_text);
 
     if (root == NULL) {
-        const char *error_position = cJSON_GetErrorPtr();
+        const char *error_position =
+            cJSON_GetErrorPtr();
 
         ESP_LOGE(
             TAG,
@@ -151,10 +157,24 @@ static esp_err_t parse_config(
     }
 
     if (!cJSON_IsObject(root)) {
-        ESP_LOGE(TAG, "Configuration root must be a JSON object");
+        ESP_LOGE(
+            TAG,
+            "Configuration root must be a JSON object"
+        );
+
         result = ESP_ERR_INVALID_RESPONSE;
         goto cleanup;
     }
+
+    /*
+     * Parse into a temporary object so the current settings remain
+     * unchanged if validation fails.
+     */
+    app_settings_t parsed_settings;
+
+    settings_model_set_defaults(
+        &parsed_settings
+    );
 
     /*
      * Validate schema version.
@@ -166,13 +186,33 @@ static esp_err_t parse_config(
         );
 
     if (!cJSON_IsNumber(schema_version)) {
-        ESP_LOGE(TAG, "Missing or invalid schema_version");
+        ESP_LOGE(
+            TAG,
+            "Missing or invalid schema_version"
+        );
+
+        result = ESP_ERR_INVALID_VERSION;
+        goto cleanup;
+    }
+
+    /*
+     * Schema version must be a non-negative integer.
+     */
+    if (schema_version->valuedouble < 0 ||
+        schema_version->valuedouble !=
+            (double)schema_version->valueint) {
+
+        ESP_LOGE(
+            TAG,
+            "schema_version must be an integer"
+        );
+
         result = ESP_ERR_INVALID_VERSION;
         goto cleanup;
     }
 
     const uint32_t version =
-        (uint32_t)schema_version->valuedouble;
+        (uint32_t)schema_version->valueint;
 
     if (version != SUPPORTED_SCHEMA_VERSION) {
         ESP_LOGE(
@@ -186,31 +226,48 @@ static esp_err_t parse_config(
     }
 
     /*
-     * Validate device identity before applying configuration.
+     * Validate device configuration.
      */
     const cJSON *device =
-        cJSON_GetObjectItemCaseSensitive(root, "device");
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "device"
+        );
 
     if (!cJSON_IsObject(device)) {
-        ESP_LOGE(TAG, "Missing device configuration");
+        ESP_LOGE(
+            TAG,
+            "Missing device configuration"
+        );
+
         result = ESP_ERR_INVALID_RESPONSE;
         goto cleanup;
     }
 
     const cJSON *device_target =
-        cJSON_GetObjectItemCaseSensitive(device, "target");
+        cJSON_GetObjectItemCaseSensitive(
+            device,
+            "target"
+        );
 
     if (!cJSON_IsString(device_target) ||
         device_target->valuestring == NULL) {
 
-        ESP_LOGE(TAG, "Missing or invalid device.target");
+        ESP_LOGE(
+            TAG,
+            "Missing or invalid device.target"
+        );
+
         result = ESP_ERR_INVALID_RESPONSE;
         goto cleanup;
     }
 
     system_model_t system_model;
 
-    result = system_model_get_snapshot(&system_model);
+    result =
+        system_model_get_snapshot(
+            &system_model
+        );
 
     if (result != ESP_OK) {
         ESP_LOGE(
@@ -239,39 +296,118 @@ static esp_err_t parse_config(
         goto cleanup;
     }
 
-    
     const cJSON *device_name =
-        cJSON_GetObjectItemCaseSensitive(device, "name");
+        cJSON_GetObjectItemCaseSensitive(
+            device,
+            "name"
+        );
 
     if (!cJSON_IsString(device_name) ||
         device_name->valuestring == NULL) {
 
-        ESP_LOGE(TAG, "Missing or invalid device.name");
+        ESP_LOGE(
+            TAG,
+            "Missing or invalid device.name"
+        );
+
         result = ESP_ERR_INVALID_RESPONSE;
         goto cleanup;
     }
 
     /*
-     * The configuration belongs to this device.
-     * It is now safe to apply its values.
+     * Validate display configuration.
      */
-    settings->schema_version = version;
+    const cJSON *display =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "display"
+        );
 
-    strlcpy(
-        settings->device.target,
-        device_target->valuestring,
-        sizeof(settings->device.target)
-    );
+    if (!cJSON_IsObject(display)) {
+        ESP_LOGE(
+            TAG,
+            "Missing display configuration"
+        );
 
-    strlcpy(
-        settings->device.name,
-        device_name->valuestring,
-        sizeof(settings->device.name)
-    );
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
+    }
+
+    const cJSON *brightness =
+        cJSON_GetObjectItemCaseSensitive(
+            display,
+            "brightness"
+        );
+
+    if (!cJSON_IsNumber(brightness)) {
+        ESP_LOGE(
+            TAG,
+            "Missing or invalid display.brightness"
+        );
+
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
+    }
 
     /*
-     * Parse the remaining configuration fields here.
+     * Brightness must be an integer.
      */
+    if (brightness->valuedouble !=
+        (double)brightness->valueint) {
+
+        ESP_LOGE(
+            TAG,
+            "display.brightness must be an integer"
+        );
+
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
+    }
+
+    if (brightness->valueint <
+            SETTINGS_DISPLAY_BRIGHTNESS_MIN ||
+        brightness->valueint >
+            SETTINGS_DISPLAY_BRIGHTNESS_MAX) {
+
+        ESP_LOGE(
+            TAG,
+            "display.brightness is out of range: %d "
+            "(allowed %d-%d)",
+            brightness->valueint,
+            SETTINGS_DISPLAY_BRIGHTNESS_MIN,
+            SETTINGS_DISPLAY_BRIGHTNESS_MAX
+        );
+
+        result = ESP_ERR_INVALID_ARG;
+        goto cleanup;
+    }
+
+    /*
+     * All configuration values are valid.
+     */
+    parsed_settings.schema_version =
+        version;
+
+    strlcpy(
+        parsed_settings.device.target,
+        device_target->valuestring,
+        sizeof(parsed_settings.device.target)
+    );
+
+    strlcpy(
+        parsed_settings.device.name,
+        device_name->valuestring,
+        sizeof(parsed_settings.device.name)
+    );
+
+    parsed_settings.display.brightness =
+        (uint8_t)brightness->valueint;
+
+    /*
+     * Apply the fully validated configuration.
+     */
+    *settings =
+        parsed_settings;
 
     ESP_LOGI(
         TAG,
@@ -279,9 +415,205 @@ static esp_err_t parse_config(
         system_model.device_id
     );
 
+    ESP_LOGI(
+        TAG,
+        "Display brightness: %u%%",
+        parsed_settings.display.brightness
+    );
+
 cleanup:
     cJSON_Delete(root);
+
     return result;
+}
+
+static cJSON *settings_service_create_json(
+    const app_settings_t *settings
+)
+{
+    if (settings == NULL) {
+        return NULL;
+    }
+
+    cJSON *root =
+        cJSON_CreateObject();
+
+    if (root == NULL) {
+        return NULL;
+    }
+
+    if (cJSON_AddNumberToObject(
+            root,
+            "schema_version",
+            settings->schema_version
+        ) == NULL) {
+
+        goto error;
+    }
+
+    cJSON *device =
+        cJSON_AddObjectToObject(
+            root,
+            "device"
+        );
+
+    if (device == NULL) {
+        goto error;
+    }
+
+    if (cJSON_AddStringToObject(
+            device,
+            "target",
+            settings->device.target
+        ) == NULL) {
+
+        goto error;
+    }
+
+    if (cJSON_AddStringToObject(
+            device,
+            "name",
+            settings->device.name
+        ) == NULL) {
+
+        goto error;
+    }
+
+    cJSON *display =
+        cJSON_AddObjectToObject(
+            root,
+            "display"
+        );
+
+    if (display == NULL) {
+        goto error;
+    }
+
+    if (cJSON_AddNumberToObject(
+            display,
+            "brightness",
+            settings->display.brightness
+        ) == NULL) {
+
+        goto error;
+    }
+
+    return root;
+
+error:
+    cJSON_Delete(root);
+    return NULL;
+}
+
+esp_err_t settings_service_save(void)
+{
+    const app_settings_t *settings =
+        settings_model_get();
+
+    if (settings == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    cJSON *root =
+        settings_service_create_json(
+            settings
+        );
+
+    if (root == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    char *json_text =
+        cJSON_Print(root);
+
+    cJSON_Delete(root);
+
+    if (json_text == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    FILE *file =
+        fopen(
+            CONFIG_FILE_PATH_TMP,
+            "w"
+        );
+
+    if (file == NULL) {
+        cJSON_free(json_text);
+        return ESP_FAIL;
+    }
+
+    const size_t length =
+        strlen(json_text);
+
+    const size_t written =
+        fwrite(
+            json_text,
+            1,
+            length,
+            file
+        );
+
+    esp_err_t result =
+        ESP_OK;
+
+    if (written != length) {
+        result =
+            ESP_FAIL;
+    }
+
+    if (fflush(file) != 0) {
+        result =
+            ESP_FAIL;
+    }
+
+    if (fclose(file) != 0) {
+        result =
+            ESP_FAIL;
+    }
+
+    cJSON_free(json_text);
+
+    if (result != ESP_OK) {
+        remove(
+            CONFIG_FILE_PATH_TMP
+        );
+
+        ESP_LOGE(
+            TAG,
+            "Failed to write temporary settings file"
+        );
+
+        return result;
+    }
+
+    remove(
+        CONFIG_FILE_PATH
+    );
+
+    if (rename(
+            CONFIG_FILE_PATH_TMP,
+            CONFIG_FILE_PATH
+        ) != 0) {
+
+        ESP_LOGE(
+            TAG,
+            "Failed to replace settings file"
+        );
+
+        remove(
+            CONFIG_FILE_PATH_TMP
+        );
+
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Settings saved successfully"
+    );
+
+    return ESP_OK;
 }
 
 esp_err_t settings_service_reload(void)
@@ -310,7 +642,7 @@ esp_err_t settings_service_reload(void)
         );
 
         settings_model_set(&settings);
-        return ESP_OK;
+        return settings_service_apply();
     }
 
     if (err != ESP_OK) {
@@ -321,6 +653,7 @@ esp_err_t settings_service_reload(void)
         );
 
         settings_model_set(&settings);
+        settings_service_apply();
         return err;
     }
 
@@ -342,6 +675,7 @@ esp_err_t settings_service_reload(void)
 
         settings_model_set_defaults(&settings);
         settings_model_set(&settings);
+        settings_service_apply();
 
         return err;
     }
@@ -350,7 +684,7 @@ esp_err_t settings_service_reload(void)
 
     ESP_LOGI(TAG, "Configuration applied successfully");
 
-    return ESP_OK;
+    return settings_service_apply();
 }
 
 esp_err_t settings_service_init(void)
@@ -362,33 +696,62 @@ esp_err_t settings_service_set_brightness(
     uint8_t brightness
 )
 {
-    const app_settings_t *current_settings =
+    const app_settings_t *current =
         settings_model_get();
 
-    if (current_settings == NULL) {
+    if (current == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    app_settings_t updated_settings =
-        *current_settings;
+    app_settings_t updated =
+        *current;
 
-    updated_settings.display.brightness =
+    updated.display.brightness =
         brightness;
 
     settings_model_set(
-        &updated_settings
+        &updated
     );
 
-    const app_settings_t *applied_settings =
+    const app_settings_t *applied =
         settings_model_get();
+
+    return display_backlight_set_brightness(
+        applied->display.brightness
+    );
+}
+
+esp_err_t settings_service_apply(void)
+{
+    const app_settings_t *settings =
+        settings_model_get();
+
+    if (settings == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Settings model is unavailable"
+        );
+
+        return ESP_ERR_INVALID_STATE;
+    }
 
     ESP_RETURN_ON_ERROR(
         display_backlight_set_brightness(
-            applied_settings->display.brightness
+            settings->display.brightness
         ),
         TAG,
         "Failed to apply display brightness"
     );
+
+    ESP_LOGI(
+        TAG,
+        "Settings applied, brightness: %u%%",
+        settings->display.brightness
+    );
+
+    /*
+     * Apply other settings here later.
+     */
 
     return ESP_OK;
 }

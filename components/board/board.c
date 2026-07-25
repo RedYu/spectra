@@ -9,7 +9,7 @@ esp_err_t board_init(void)
 
     ESP_ERROR_CHECK(
         display_backlight_set_brightness(
-            80
+            0
         )
     );
 
