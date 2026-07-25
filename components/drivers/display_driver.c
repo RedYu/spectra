@@ -22,41 +22,6 @@ static esp_lcd_panel_handle_t s_panel = NULL;
 static bool s_spi_bus_initialized = false;
 static bool s_display_initialized = false;
 
-
-static esp_err_t display_backlight_init(void)
-{
-    const gpio_config_t backlight_config = {
-        .pin_bit_mask = 1ULL << LCD_PIN_BACKLIGHT,
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-
-    ESP_RETURN_ON_ERROR(
-        gpio_config(&backlight_config),
-        TAG,
-        "Failed to configure backlight GPIO"
-    );
-
-    return gpio_set_level(
-        LCD_PIN_BACKLIGHT,
-        LCD_BACKLIGHT_OFF_LEVEL
-    );
-}
-
-
-esp_err_t display_driver_set_backlight(bool enabled)
-{
-    return gpio_set_level(
-        LCD_PIN_BACKLIGHT,
-        enabled
-            ? LCD_BACKLIGHT_ON_LEVEL
-            : LCD_BACKLIGHT_OFF_LEVEL
-    );
-}
-
-
 static esp_err_t display_spi_bus_init(void)
 {
     if (s_spi_bus_initialized) {
@@ -207,12 +172,6 @@ esp_err_t display_driver_init(void)
     }
 
     ESP_RETURN_ON_ERROR(
-        display_backlight_init(),
-        TAG,
-        "Backlight initialization failed"
-    );
-
-    ESP_RETURN_ON_ERROR(
         display_spi_bus_init(),
         TAG,
         "SPI bus initialization failed"
@@ -228,19 +187,6 @@ esp_err_t display_driver_init(void)
         display_panel_init(),
         TAG,
         "ILI9488 initialization failed"
-    );
-
-    /*
-    * Enable the backlight here for the initial display test.
-    *
-    * Once LVGL is integrated, it is recommended to enable the
-    * backlight after the first screen has been created and the
-    * initial frame has been rendered.
-    */
-    ESP_RETURN_ON_ERROR(
-        display_driver_set_backlight(true),
-        TAG,
-        "Failed to enable backlight"
     );
 
     s_display_initialized = true;

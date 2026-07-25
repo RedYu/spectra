@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS
         "screen_manager.c"
-        
+
         "screens/splash_screen.c"
         "screens/main_screen.c"
         "screens/settings_screen.c"
@@ -22,5 +22,6 @@ idf_component_register(
 
     PRIV_REQUIRES
         models
+        services
 )
 

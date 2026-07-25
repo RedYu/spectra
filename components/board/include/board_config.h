@@ -27,9 +27,6 @@
 #define TOUCH_PIN_INT          GPIO_NUM_13
 #define TOUCH_PIN_RST          GPIO_NUM_NC
 
-#define LCD_BACKLIGHT_ON_LEVEL     1
-#define LCD_BACKLIGHT_OFF_LEVEL    0
-
 #define LCD_DRAW_BUFFER_LINES       40
 #define LV_BUFFER_SIZE (LCD_H_RES * LCD_DRAW_BUFFER_LINES)
 

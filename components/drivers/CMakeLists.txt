@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "display_backlight.c"
         "display_driver.c"
         "touch_driver.c"
 

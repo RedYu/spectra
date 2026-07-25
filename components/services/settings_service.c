@@ -5,6 +5,9 @@
 
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_err.h"
+#include "esp_check.h"
+#include "display_backlight.h"
 
 #include "system_model.h"
 #include "settings_model.h"
@@ -353,4 +356,39 @@ esp_err_t settings_service_reload(void)
 esp_err_t settings_service_init(void)
 {
     return settings_service_reload();
+}
+
+esp_err_t settings_service_set_brightness(
+    uint8_t brightness
+)
+{
+    const app_settings_t *current_settings =
+        settings_model_get();
+
+    if (current_settings == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    app_settings_t updated_settings =
+        *current_settings;
+
+    updated_settings.display.brightness =
+        brightness;
+
+    settings_model_set(
+        &updated_settings
+    );
+
+    const app_settings_t *applied_settings =
+        settings_model_get();
+
+    ESP_RETURN_ON_ERROR(
+        display_backlight_set_brightness(
+            applied_settings->display.brightness
+        ),
+        TAG,
+        "Failed to apply display brightness"
+    );
+
+    return ESP_OK;
 }

@@ -4,5 +4,9 @@
     "device": {
         "target": "spectra",
 		"name": "Modern Automotive CAN Analyzer"
-    }
+    },
+	
+	"display": {
+		"brightness": 80
+	}
 }
