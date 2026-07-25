@@ -20,6 +20,7 @@ static lv_display_t *s_display = NULL;
 static lv_indev_t *s_touch_indev = NULL;
 
 static lv_color_t *s_draw_buffer_1 = NULL;
+static lv_color_t *s_draw_buffer_2 = NULL;
 
 static esp_timer_handle_t s_tick_timer = NULL;
 
@@ -163,10 +164,15 @@ static esp_err_t lvgl_display_register(void)
         MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL
     );
 
-    if (s_draw_buffer_1 == NULL) {
+    s_draw_buffer_2 = heap_caps_malloc(
+        buffer_size, 
+        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL
+    );
+
+    if (s_draw_buffer_1 == NULL || s_draw_buffer_2 == NULL) {
         ESP_LOGE(
             TAG,
-            "Failed to allocate LVGL draw buffer"
+            "Failed to allocate LVGL draw buffers"
         );
 
         return ESP_ERR_NO_MEM;
@@ -178,7 +184,7 @@ static esp_err_t lvgl_display_register(void)
     lv_display_set_buffers(
         s_display,
         s_draw_buffer_1,
-        NULL,
+        s_draw_buffer_2,
         buffer_size,
         LV_DISPLAY_RENDER_MODE_PARTIAL
     );
