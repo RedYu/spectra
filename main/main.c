@@ -23,6 +23,8 @@
 #include "settings_service.h"
 #include "gui_service.h"
 
+#include "logging_service.h"
+
 static const char *TAG = "app_main";
 
 static esp_err_t start_service(const char *name, esp_err_t (*start)(void))
@@ -74,6 +76,11 @@ static void startup_task(
     }
 
     start_service("Storage SD card", storage_sd_service_start);
+
+    gui_service_set_boot_progress(
+        15,
+        "SD card interface ready"
+    );
 
     start_service("System", system_service_start);
 
@@ -195,26 +202,27 @@ static void startup_task(
         "WIFI interface ready"
     );
     vTaskDelay(pdMS_TO_TICKS(100));
-    gui_service_set_boot_progress(
-        95,
-        "Bluetooth interface ready"
-    );
-    vTaskDelay(pdMS_TO_TICKS(100));
-    gui_service_set_boot_progress(
-        95,
-        "SD card interface ready"
-    );
-    vTaskDelay(pdMS_TO_TICKS(100));
+
     gui_service_set_boot_progress(
         100,
         "System ready"
     );
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     vTaskDelete(NULL);
 }
 
 void app_main(void)
 {
+    ESP_ERROR_CHECK(
+        logging_service_init()
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Logging service initialized"
+    );
+
     ESP_ERROR_CHECK(board_init());
 
     ESP_ERROR_CHECK(system_model_init());

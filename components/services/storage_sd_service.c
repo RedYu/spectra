@@ -10,7 +10,7 @@
 #include "esp_check.h"
 #include "freertos/FreeRTOS.h"
 #include "sd_card_driver.h"
-
+#include "logging_service.h"
 #include "system_model.h"
 
 #define STORAGE_SD_MOUNT_POINT      SD_CARD_MOUNT_POINT
@@ -314,6 +314,69 @@ esp_err_t storage_sd_service_read(
      * bytes_read may be less than size at the end of the file.
      * This is not considered an error.
      */
+    return ESP_OK;
+}
+
+esp_err_t storage_sd_service_write(
+    FILE *file,
+    const void *buffer,
+    size_t size,
+    size_t *out_bytes_written
+)
+{
+    if (file == NULL ||
+        buffer == NULL ||
+        size == 0) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (out_bytes_written != NULL) {
+        *out_bytes_written = 0;
+    }
+
+    esp_err_t result =
+        storage_sd_service_validate_state();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    const esp_err_t lock_result =
+        storage_sd_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    errno = 0;
+
+    const size_t bytes_written =
+        fwrite(
+            buffer,
+            1,
+            size,
+            file
+        );
+
+    const int saved_errno =
+        errno;
+
+    board_spi_unlock();
+
+    if (out_bytes_written != NULL) {
+        *out_bytes_written =
+            bytes_written;
+    }
+
+    if (bytes_written != size) {
+        if (saved_errno == ENOSPC) {
+            return ESP_ERR_NO_MEM;
+        }
+
+        return ESP_FAIL;
+    }
+
     return ESP_OK;
 }
 
@@ -732,27 +795,6 @@ void storage_sd_service_set_state(
     );
 }
 
-static void storage_sd_monitor_task(
-    void *argument
-)
-{
-    (void)argument;
-
-    ESP_LOGI(
-        TAG,
-        "Storage SD monitor task started"
-    );
-
-    while (true) {
-        storage_sd_service_set_state(sd_card_driver_is_mounted() ? STORAGE_STATE_MOUNTED : STORAGE_STATE_UNAVAILABLE);
-        vTaskDelay(
-            pdMS_TO_TICKS(
-                STORAGE_REMOUNT_INTERVAL_MS
-            )
-        );
-    }
-}
-
 esp_err_t storage_sd_service_start(void)
 {
     ESP_RETURN_ON_ERROR(
@@ -771,18 +813,22 @@ esp_err_t storage_sd_service_start(void)
         STORAGE_STATE_MOUNTED : STORAGE_STATE_UNAVAILABLE
     );
 
-    const BaseType_t task_created =
-        xTaskCreate(
-            storage_sd_monitor_task,
-            "storage_sd_monitor",
-            4096,
-            NULL,
-            4,
-            NULL
-        );
+    if (mount_result == ESP_OK) {
+        const esp_err_t logging_result =
+            logging_service_enable_file();
 
-    if (task_created != pdPASS) {
-        return ESP_ERR_NO_MEM;
+        if (logging_result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to enable SD logging: %s",
+                esp_err_to_name(logging_result)
+            );
+        } else {
+            ESP_LOGI(
+                TAG,
+                "SD file logging enabled"
+            );
+        }
     }
 
     return ESP_OK;

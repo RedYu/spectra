@@ -125,7 +125,7 @@ static lv_obj_t *screen_get_or_create(
         return NULL;
     }
 
-    ESP_LOGI(
+    ESP_LOGD(
         TAG,
         "Created screen: %s",
         screen_get_name(id)
@@ -238,7 +238,7 @@ static esp_err_t screen_manager_load(
         );
     }
 
-    ESP_LOGI(
+    ESP_LOGD(
         TAG,
         "Showing screen: %s",
         screen_get_name(id)
@@ -441,7 +441,7 @@ esp_err_t screen_manager_destroy(
     instance->object =
         NULL;
 
-    ESP_LOGI(
+    ESP_LOGD(
         TAG,
         "Destroyed screen: %s",
         screen_get_name(id)

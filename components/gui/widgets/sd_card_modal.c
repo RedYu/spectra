@@ -7,6 +7,8 @@
 
 #include "widgets/modal_dialog.h"
 #include "storage_service.h"
+#include "logging_service.h"
+#include "storage_sd_service.h"
 
 #include "sd_card_driver.h"
 
@@ -163,9 +165,24 @@ static void sd_card_modal_action_cb(
             "Please wait while the SD card is being unmounted."
         );
 
+        const esp_err_t logging_result =
+            logging_service_disable_file();
+
+        if (logging_result != ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Failed to disable SD logging: %s",
+                esp_err_to_name(logging_result)
+            );
+        }
+
         const esp_err_t result =
             sd_card_driver_unmount();
 
+        storage_sd_service_set_state(result == ESP_OK ? 
+            STORAGE_STATE_UNAVAILABLE : STORAGE_STATE_ERROR
+        );
+        
         sd_card_modal_show_result(
             dialog,
             result,
@@ -184,6 +201,28 @@ static void sd_card_modal_action_cb(
 
         const esp_err_t result =
             sd_card_driver_mount();
+
+        storage_sd_service_set_state(result == ESP_OK ? 
+            STORAGE_STATE_MOUNTED : STORAGE_STATE_UNAVAILABLE
+        );
+
+        if (result == ESP_OK) {
+            const esp_err_t logging_result =
+                logging_service_enable_file();
+
+            if (logging_result != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to enable SD logging: %s",
+                    esp_err_to_name(logging_result)
+                );
+            } else {
+                ESP_LOGI(
+                    TAG,
+                    "SD file logging enabled"
+                );
+            }
+        }
 
         sd_card_modal_show_result(
             dialog,

@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "logging_service.c"
         "gui_service.c"
         "storage_service.c"
         "storage_sd_service.c"

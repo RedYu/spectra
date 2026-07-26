@@ -66,6 +66,32 @@ esp_err_t storage_sd_service_read(
 );
 
 /**
+ * @brief Write data to an opened file.
+ *
+ * The data is written starting from the current file position.
+ *
+ * @param file Opened file.
+ * @param buffer Source buffer containing the data to write.
+ * @param size Number of bytes to write.
+ * @param out_bytes_written Receives the actual number of bytes written.
+ *                          May be NULL if the caller does not need it.
+ *
+ * @return
+ *     - ESP_OK on success
+ *     - ESP_ERR_INVALID_ARG for invalid arguments
+ *     - ESP_ERR_INVALID_STATE if the SD card is not mounted
+ *     - ESP_ERR_TIMEOUT if the SPI bus could not be locked
+ *     - ESP_ERR_NO_MEM if there is not enough space on the SD card
+ *     - ESP_FAIL for other filesystem errors
+ */
+esp_err_t storage_sd_service_write(
+    FILE *file,
+    const void *buffer,
+    size_t size,
+    size_t *out_bytes_written
+);
+
+/**
  * @brief Change the current file position.
  */
 esp_err_t storage_sd_service_seek(
@@ -117,6 +143,10 @@ esp_err_t storage_sd_service_stat(
  * @brief Start storage SD service.
  */
 esp_err_t storage_sd_service_start(void);
+
+void storage_sd_service_set_state(
+    storage_sd_state_t state
+);
 
 #ifdef __cplusplus
 }
