@@ -4,8 +4,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "esp_log.h"
+#include "esp_check.h"
+#include "esp_err.h"
 #include "esp_spiffs.h"
+
+#include "sd_card_driver.h"
+
 
 static const char *TAG = "storage_service";
 
@@ -13,6 +21,7 @@ static const char *STORAGE_PARTITION_LABEL = "storage";
 static const char *STORAGE_BASE_PATH = "/storage";
 
 static bool s_is_mounted;
+
 
 esp_err_t storage_service_init(void)
 {

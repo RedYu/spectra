@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#include "board.h"
+
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 
@@ -19,43 +21,7 @@ static const char *TAG = "display_driver";
 static esp_lcd_panel_io_handle_t s_panel_io = NULL;
 static esp_lcd_panel_handle_t s_panel = NULL;
 
-static bool s_spi_bus_initialized = false;
 static bool s_display_initialized = false;
-
-static esp_err_t display_spi_bus_init(void)
-{
-    if (s_spi_bus_initialized) {
-        return ESP_OK;
-    }
-
-    const spi_bus_config_t bus_config = {
-        .mosi_io_num = LCD_PIN_MOSI,
-        .miso_io_num = LCD_PIN_MISO,
-        .sclk_io_num = LCD_PIN_SCLK,
-
-        .quadwp_io_num = GPIO_NUM_NC,
-        .quadhd_io_num = GPIO_NUM_NC,
-
-        .max_transfer_sz = LCD_H_RES * LCD_DRAW_BUFFER_LINES * sizeof(uint16_t),
-    };
-
-    ESP_RETURN_ON_ERROR(
-        spi_bus_initialize(
-            LCD_SPI_HOST,
-            &bus_config,
-            SPI_DMA_CH_AUTO
-        ),
-        TAG,
-        "Failed to initialize LCD SPI bus"
-    );
-
-    s_spi_bus_initialized = true;
-
-    ESP_LOGI(TAG, "SPI bus initialized");
-
-    return ESP_OK;
-}
-
 
 static esp_err_t display_panel_io_init(void)
 {
@@ -84,7 +50,7 @@ static esp_err_t display_panel_io_init(void)
     };
 
     ESP_RETURN_ON_ERROR(
-        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_HOST, &io_config, &s_panel_io),
+        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)board_spi_get_host(), &io_config, &s_panel_io),
         TAG,
         "Failed to create LCD panel IO"
     );
@@ -171,11 +137,14 @@ esp_err_t display_driver_init(void)
         return ESP_OK;
     }
 
-    ESP_RETURN_ON_ERROR(
-        display_spi_bus_init(),
-        TAG,
-        "SPI bus initialization failed"
-    );
+     if (!board_spi_is_initialized()) {
+        ESP_LOGE(
+            TAG,
+            "Shared SPI bus is not initialized"
+        );
+
+        return ESP_ERR_INVALID_STATE;
+    }
 
     ESP_RETURN_ON_ERROR(
         display_panel_io_init(),

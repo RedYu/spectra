@@ -19,6 +19,7 @@
 #include "app_config.h"
 #include "system_service.h"
 #include "storage_service.h"
+#include "storage_sd_service.h"
 #include "settings_service.h"
 #include "gui_service.h"
 
@@ -71,6 +72,8 @@ static void startup_task(
         vTaskDelete(NULL);
         return;
     }
+
+    start_service("Storage SD card", storage_sd_service_start);
 
     start_service("System", system_service_start);
 

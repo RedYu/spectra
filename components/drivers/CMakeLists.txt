@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "sd_card_driver.c"
         "display_backlight.c"
         "display_driver.c"
         "touch_driver.c"
@@ -12,6 +13,9 @@ idf_component_register(
         esp_lcd
         esp_lcd_touch
         esp_lcd_touch_gt911
+        fatfs
+        sdmmc
+        esp_driver_sdspi
 
     PRIV_REQUIRES
         esp_driver_gpio
@@ -19,4 +23,5 @@ idf_component_register(
         esp_driver_i2c
         esp_timer
         esp_lcd_ili9488
+
 )

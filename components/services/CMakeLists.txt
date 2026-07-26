@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "gui_service.c"
         "storage_service.c"
+        "storage_sd_service.c"
         "settings_service.c"
         "system_service.c"
 

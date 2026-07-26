@@ -8,8 +8,8 @@
 ![Platform](https://img.shields.io/badge/Platform-ESP32--S3-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-Modern Automotive CAN Analyzer <br />
-Modular ESP32-S3 automotive diagnostic platform built with ESP-IDF, FreeRTOS and LVGL.
+**Modern Automotive CAN Analyzer** <br />
+Modular ESP32-S3 diagnostic platform built with ESP-IDF, FreeRTOS and LVGL 9.
 
 </div>
 
@@ -17,44 +17,41 @@ Modular ESP32-S3 automotive diagnostic platform built with ESP-IDF, FreeRTOS and
 
 ## Overview
 
-Spectra is an embedded automotive diagnostic platform based on the ESP32-S3.
+Spectra is an embedded automotive diagnostic platform based on the **ESP32-S3**.
 
-The project combines a modern LVGL graphical interface, CAN communication, and a modular software architecture built on ESP-IDF and FreeRTOS.
-
-The long-term goal is to create a professional handheld automotive diagnostic device capable of monitoring, logging, analyzing, and visualizing vehicle communication in real time.
+The project combines a modern touch GUI (LVGL 9), modular software architecture and CAN communication capabilities. 
+The long-term goal is to create a professional handheld device for real-time monitoring, logging and analysis of vehicle networks.
 
 ---
 
 ## Features
 
-- ESP-IDF 6.x
-- FreeRTOS
-- LVGL 9
-- Layered software architecture
-- Storage Service
-- Settings Service
-- Configuration Model
-- SPIFFS support
-- ILI9488 display driver
-- GT911 touch driver
-- CAN / TWAI interface
+### Implemented
+- ESP-IDF 6.x + FreeRTOS
+- LVGL 9 graphical interface
+- Layered software architecture (Drivers → Services → Models → GUI)
+- ILI9488 480×320 display driver (SPI + DMA)
+- GT911 capacitive touch driver
+- SPIFFS storage service
+- Settings service with JSON configuration
+- System model (uptime, heap, firmware info)
+- Splash screen + Main screen + Settings screen
 - GitHub Actions CI
 
-## Planned Features
-
-* CAN Monitor
-* CAN Logger
-* DBC Parser
-* XCP Protocol
-* UDS Diagnostics
-* OBD-II Support
-* Live Dashboard
-* Data Recording
-* SD Card Support
-* Wi-Fi
-* USB Networking
-* OTA Updates
-* Firmware Manager
+### Planned
+- Screen Manager with navigation history
+- CAN / TWAI interface
+- CAN Monitor & Logger
+- DBC Parser
+- UDS / OBD-II support
+- XCP Protocol
+- Live Dashboard
+- SD Card support
+- Wi-Fi / USB networking
+- OTA updates
+- Data Recording
+- SD Card Support
+- Firmware Manager
 
 ---
 
@@ -68,6 +65,7 @@ The long-term goal is to create a professional handheld automotive diagnostic de
 | Communication | CAN / TWAI             |
 | Storage       | SD Card (planned)      |
 | Networking    | USB / Wi-Fi / Ethernet |
+| Flash         | 16 MB                  |
 
 ---
 
@@ -76,38 +74,19 @@ The long-term goal is to create a professional handheld automotive diagnostic de
 ```text
 spectra/
 ├── main/
-│   ├── app_main.c
-│   ├── app_config.h
-│   └── app_events.h
-│
-└── components/
-    ├── board/
-    │   ├── board.c
-    │   └── board_config.h
-    │
-    ├── drivers/
-    │   ├── display_driver
-    │   ├── touch_driver
-    │   └── can_driver
-    │
-    ├── services/
-    │   ├── storage_service
-    │   ├── settings_service
-    │   ├── gui_service
-    │   └── can_service
-    │
-    ├── models/
-    │   ├── settings_model
-    │   ├── system_model
-    │   └── can_model
-    │
-    ├── gui/
-    │   ├── screens
-    │   ├── widgets
-    │   └── assets
-    │
-    └── lvgl_port/
+│   └── main.c
+├── components/
+│   ├── board/           # Board configuration & pins
+│   ├── drivers/         # Display, Touch, (CAN)
+│   ├── services/        # Storage, Settings, System, GUI
+│   ├── models/          # Shared application state
+│   ├── gui/             # Screens, widgets, assets
+│   └── lvgl_port/       # LVGL porting layer
+├── partitions.csv
+└── sdkconfig.defaults
 ```
+
+
 
 ## Software Architecture
 
@@ -138,6 +117,25 @@ Responsibilities:
 - **Services** implement application logic.
 - **Models** store shared application state.
 - **GUI** only reads data from models.
+- **Screen Manager** handles screen creation, navigation history and lifecycle
+
+## Screen Manager
+The GUI uses a centralized Screen Manager with the following features:
+
+* Screen registration via descriptors
+* Lazy screen creation
+* Navigation history stack
+* Animated transitions
+
+Example usage:
+
+```c
+// Show a screen
+screen_manager_show(SCREEN_ID_SETTINGS, LV_SCR_LOAD_ANIM_MOVE_LEFT, 250);
+
+// Go back
+screen_manager_back(LV_SCR_LOAD_ANIM_MOVE_RIGHT, 250);
+```
 
 ## Software Stack
 
@@ -173,15 +171,24 @@ Example:
 
 ```json
 {
-    "display": {
-        "brightness": 80
-    },
+    "schema_version": 1,
 
-    "can": {
-        "bitrate": 500000
-    }
+    "device": {
+        "target": "spectra",
+		"name": "Modern Automotive CAN Analyzer"
+    },
+	
+	"display": {
+		"brightness": 80
+	}
 }
 ```
+
+## Getting Started
+###Requirements
+
+* ESP-IDF v5.3+ / v6.x
+* ESP32-S3 board with ILI9488 + GT911
 
 ## Development
 
@@ -214,27 +221,29 @@ idf.py fullclean
 ### Core
 
 - [x] Modular architecture
-- [x] Display driver
-- [x] Touch driver
-- [x] LVGL integration
-- [x] Storage service
-- [x] Settings service
-- [x] Configuration manager
+- [x] Display & Touch drivers
+- [x] LVGL 9 integration
+- [x] Storage & Settings services
+- [x] System model
+- [x] Screen Manager
+- [ ] Theme / Style system
 
 ### GUI
 
-- [ ] Dashboard
+- [x] Splash screen
+- [x] Main screen
 - [ ] Settings application
-- [ ] CAN monitor
 - [ ] Vehicle information
+- [ ] Dashboard
+- [ ] CAN Monitor
 
 ### Communication
 
+- [ ] CAN / TWAI driver
 - [ ] CAN Logger
 - [ ] DBC Parser
 - [ ] XCP
-- [ ] UDS
-- [ ] OBD-II
+- [ ] UDS / OBD-II
 
 ### Connectivity
 

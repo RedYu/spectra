@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "board.h"
 #include "board_config.h"
 #include "display_driver.h"
 #include "touch_driver.h"
@@ -66,6 +67,22 @@ static void lvgl_display_flush_cb(
     uint8_t *pixel_map
 )
 {
+    if (!board_spi_lock(
+            pdMS_TO_TICKS(1000)
+        )) {
+
+        ESP_LOGE(
+            TAG,
+            "Failed to lock SPI bus for LCD flush"
+        );
+
+        lv_display_flush_ready(
+            display
+        );
+
+        return;
+    }
+
     esp_lcd_panel_handle_t panel =
         display_driver_get_panel();
 
@@ -88,6 +105,8 @@ static void lvgl_display_flush_cb(
     );
 
     if (err != ESP_OK) {
+        board_spi_unlock();
+
         ESP_LOGE(
             TAG,
             "Display flush failed: %s",
@@ -117,13 +136,20 @@ static bool lvgl_color_transfer_done_cb(
     (void)panel_io;
     (void)event_data;
 
+    BaseType_t higher_priority_task_woken =
+        pdFALSE;
+
+    board_spi_unlock_from_isr(
+        &higher_priority_task_woken
+    );
+
     lv_display_t *display = user_ctx;
 
     if (display != NULL) {
         lv_display_flush_ready(display);
     }
 
-    return false;
+    return higher_priority_task_woken == pdTRUE;
 }
 
 static esp_err_t lvgl_display_register(void)

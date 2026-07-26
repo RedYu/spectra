@@ -16,3 +16,4 @@ esp_err_t storage_service_read_file(
     char **out_data,
     size_t *out_size
 );
+
