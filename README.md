@@ -185,7 +185,7 @@ Example:
 ```
 
 ## Getting Started
-###Requirements
+### Requirements
 
 * ESP-IDF v5.3+ / v6.x
 * ESP32-S3 board with ILI9488 + GT911

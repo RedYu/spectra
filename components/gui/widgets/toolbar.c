@@ -11,9 +11,9 @@
 
 #define TOOLBAR_ICON_COLOR_DEFAULT      0xFFFFFF
 #define TOOLBAR_ICON_COLOR_INACTIVE     0x7B858F
-#define TOOLBAR_ICON_COLOR_SD_MOUNTED   0x42C77A
+#define TOOLBAR_ICON_COLOR_SD_MOUNTED   0x4B77D1
 #define TOOLBAR_ICON_COLOR_SD_ERROR     0xE05252
-#define TOOLBAR_ICON_COLOR_OTA_READY    0x4B77D1
+#define TOOLBAR_ICON_COLOR_OTA_READY    0xF4B400
 
 static void toolbar_button_event_cb(
     lv_event_t *event
@@ -447,7 +447,7 @@ void toolbar_set_sd_mounted(
         lv_color_hex(
             mounted
                 ? TOOLBAR_ICON_COLOR_SD_MOUNTED
-                : TOOLBAR_ICON_COLOR_SD_ERROR
+                : TOOLBAR_ICON_COLOR_INACTIVE
         )
     );
 }
