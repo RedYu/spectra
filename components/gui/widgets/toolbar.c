@@ -2,6 +2,7 @@
 
 #include "assets/gui_images.h"
 #include "esp_log.h"
+#include "gui_config.h"
 
 #define TOOLBAR_HEIGHT       56
 #define TOOLBAR_BUTTON_SIZE  44
@@ -370,22 +371,22 @@ toolbar_t toolbar_create(
     );
 
     if (config->show_ota_status) {
-    result.ota_button =
-        toolbar_button_create(
-            status_container,
-            &icons8_alarm_clock_32,
-            config->ota_action
-        );
-}
+        result.ota_button =
+            toolbar_button_create(
+                status_container,
+                &icons8_alarm_clock_32,
+                config->ota_action
+            );
+    }
 
-if (config->show_sd_status) {
-    result.sd_button =
-        toolbar_button_create(
-            status_container,
-            &icons8_micro_sd_32,
-            config->sd_action
-        );
-}
+    if (config->show_sd_status) {
+        result.sd_button =
+            toolbar_button_create(
+                status_container,
+                &icons8_micro_sd_32,
+                config->sd_action
+            );
+    }
     /*
      * Settings button.
      */

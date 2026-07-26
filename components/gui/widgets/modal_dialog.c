@@ -2,6 +2,8 @@
 
 #include <stddef.h>
 
+#include "gui_config.h"
+
 #define MODAL_DIALOG_WIDTH   360
 #define MODAL_DIALOG_HEIGHT  260
 

@@ -12,12 +12,17 @@
 #include "esp_err.h"
 #include "esp_check.h"
 
+#include "gui_config.h"
+
 #define TOOLBAR_HEIGHT 56
 
 static const char *TAG = "settings_screen";
 
 static lv_obj_t *s_brightness_slider = NULL;
 static lv_obj_t *s_brightness_value_label = NULL;
+
+static lv_obj_t *s_sd_logging_switch;
+static lv_obj_t *s_animations_switch;
 
 static void settings_screen_back_action(void)
 {
@@ -38,7 +43,7 @@ static void settings_screen_back_action(void)
     }
 
     result = screen_manager_back(
-        LV_SCR_LOAD_ANIM_MOVE_RIGHT,
+        gui_config_are_animations_enabled() ? LV_SCR_LOAD_ANIM_MOVE_RIGHT : LV_SCR_LOAD_ANIM_NONE,
         200
     );
 
@@ -90,10 +95,71 @@ static void brightness_slider_event_cb(
     }
 }
 
+static void sd_logging_switch_event_cb(
+    lv_event_t *event
+)
+{
+    lv_obj_t *switch_obj =
+        lv_event_get_target_obj(event);
+
+    const bool enabled =
+        lv_obj_has_state(
+            switch_obj,
+            LV_STATE_CHECKED
+        );
+
+    esp_err_t result =
+        settings_service_set_sd_logging_enabled(
+            enabled
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply sd logging: %s",
+            esp_err_to_name(result)
+        );
+
+        return;
+    }
+}
+
+static void animations_switch_event_cb(
+    lv_event_t *event
+)
+{
+    lv_obj_t *switch_obj =
+        lv_event_get_target_obj(event);
+
+    const bool enabled =
+        lv_obj_has_state(
+            switch_obj,
+            LV_STATE_CHECKED
+        );
+
+    esp_err_t result =
+        settings_service_set_animations_enabled(
+            enabled
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply animation enabled: %s",
+            esp_err_to_name(result)
+        );
+
+        return;
+    }
+}
+
 lv_obj_t *settings_screen_create(void)
 {
     lv_obj_t *screen =
         lv_obj_create(NULL);
+
+    const app_settings_t *settings =
+        settings_model_get();
 
     lv_obj_remove_flag(
         screen,
@@ -143,9 +209,19 @@ lv_obj_t *settings_screen_create(void)
         0
     );
 
-    lv_obj_remove_flag(
+    lv_obj_add_flag(
         content,
         LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    lv_obj_set_scroll_dir(
+        content,
+        LV_DIR_VER
+    );
+
+    lv_obj_set_scrollbar_mode(
+        content,
+        LV_SCROLLBAR_MODE_AUTO
     );
 
     lv_obj_set_style_border_width(
@@ -272,6 +348,307 @@ lv_obj_t *settings_screen_create(void)
         LV_PART_MAIN
     );
 
+    lv_obj_set_width(
+        brightness_card,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_height(
+        brightness_card,
+        110
+    );
+
+    lv_obj_set_flex_grow(
+        brightness_card,
+        0
+    );
+
+    /*
+     * General settings card.
+     */
+    lv_obj_t *general_card =
+        lv_obj_create(content);
+
+    lv_obj_set_width(
+        general_card,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_height(
+        general_card,
+        130
+    );
+
+    lv_obj_remove_flag(
+        general_card,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    lv_obj_set_style_border_width(
+        general_card,
+        1,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_color(
+        general_card,
+        lv_color_hex(0xE1E5EA),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_radius(
+        general_card,
+        12,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        general_card,
+        lv_color_hex(0xF7F8FA),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        general_card,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_all(
+        general_card,
+        14,
+        LV_PART_MAIN
+    );
+
+    /*
+     * General card title.
+     */
+    lv_obj_t *general_title =
+        lv_label_create(general_card);
+
+    lv_label_set_text(
+        general_title,
+        "General"
+    );
+
+    lv_obj_set_style_text_font(
+        general_title,
+        &lv_font_montserrat_16,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        general_title,
+        lv_color_hex(0x20252A),
+        LV_PART_MAIN
+    );
+
+    lv_obj_align(
+        general_title,
+        LV_ALIGN_TOP_LEFT,
+        0,
+        0
+    );
+
+    /*
+     * SD logging row.
+     */
+    lv_obj_t *sd_logging_label =
+        lv_label_create(general_card);
+
+    lv_label_set_text(
+        sd_logging_label,
+        "Log to SD card"
+    );
+
+    lv_obj_set_style_text_font(
+        sd_logging_label,
+        &lv_font_montserrat_14,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        sd_logging_label,
+        lv_color_hex(0x4B5563),
+        LV_PART_MAIN
+    );
+
+    lv_obj_align(
+        sd_logging_label,
+        LV_ALIGN_TOP_LEFT,
+        0,
+        36
+    );
+
+    s_sd_logging_switch =
+        lv_switch_create(general_card);
+
+    lv_obj_set_size(
+        s_sd_logging_switch,
+        48,
+        26
+    );
+
+    lv_obj_align(
+        s_sd_logging_switch,
+        LV_ALIGN_TOP_RIGHT,
+        0,
+        30
+    );
+
+    lv_obj_set_style_bg_color(
+        s_sd_logging_switch,
+        lv_color_hex(0xD9DEE5),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        s_sd_logging_switch,
+        lv_color_hex(0x4B77D1),
+        LV_PART_INDICATOR | LV_STATE_CHECKED
+    );
+
+    lv_obj_set_style_bg_color(
+        s_sd_logging_switch,
+        lv_color_hex(0xFFFFFF),
+        LV_PART_KNOB
+    );
+
+    if (settings->logging.sd_enabled) {
+        lv_obj_add_state(
+            s_sd_logging_switch,
+            LV_STATE_CHECKED
+        );
+    }
+
+    lv_obj_add_event_cb(
+        s_sd_logging_switch,
+        sd_logging_switch_event_cb,
+        LV_EVENT_VALUE_CHANGED,
+        NULL
+    );
+
+    /*
+     * Separator.
+     */
+    lv_obj_t *separator =
+        lv_obj_create(general_card);
+
+    lv_obj_set_size(
+        separator,
+        LV_PCT(100),
+        1
+    );
+
+    lv_obj_align(
+        separator,
+        LV_ALIGN_TOP_MID,
+        0,
+        70
+    );
+
+    lv_obj_set_style_border_width(
+        separator,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_radius(
+        separator,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        separator,
+        lv_color_hex(0xE1E5EA),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        separator,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    /*
+     * Animations row.
+     */
+    lv_obj_t *animations_label =
+        lv_label_create(general_card);
+
+    lv_label_set_text(
+        animations_label,
+        "Enable animations"
+    );
+
+    lv_obj_set_style_text_font(
+        animations_label,
+        &lv_font_montserrat_14,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        animations_label,
+        lv_color_hex(0x4B5563),
+        LV_PART_MAIN
+    );
+
+    lv_obj_align(
+        animations_label,
+        LV_ALIGN_BOTTOM_LEFT,
+        0,
+        -4
+    );
+
+    s_animations_switch =
+        lv_switch_create(general_card);
+
+    lv_obj_set_size(
+        s_animations_switch,
+        48,
+        26
+    );
+
+    lv_obj_align(
+        s_animations_switch,
+        LV_ALIGN_BOTTOM_RIGHT,
+        0,
+        0
+    );
+
+    lv_obj_set_style_bg_color(
+        s_animations_switch,
+        lv_color_hex(0xD9DEE5),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        s_animations_switch,
+        lv_color_hex(0x4B77D1),
+        LV_PART_INDICATOR | LV_STATE_CHECKED
+    );
+
+    lv_obj_set_style_bg_color(
+        s_animations_switch,
+        lv_color_hex(0xFFFFFF),
+        LV_PART_KNOB
+    );
+
+    if (settings->ui.animations_enabled) {
+        lv_obj_add_state(
+            s_animations_switch,
+            LV_STATE_CHECKED
+        );
+    }
+
+    lv_obj_add_event_cb(
+        s_animations_switch,
+        animations_switch_event_cb,
+        LV_EVENT_VALUE_CHANGED,
+        NULL
+    );
+
     /*
      * Brightness label.
      */
@@ -307,9 +684,6 @@ lv_obj_t *settings_screen_create(void)
      */
     s_brightness_value_label =
         lv_label_create(brightness_card);
-
-    const app_settings_t *settings =
-        settings_model_get();
 
     lv_label_set_text_fmt(
         s_brightness_value_label,

@@ -31,6 +31,12 @@ void settings_model_set_defaults(app_settings_t *settings)
 
     settings->display.brightness =
         SETTINGS_DISPLAY_BRIGHTNESS_DEFAULT;
+
+    settings->logging.sd_enabled =
+        SETTINGS_LOGGING_SD_ENABLED_DEFAULT;
+
+    settings->ui.animations_enabled =
+        SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT;
 }
 
 void settings_model_set(const app_settings_t *settings)

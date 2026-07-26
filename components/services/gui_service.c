@@ -15,6 +15,7 @@
 
 #include "lvgl.h"
 #include "screen_manager.h"
+#include "gui_config.h"
 
 static const char *TAG = "gui_service";
 
@@ -60,8 +61,8 @@ static void gui_service_process_boot_progress(void)
 
             screen_manager_show(
                 SCREEN_ID_MAIN,
-                LV_SCR_LOAD_ANIM_FADE_IN,
-                300
+                gui_config_are_animations_enabled() ? LV_SCR_LOAD_ANIM_FADE_IN : LV_SCR_LOAD_ANIM_NONE,
+                gui_config_are_animations_enabled() ? 300 : 0
             );
         }
     }

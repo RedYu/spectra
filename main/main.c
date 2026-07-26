@@ -75,13 +75,6 @@ static void startup_task(
         return;
     }
 
-    start_service("Storage SD card", storage_sd_service_start);
-
-    gui_service_set_boot_progress(
-        15,
-        "SD card interface ready"
-    );
-
     start_service("System", system_service_start);
 
     gui_service_set_boot_progress(
@@ -115,6 +108,13 @@ static void startup_task(
         "Configuration loaded"
     );
 
+    start_service("Storage SD card", storage_sd_service_start);
+
+    gui_service_set_boot_progress(
+        65,
+        "SD card interface ready"
+    );
+
     /*
      * Initialize display driver.
      */
@@ -128,7 +128,7 @@ static void startup_task(
         );
 
         gui_service_set_boot_progress(
-            50,
+            75,
             "Display initialization failed"
         );
 
@@ -137,7 +137,7 @@ static void startup_task(
     }
 
     gui_service_set_boot_progress(
-        65,
+        75,
         "Display interface ready"
     );
 
@@ -154,7 +154,7 @@ static void startup_task(
         );
 
         gui_service_set_boot_progress(
-            65,
+            80,
             "Touch initialization failed"
         );
 
@@ -163,7 +163,7 @@ static void startup_task(
     }
 
     gui_service_set_boot_progress(
-        85,
+        80,
         "Touch interface ready"
     );
 
@@ -190,23 +190,11 @@ static void startup_task(
 
     start_service("GUI", gui_service_start);
 
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    gui_service_set_boot_progress(
+            100,
+            "Good :)"
+        );
 
-    gui_service_set_boot_progress(
-        85,
-        "CAN interface ready"
-    );
-    vTaskDelay(pdMS_TO_TICKS(100));
-    gui_service_set_boot_progress(
-        90,
-        "WIFI interface ready"
-    );
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    gui_service_set_boot_progress(
-        100,
-        "System ready"
-    );
     vTaskDelay(pdMS_TO_TICKS(100));
 
     vTaskDelete(NULL);

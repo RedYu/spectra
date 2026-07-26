@@ -3,10 +3,18 @@
 
     "device": {
         "target": "spectra",
-		"name": "Modern Automotive CAN Analyzer"
+        "name": "Modern Automotive CAN Analyzer"
     },
-	
-	"display": {
-		"brightness": 80
-	}
+
+    "display": {
+        "brightness": 80
+    },
+
+    "logging": {
+        "sd_enabled": false
+    },
+
+    "ui": {
+        "animations_enabled": false
+    }
 }

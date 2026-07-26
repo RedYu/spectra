@@ -8,9 +8,11 @@
 #include "widgets/modal_dialog.h"
 #include "storage_service.h"
 #include "logging_service.h"
+#include "settings_model.h"
 #include "storage_sd_service.h"
 
 #include "sd_card_driver.h"
+#include "gui_config.h"
 
 static const char *TAG =
     "sd_card_modal";
@@ -106,7 +108,7 @@ void sd_card_modal_open(
             NULL,
 
         .animate_open =
-            true,
+            true && gui_config_are_animations_enabled(),
 
         .close_on_overlay_click =
             false
@@ -207,20 +209,27 @@ static void sd_card_modal_action_cb(
         );
 
         if (result == ESP_OK) {
-            const esp_err_t logging_result =
-                logging_service_enable_file();
+            const app_settings_t *settings =
+                settings_model_get();
 
-            if (logging_result != ESP_OK) {
-                ESP_LOGE(
-                    TAG,
-                    "Failed to enable SD logging: %s",
-                    esp_err_to_name(logging_result)
-                );
-            } else {
-                ESP_LOGI(
-                    TAG,
-                    "SD file logging enabled"
-                );
+            if (settings != NULL &&
+                settings->logging.sd_enabled) {
+
+                const esp_err_t logging_result =
+                    logging_service_enable_file();
+
+                if (logging_result != ESP_OK) {
+                    ESP_LOGE(
+                        TAG,
+                        "Failed to enable SD logging: %s",
+                        esp_err_to_name(logging_result)
+                    );
+                } else {
+                    ESP_LOGI(
+                        TAG,
+                        "SD file logging enabled"
+                    );
+                }
             }
         }
 

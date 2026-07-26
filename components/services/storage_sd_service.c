@@ -12,6 +12,7 @@
 #include "sd_card_driver.h"
 #include "logging_service.h"
 #include "system_model.h"
+#include "settings_model.h"
 
 #define STORAGE_SD_MOUNT_POINT      SD_CARD_MOUNT_POINT
 #define STORAGE_SD_MAX_PATH_LENGTH  256
@@ -814,21 +815,29 @@ esp_err_t storage_sd_service_start(void)
     );
 
     if (mount_result == ESP_OK) {
-        const esp_err_t logging_result =
-            logging_service_enable_file();
+        const app_settings_t *settings =
+            settings_model_get();
 
-        if (logging_result != ESP_OK) {
-            ESP_LOGE(
-                TAG,
-                "Failed to enable SD logging: %s",
-                esp_err_to_name(logging_result)
-            );
-        } else {
-            ESP_LOGI(
-                TAG,
-                "SD file logging enabled"
-            );
+        if (settings != NULL &&
+            settings->logging.sd_enabled) {
+
+            const esp_err_t logging_result =
+                logging_service_enable_file();
+
+            if (logging_result != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to enable SD logging: %s",
+                    esp_err_to_name(logging_result)
+                );
+            } else {
+                ESP_LOGI(
+                    TAG,
+                    "SD file logging enabled"
+                );
+            }
         }
+        
     }
 
     return ESP_OK;

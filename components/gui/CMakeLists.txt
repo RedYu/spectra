@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "gui_config.c"
         "screen_manager.c"
 
         "screens/splash_screen.c"

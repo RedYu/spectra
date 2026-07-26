@@ -4,6 +4,7 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "gui_config.h"
 
 #define SCREEN_HISTORY_SIZE 4
 

@@ -12,6 +12,10 @@
 #include "system_model.h"
 #include "settings_model.h"
 #include "storage_service.h"
+#include "logging_service.h"
+#include "sd_card_driver.h"
+
+#include "gui_config.h"
 
 static const char *TAG = "settings_service";
 
@@ -404,6 +408,82 @@ static esp_err_t parse_config(
         (uint8_t)brightness->valueint;
 
     /*
+     * Validate logging configuration.
+     */
+    const cJSON *logging =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "logging"
+        );
+
+    if (!cJSON_IsObject(logging)) {
+        ESP_LOGE(
+            TAG,
+            "Missing logging configuration"
+        );
+
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
+    }
+
+    const cJSON *sd_enabled =
+        cJSON_GetObjectItemCaseSensitive(
+            logging,
+            "sd_enabled"
+        );
+
+    if (!cJSON_IsBool(sd_enabled)) {
+        ESP_LOGE(
+            TAG,
+            "Missing or invalid logging.sd_enabled"
+        );
+
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
+    }
+
+    parsed_settings.logging.sd_enabled =
+        cJSON_IsTrue(sd_enabled);
+
+    /*
+     * Validate UI configuration.
+     */
+    const cJSON *ui =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "ui"
+        );
+
+    if (!cJSON_IsObject(ui)) {
+        ESP_LOGE(
+            TAG,
+            "Missing UI configuration"
+        );
+
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
+    }
+
+    const cJSON *animations_enabled =
+        cJSON_GetObjectItemCaseSensitive(
+            ui,
+            "animations_enabled"
+        );
+
+    if (!cJSON_IsBool(animations_enabled)) {
+        ESP_LOGE(
+            TAG,
+            "Missing or invalid ui.animations_enabled"
+        );
+
+        result = ESP_ERR_INVALID_RESPONSE;
+        goto cleanup;
+    }
+
+    parsed_settings.ui.animations_enabled =
+        cJSON_IsTrue(animations_enabled);
+
+    /*
      * Apply the fully validated configuration.
      */
     *settings =
@@ -415,10 +495,26 @@ static esp_err_t parse_config(
         system_model.device_id
     );
 
-    ESP_LOGI(
+    ESP_LOGD(
         TAG,
         "Display brightness: %u%%",
         parsed_settings.display.brightness
+    );
+
+    ESP_LOGD(
+        TAG,
+        "SD card logging: %s",
+        parsed_settings.logging.sd_enabled
+            ? "enabled"
+            : "disabled"
+    );
+
+    ESP_LOGD(
+        TAG,
+        "UI animations: %s",
+        parsed_settings.ui.animations_enabled
+            ? "enabled"
+            : "disabled"
     );
 
 cleanup:
@@ -493,6 +589,44 @@ static cJSON *settings_service_create_json(
             display,
             "brightness",
             settings->display.brightness
+        ) == NULL) {
+
+        goto error;
+    }
+
+    cJSON *logging =
+        cJSON_AddObjectToObject(
+            root,
+            "logging"
+        );
+
+    if (logging == NULL) {
+        goto error;
+    }
+
+    if (cJSON_AddBoolToObject(
+            logging,
+            "sd_enabled",
+            settings->logging.sd_enabled
+        ) == NULL) {
+
+        goto error;
+    }
+
+    cJSON *ui =
+        cJSON_AddObjectToObject(
+            root,
+            "ui"
+        );
+
+    if (ui == NULL) {
+        goto error;
+    }
+
+    if (cJSON_AddBoolToObject(
+            ui,
+            "animations_enabled",
+            settings->ui.animations_enabled
         ) == NULL) {
 
         goto error;
@@ -721,6 +855,80 @@ esp_err_t settings_service_set_brightness(
     );
 }
 
+esp_err_t settings_service_set_sd_logging_enabled(
+    bool enabled
+)
+{
+    const app_settings_t *current =
+        settings_model_get();
+
+    if (current == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    app_settings_t updated =
+        *current;
+
+    updated.logging.sd_enabled =
+        enabled;
+
+    settings_model_set(
+        &updated
+    );
+
+    const app_settings_t *applied =
+        settings_model_get();
+
+    if (applied == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (applied->logging.sd_enabled) {
+        if (sd_card_driver_is_mounted()) {
+            return logging_service_enable_file();
+        }
+
+        return ESP_OK;
+    }
+
+    return logging_service_disable_file();
+}
+
+esp_err_t settings_service_set_animations_enabled(
+    bool enabled
+)
+{
+    const app_settings_t *current =
+        settings_model_get();
+
+    if (current == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    app_settings_t updated =
+        *current;
+
+    updated.ui.animations_enabled =
+        enabled;
+
+    settings_model_set(
+        &updated
+    );
+
+    const app_settings_t *applied =
+        settings_model_get();
+
+    if (applied == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    gui_config_set_animations_enabled(
+        applied->ui.animations_enabled
+    );
+
+    return ESP_OK;
+}
+
 esp_err_t settings_service_apply(void)
 {
     const app_settings_t *settings =
@@ -743,15 +951,46 @@ esp_err_t settings_service_apply(void)
         "Failed to apply display brightness"
     );
 
-    ESP_LOGI(
-        TAG,
-        "Settings applied, brightness: %u%%",
-        settings->display.brightness
+    gui_config_set_animations_enabled(
+        settings->ui.animations_enabled
     );
 
-    /*
-     * Apply other settings here later.
-     */
+    if (!settings->logging.sd_enabled) {
+        if (logging_service_is_file_enabled()) {
+            ESP_RETURN_ON_ERROR(
+                logging_service_disable_file(),
+                TAG,
+                "Failed to disable SD logging"
+            );
+        }
+    } else if (sd_card_driver_is_mounted()) {
+        if (!logging_service_is_file_enabled()) {
+            ESP_RETURN_ON_ERROR(
+                logging_service_enable_file(),
+                TAG,
+                "Failed to enable SD logging"
+            );
+        }
+    } else {
+        ESP_LOGW(
+            TAG,
+            "SD logging is enabled in settings, "
+            "but the SD card is not mounted"
+        );
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Settings applied: brightness=%u%%, "
+        "SD logging=%s, animations=%s",
+        settings->display.brightness,
+        settings->logging.sd_enabled
+            ? "enabled"
+            : "disabled",
+        settings->ui.animations_enabled
+            ? "enabled"
+            : "disabled"
+    );
 
     return ESP_OK;
 }

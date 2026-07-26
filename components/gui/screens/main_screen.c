@@ -11,6 +11,7 @@
 #include "assets/gui_images.h"
 
 #include "screen_manager.h"
+#include "gui_config.h"
 
 #define TOOLBAR_HEIGHT          56
 #define MAIN_SCREEN_UPDATE_MS   1000
@@ -43,7 +44,7 @@ static void main_screen_settings_action(void)
 {
     screen_manager_show(
         SCREEN_ID_SETTINGS,
-        LV_SCR_LOAD_ANIM_MOVE_LEFT,
+        gui_config_are_animations_enabled() ? LV_SCR_LOAD_ANIM_MOVE_LEFT : LV_SCR_LOAD_ANIM_NONE,
         200
     );
 }
@@ -262,7 +263,7 @@ static void ota_button_action(void)
         .initial_progress = 0,
         .progress_text = "Connecting to server...",
 
-        .animate_open = true,
+        .animate_open = true && gui_config_are_animations_enabled(),
         .close_on_overlay_click = false
     };
 

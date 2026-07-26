@@ -11,6 +11,9 @@
 #define SETTINGS_DISPLAY_BRIGHTNESS_MAX      100
 #define SETTINGS_DISPLAY_BRIGHTNESS_DEFAULT  80
 
+#define SETTINGS_LOGGING_SD_ENABLED_DEFAULT  false
+#define SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT false
+
 typedef struct
 {
     char target[SETTINGS_DEVICE_TARGET_MAX_LENGTH];
@@ -27,10 +30,24 @@ typedef struct
 
 typedef struct
 {
+    bool sd_enabled;
+
+} app_logging_config_t;
+
+typedef struct
+{
+    bool animations_enabled;
+
+} app_ui_config_t;
+
+typedef struct
+{
     uint32_t schema_version;
 
     device_settings_t device;
     display_settings_t display;
+    app_logging_config_t logging;
+    app_ui_config_t ui;
     
 } app_settings_t;
 

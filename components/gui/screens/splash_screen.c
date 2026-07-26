@@ -5,6 +5,7 @@
 #include "assets/gui_images.h"
 
 #include "screen_manager.h"
+#include "gui_config.h"
 
 typedef struct
 {
@@ -29,7 +30,7 @@ static void splash_screen_timer_cb(
 
     screen_manager_show(
         SCREEN_ID_MAIN,
-        LV_SCR_LOAD_ANIM_FADE_IN,
+        gui_config_are_animations_enabled() ? LV_SCR_LOAD_ANIM_FADE_IN : LV_SCR_LOAD_ANIM_NONE,
         300
     );
 }
