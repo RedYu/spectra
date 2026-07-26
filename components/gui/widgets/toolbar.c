@@ -6,6 +6,15 @@
 #define TOOLBAR_HEIGHT       56
 #define TOOLBAR_BUTTON_SIZE  44
 
+#define TOOLBAR_COLOR_BACKGROUND       0x343B42
+#define TOOLBAR_COLOR_PRESSED          0x4B77D1
+
+#define TOOLBAR_ICON_COLOR_DEFAULT      0xFFFFFF
+#define TOOLBAR_ICON_COLOR_INACTIVE     0x7B858F
+#define TOOLBAR_ICON_COLOR_SD_MOUNTED   0x42C77A
+#define TOOLBAR_ICON_COLOR_SD_ERROR     0xE05252
+#define TOOLBAR_ICON_COLOR_OTA_READY    0x4B77D1
+
 static void toolbar_button_event_cb(
     lv_event_t *event
 )
@@ -18,118 +27,13 @@ static void toolbar_button_event_cb(
     }
 }
 
-static lv_obj_t *toolbar_status_icon_create(
-    lv_obj_t *parent,
-    const lv_image_dsc_t *image_source
-)
-{
-    if (parent == NULL || image_source == NULL) {
-        return NULL;
-    }
-
-    /*
-     * Permanent slot participating in flex layout.
-     */
-    lv_obj_t *slot =
-        lv_obj_create(parent);
-
-    lv_obj_set_size(
-        slot,
-        TOOLBAR_BUTTON_SIZE,
-        TOOLBAR_BUTTON_SIZE
-    );
-
-    lv_obj_remove_flag(
-        slot,
-        LV_OBJ_FLAG_SCROLLABLE
-    );
-
-    lv_obj_remove_flag(
-        slot,
-        LV_OBJ_FLAG_CLICKABLE
-    );
-
-    lv_obj_set_style_border_width(
-        slot,
-        0,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_radius(
-        slot,
-        10,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_pad_all(
-        slot,
-        0,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        slot,
-        lv_color_hex(0x343B42),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_opa(
-        slot,
-        LV_OPA_COVER,
-        LV_PART_MAIN
-    );
-
-    /*
-     * Image inside the permanent slot.
-     */
-    lv_obj_t *image =
-        lv_image_create(slot);
-
-    lv_image_set_src(
-        image,
-        image_source
-    );
-
-    lv_obj_center(image);
-
-    lv_obj_set_style_image_recolor(
-        image,
-        lv_color_hex(0x4B77D1),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_image_recolor_opa(
-        image,
-        LV_OPA_COVER,
-        LV_PART_MAIN
-    );
-
-    /*
-     * Store the image pointer in the slot.
-     */
-    lv_obj_set_user_data(
-        slot,
-        image
-    );
-
-    /*
-     * Hide only the image, not the flex-layout slot.
-     */
-    lv_obj_add_flag(
-        image,
-        LV_OBJ_FLAG_HIDDEN
-    );
-
-    return slot;
-}
-
 static lv_obj_t *toolbar_button_create(
     lv_obj_t *parent,
     const lv_image_dsc_t *image_source,
     toolbar_action_cb_t callback
 )
 {
-    if (image_source == NULL || callback == NULL) {
+    if (parent == NULL || image_source == NULL) {
         return NULL;
     }
 
@@ -150,14 +54,24 @@ static lv_obj_t *toolbar_button_create(
 
     lv_obj_set_style_bg_color(
         button,
-        lv_color_hex(0x343B42),
+        lv_color_hex(
+            TOOLBAR_COLOR_BACKGROUND
+        ),
         LV_PART_MAIN
     );
 
     lv_obj_set_style_bg_color(
         button,
-        lv_color_hex(0x4B77D1),
+        lv_color_hex(
+            TOOLBAR_COLOR_PRESSED
+        ),
         LV_PART_MAIN | LV_STATE_PRESSED
+    );
+
+    lv_obj_set_style_bg_opa(
+        button,
+        LV_OPA_COVER,
+        LV_PART_MAIN
     );
 
     lv_obj_set_style_shadow_width(
@@ -166,12 +80,29 @@ static lv_obj_t *toolbar_button_create(
         LV_PART_MAIN
     );
 
-    lv_obj_add_event_cb(
+    lv_obj_set_style_pad_all(
         button,
-        toolbar_button_event_cb,
-        LV_EVENT_CLICKED,
-        callback
+        0,
+        LV_PART_MAIN
     );
+
+    if (callback != NULL) {
+        lv_obj_add_event_cb(
+            button,
+            toolbar_button_event_cb,
+            LV_EVENT_CLICKED,
+            callback
+        );
+    } else {
+        /*
+         * The button remains visible but cannot be pressed
+         * when no action is assigned.
+         */
+        lv_obj_remove_flag(
+            button,
+            LV_OBJ_FLAG_CLICKABLE
+        );
+    }
 
     lv_obj_t *image =
         lv_image_create(button);
@@ -185,7 +116,9 @@ static lv_obj_t *toolbar_button_create(
 
     lv_obj_set_style_image_recolor(
         image,
-        lv_color_hex(0xFFFFFF),
+        lv_color_hex(
+            TOOLBAR_ICON_COLOR_DEFAULT
+        ),
         LV_PART_MAIN
     );
 
@@ -193,6 +126,15 @@ static lv_obj_t *toolbar_button_create(
         image,
         LV_OPA_COVER,
         LV_PART_MAIN
+    );
+
+    /*
+     * Store the image pointer inside the button so its color
+     * can be changed later.
+     */
+    lv_obj_set_user_data(
+        button,
+        image
     );
 
     return button;
@@ -428,20 +370,22 @@ toolbar_t toolbar_create(
     );
 
     if (config->show_ota_status) {
-        result.ota_icon =
-            toolbar_status_icon_create(
-                status_container,
-                &icons8_alarm_clock_32
-            );
-    }
+    result.ota_button =
+        toolbar_button_create(
+            status_container,
+            &icons8_alarm_clock_32,
+            config->ota_action
+        );
+}
 
-    if (config->show_sd_status) {
-        result.sd_icon =
-            toolbar_status_icon_create(
-                status_container,
-                &icons8_micro_sd_32
-            );
-    }
+if (config->show_sd_status) {
+    result.sd_button =
+        toolbar_button_create(
+            status_container,
+            &icons8_micro_sd_32,
+            config->sd_action
+        );
+}
     /*
      * Settings button.
      */
@@ -458,35 +402,35 @@ toolbar_t toolbar_create(
     return result;
 }
 
-static void toolbar_set_status_visible(
-    lv_obj_t *slot,
-    bool visible
+static void toolbar_set_button_icon_color(
+    lv_obj_t *button,
+    lv_color_t color
 )
 {
-    if (slot == NULL) {
+    if (button == NULL) {
         return;
     }
 
     lv_obj_t *image =
-        lv_obj_get_user_data(slot);
+        lv_obj_get_user_data(button);
 
     if (image == NULL) {
         return;
     }
 
-    if (visible) {
-        lv_obj_remove_flag(
-            image,
-            LV_OBJ_FLAG_HIDDEN
-        );
-    } else {
-        lv_obj_add_flag(
-            image,
-            LV_OBJ_FLAG_HIDDEN
-        );
-    }
+    lv_obj_set_style_image_recolor(
+        image,
+        color,
+        LV_PART_MAIN
+    );
 
-    lv_obj_invalidate(slot);
+    lv_obj_set_style_image_recolor_opa(
+        image,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_invalidate(image);
 }
 
 void toolbar_set_sd_mounted(
@@ -498,9 +442,13 @@ void toolbar_set_sd_mounted(
         return;
     }
 
-    toolbar_set_status_visible(
-        toolbar->sd_icon,
-        mounted
+    toolbar_set_button_icon_color(
+        toolbar->sd_button,
+        lv_color_hex(
+            mounted
+                ? TOOLBAR_ICON_COLOR_SD_MOUNTED
+                : TOOLBAR_ICON_COLOR_SD_ERROR
+        )
     );
 }
 
@@ -513,9 +461,13 @@ void toolbar_set_ota_available(
         return;
     }
 
-    toolbar_set_status_visible(
-        toolbar->ota_icon,
-        available
+    toolbar_set_button_icon_color(
+        toolbar->ota_button,
+        lv_color_hex(
+            available
+                ? TOOLBAR_ICON_COLOR_OTA_READY
+                : TOOLBAR_ICON_COLOR_INACTIVE
+        )
     );
 }
 

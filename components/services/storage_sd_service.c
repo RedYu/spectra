@@ -738,87 +738,18 @@ static void storage_sd_monitor_task(
 {
     (void)argument;
 
-    uint8_t failure_count = 0;
-
     ESP_LOGI(
         TAG,
         "Storage SD monitor task started"
     );
 
     while (true) {
-        if (sd_card_driver_is_mounted()) {
-            const esp_err_t result =
-                sd_card_driver_check();
-
-            if (result == ESP_OK) {
-                failure_count = 0;
-            } else {
-                failure_count++;
-
-                ESP_LOGW(
-                    TAG,
-                    "SD card status check failed %u/%u: %s",
-                    (unsigned int)failure_count,
-                    STORAGE_MAX_STATUS_FAILURES,
-                    esp_err_to_name(result)
-                );
-
-                if (failure_count >=
-                    STORAGE_MAX_STATUS_FAILURES) {
-
-                    ESP_LOGE(
-                        TAG,
-                        "SD card is no longer responding"
-                    );
-
-                    /*
-                     * First stop CAN logging and prevent any new
-                     * storage operations.
-                     */
-                    storage_sd_service_set_state(STORAGE_STATE_UNAVAILABLE);
-
-                    /*
-                     * Close files owned by the storage service.
-                     */
-                    //storage_service_close_all_files();
-
-                    /*
-                     * Remove the broken FATFS mount.
-                     */
-                    sd_card_driver_unmount();
-
-                    failure_count = 0;
-                }
-            }
-
-            vTaskDelay(
-                pdMS_TO_TICKS(
-                    STORAGE_MONITOR_INTERVAL_MS
-                )
-            );
-        } else {
-            /*
-             * Without a Card Detect contact, the only way to detect
-             * insertion is to periodically attempt mounting.
-             */
-            const esp_err_t result =
-                sd_card_driver_mount();
-
-            if (result == ESP_OK) {
-                ESP_LOGI(
-                    TAG,
-                    "SD card detected and mounted"
-                );
-
-                storage_sd_service_set_state(STORAGE_STATE_MOUNTED);
-            }
-
-            vTaskDelay(
-                pdMS_TO_TICKS(
-                    STORAGE_REMOUNT_INTERVAL_MS
-                )
-            );
-        }
+        storage_sd_service_set_state(sd_card_driver_is_mounted() ? STORAGE_STATE_MOUNTED : STORAGE_STATE_UNAVAILABLE);
+        vTaskDelay(
+            pdMS_TO_TICKS(
+                STORAGE_REMOUNT_INTERVAL_MS
+            )
+        );
     }
 }
 

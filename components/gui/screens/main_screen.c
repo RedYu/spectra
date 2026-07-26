@@ -6,6 +6,8 @@
 
 #include "system_model.h"
 #include "widgets/toolbar.h"
+#include "widgets/modal_dialog.h"
+#include "widgets/sd_card_modal.h"
 #include "assets/gui_images.h"
 
 #include "screen_manager.h"
@@ -34,6 +36,8 @@ typedef struct
 } main_screen_context_t;
 
 static main_screen_context_t s_context = {0};
+
+static modal_dialog_t s_update_dialog;
 
 static void main_screen_settings_action(void)
 {
@@ -231,6 +235,71 @@ static lv_obj_t *create_info_label(
     return label;
 }
 
+static void sd_button_action(void)
+{
+    sd_card_modal_open(
+        lv_screen_active()
+    );
+}
+
+static void ota_button_action(void)
+{
+    const modal_dialog_config_t config = {
+        .title = "Software Update",
+        .message = "Checking for available updates...",
+
+        .icon = NULL,
+
+        .primary_button_text = "Close",
+        .primary_action = NULL,
+        .close_on_primary_action = true,
+
+        .secondary_button_text = NULL,
+        .secondary_action = NULL,
+        .close_on_secondary_action = false,
+
+        .show_progress_bar = true,
+        .initial_progress = 0,
+        .progress_text = "Connecting to server...",
+
+        .animate_open = true,
+        .close_on_overlay_click = false
+    };
+
+    modal_dialog_create(
+        &s_update_dialog,
+        lv_screen_active(),
+        &config
+    );
+
+    modal_dialog_set_progress_text(
+        &s_update_dialog,
+        "Downloading update..."
+    );
+
+    modal_dialog_set_progress(
+        &s_update_dialog,
+        45,
+        true
+    );
+
+    modal_dialog_set_title(
+        &s_update_dialog,
+        "Update Ready"
+    );
+
+    modal_dialog_set_message(
+        &s_update_dialog,
+        "The update was downloaded successfully."
+    );
+
+    modal_dialog_set_progress(
+        &s_update_dialog,
+        100,
+        true
+    );
+}
+
 lv_obj_t *main_screen_create(void)
 {
     system_model_t model;
@@ -281,7 +350,10 @@ lv_obj_t *main_screen_create(void)
         .right_action = main_screen_settings_action,
 
         .show_sd_status = true,
+        .sd_action = sd_button_action,
+
         .show_ota_status = true,
+        .ota_action = ota_button_action
     };
 
     s_context.toolbar =

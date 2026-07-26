@@ -17,15 +17,18 @@ typedef struct
     toolbar_action_cb_t right_action;
 
     bool show_sd_status;
+    toolbar_action_cb_t sd_action;
+
     bool show_ota_status;
+    toolbar_action_cb_t ota_action;
 
 } toolbar_config_t;
 
 typedef struct
 {
     lv_obj_t *root;
-    lv_obj_t *sd_icon;
-    lv_obj_t *ota_icon;
+    lv_obj_t *sd_button;
+    lv_obj_t *ota_button;
 
 } toolbar_t;
 

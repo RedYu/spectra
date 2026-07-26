@@ -7,6 +7,8 @@ idf_component_register(
         "screens/settings_screen.c"
 
         "widgets/toolbar.c"
+        "widgets/modal_dialog.c"
+        "widgets/sd_card_modal.c"
 
         "assets/dev_logo.c"
         "assets/icons8_alarm_clock_32.c"
@@ -23,5 +25,6 @@ idf_component_register(
     PRIV_REQUIRES
         models
         services
+        drivers
 )
 

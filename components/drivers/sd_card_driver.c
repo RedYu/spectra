@@ -89,8 +89,6 @@ esp_err_t sd_card_driver_mount(void)
             &s_card
         );
 
-    board_spi_unlock();
-
     if (result == ESP_OK) {
         s_mounted = true;
 
@@ -114,6 +112,8 @@ esp_err_t sd_card_driver_mount(void)
             esp_err_to_name(result)
         );
     }
+
+    board_spi_unlock();
 
     xSemaphoreGive(s_mutex);
 
@@ -211,4 +211,66 @@ esp_err_t sd_card_driver_unmount(void)
 bool sd_card_driver_is_mounted(void)
 {
     return s_mounted;
+}
+
+bool sd_card_get_info_text(
+    char *buffer,
+    size_t buffer_size
+)
+{
+    if (s_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(
+            s_mutex,
+            pdMS_TO_TICKS(1000)
+        ) != pdTRUE) {
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (!s_mounted) {
+        xSemaphoreGive(s_mutex);
+        return ESP_OK;
+    }
+
+    if (s_card == NULL ||
+        buffer == NULL ||
+        buffer_size == 0) {
+
+        xSemaphoreGive(s_mutex);
+        return false;
+    }
+
+    memset(
+        buffer,
+        0,
+        buffer_size
+    );
+
+    FILE *stream =
+        fmemopen(
+            buffer,
+            buffer_size - 1,
+            "w"
+        );
+
+    if (stream == NULL) {
+        return false;
+    }
+
+    sdmmc_card_print_info(
+        stream,
+        s_card
+    );
+
+    fflush(stream);
+    fclose(stream);
+
+    buffer[buffer_size - 1] = '\0';
+
+    xSemaphoreGive(s_mutex);
+
+    return true;
 }
