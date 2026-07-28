@@ -23,5 +23,6 @@ idf_component_register(
         esp_driver_i2c
         esp_timer
         esp_lcd_ili9488
+        app
 
 )

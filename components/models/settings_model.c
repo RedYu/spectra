@@ -1,6 +1,7 @@
 #include "settings_model.h"
 
 #include <string.h>
+
 #include "app_config.h"
 
 #define SETTINGS_SCHEMA_VERSION  1
@@ -19,13 +20,13 @@ void settings_model_set_defaults(app_settings_t *settings)
 
     strlcpy(
         settings->device.target,
-        APP_TARGET,
+        SPECTRA_APP_TARGET,
         sizeof(settings->device.target)
     );
 
     strlcpy(
         settings->device.name,
-        APP_NAME,
+        SPECTRA_APP_NAME,
         sizeof(settings->device.name)
     );
 

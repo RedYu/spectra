@@ -1,17 +1,18 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
 
 #define BOARD_HARDWARE_VERSION "Rev A"
 
-#define LCD_H_RES              480
-#define LCD_V_RES              320
+#define LCD_H_RES              (480U)
+#define LCD_V_RES              (320U)
 
 #define LCD_SD_SPI_HOST        SPI2_HOST
-#define LCD_SD_SPI_CLOCK_HZ    (40 * 1000)
-#define LCD_SPI_CLOCK_HZ       (LCD_SD_SPI_CLOCK_HZ * 1000)
+#define LCD_SPI_CLOCK_HZ       (40 * 1000 * 1000)
 #define LCD_PIN_MOSI           GPIO_NUM_15
 #define LCD_PIN_MISO           GPIO_NUM_16
 #define LCD_PIN_SCLK           GPIO_NUM_17
@@ -22,6 +23,7 @@
 #define LCD_PIN_BUSY           GPIO_NUM_NC
 
 #define SD_PIN_CS              GPIO_NUM_9
+#define SD_SPI_CLOCK_KHZ       (20 * 1000)
 
 #define TOUCH_I2C_PORT         I2C_NUM_0
 #define TOUCH_I2C_FREQ_HZ      (400 * 1000)
@@ -29,22 +31,6 @@
 #define TOUCH_PIN_SCL          GPIO_NUM_2
 #define TOUCH_PIN_INT          GPIO_NUM_13
 #define TOUCH_PIN_RST          GPIO_NUM_NC
-
-#define LCD_DRAW_BUFFER_LINES       40
-#define LV_BUFFER_SIZE (LCD_H_RES * LCD_DRAW_BUFFER_LINES)
-
-
-/*
- * LVGL renders the screen in partial updates.
- *
- * 40 lines:
- * 480 × 40 × 2 = 38,400 bytes per RGB565 draw buffer.
- */
-#define LVGL_DRAW_BUFFER_LINES 40
-
-#define LVGL_TICK_PERIOD_MS    2
-#define LVGL_HANDLER_MIN_MS    2
-#define LVGL_HANDLER_MAX_MS    20
 
 #define LCD_SWAP_XY   true
 #define LCD_MIRROR_X  true

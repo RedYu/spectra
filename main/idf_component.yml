@@ -16,6 +16,6 @@ dependencies:
   #   public: true
   lvgl/lvgl: ^9
   espressif/esp_lcd_touch_gt911: '*'
-  atanisoft/esp_lcd_ili9488: '*'
+  atanisoft/esp_lcd_ili9488: '1.1.1'
   espressif/esp_lcd_touch: ^1.2.1
   espressif/cjson: '*'

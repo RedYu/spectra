@@ -1,7 +1,5 @@
 #include "system_service.h"
 
-#include "app_config.h"
-
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -14,14 +12,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "app_config.h"
 #include "board_config.h"
 #include "system_model.h"
-
-static const char *TAG = "system_service";
 
 #define SYSTEM_TASK_STACK_SIZE      3072
 #define SYSTEM_TASK_PRIORITY        2
 #define SYSTEM_UPDATE_INTERVAL_MS   1000
+
+static const char *TAG = "system_service";
 
 static TaskHandle_t s_task_handle;
 
@@ -249,13 +248,13 @@ esp_err_t system_service_start(void)
 
     strlcpy(
         model.device_id,
-        APP_TARGET,
+        SPECTRA_APP_TARGET,
         sizeof(model.device_id)
     );
 
     strlcpy(
         model.device_name,
-        APP_NAME,
+        SPECTRA_APP_NAME,
         sizeof(model.device_name)
     );
 

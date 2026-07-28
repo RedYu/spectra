@@ -1,8 +1,5 @@
 #include "sd_card_driver.h"
 
-#include "board_config.h"
-#include "board.h"
-
 #include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
@@ -11,6 +8,9 @@
 #include "freertos/semphr.h"
 
 #include "esp_log.h"
+
+#include "board_config.h"
+#include "board.h"
 
 static const char *TAG = "sd_card_driver";
 
@@ -58,7 +58,7 @@ esp_err_t sd_card_driver_mount(void)
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
 
     host.slot = board_spi_get_host();
-    host.max_freq_khz = LCD_SD_SPI_CLOCK_HZ;
+    host.max_freq_khz = SD_SPI_CLOCK_KHZ;
 
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
 

@@ -1,9 +1,7 @@
 #include "display_driver.h"
-#include "board_config.h"
 
 #include <stdbool.h>
 
-#include "board.h"
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -15,6 +13,10 @@
 #include "esp_log.h"
 
 #include "esp_lcd_ili9488.h"
+
+#include "app_config.h"
+#include "board.h"
+#include "board_config.h"
 
 static const char *TAG = "display_driver";
 
@@ -35,22 +37,26 @@ static esp_err_t display_panel_io_init(void)
         .trans_queue_depth = 1,
 
         /*
-        * The ILI9488 uses 8-bit commands
-        * and 8-bit command parameters.
-        */
+         * The ILI9488 uses 8-bit commands
+         * and 8-bit command parameters.
+         */
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
 
         /*
-        * The flush completion callback
-        * will be registered here later.
-        */
+         * The flush completion callback
+         * will be registered here later.
+         */
         .on_color_trans_done = NULL,
         .user_ctx = NULL,
     };
 
     ESP_RETURN_ON_ERROR(
-        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)board_spi_get_host(), &io_config, &s_panel_io),
+        esp_lcd_new_panel_io_spi(
+            (esp_lcd_spi_bus_handle_t)board_spi_get_host(),
+            &io_config,
+            &s_panel_io
+        ),
         TAG,
         "Failed to create LCD panel IO"
     );
@@ -60,6 +66,20 @@ static esp_err_t display_panel_io_init(void)
     return ESP_OK;
 }
 
+static void display_driver_cleanup(void)
+{
+    if (s_panel != NULL) {
+        (void)esp_lcd_panel_del(s_panel);
+        s_panel = NULL;
+    }
+
+    if (s_panel_io != NULL) {
+        (void)esp_lcd_panel_io_del(s_panel_io);
+        s_panel_io = NULL;
+    }
+
+    s_display_initialized = false;
+}
 
 static esp_err_t display_panel_init(void)
 {
@@ -72,7 +92,12 @@ static esp_err_t display_panel_init(void)
     };
 
     ESP_RETURN_ON_ERROR(
-        esp_lcd_new_panel_ili9488(s_panel_io, &panel_config, LV_BUFFER_SIZE, &s_panel),
+        esp_lcd_new_panel_ili9488(
+            s_panel_io,
+            &panel_config,
+            LVGL_DRAW_BUFFER_PIXELS,
+            &s_panel
+        ),
         TAG,
         "Failed to create ILI9488 panel"
     );
@@ -133,11 +158,15 @@ static esp_err_t display_panel_init(void)
 esp_err_t display_driver_init(void)
 {
     if (s_display_initialized) {
-        ESP_LOGW(TAG, "Display is already initialized");
+        ESP_LOGW(
+            TAG,
+            "Display is already initialized"
+        );
+
         return ESP_OK;
     }
 
-     if (!board_spi_is_initialized()) {
+    if (!board_spi_is_initialized()) {
         ESP_LOGE(
             TAG,
             "Shared SPI bus is not initialized"
@@ -146,19 +175,41 @@ esp_err_t display_driver_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_RETURN_ON_ERROR(
-        display_panel_io_init(),
-        TAG,
-        "Panel IO initialization failed"
-    );
+    if (!board_spi_lock(portMAX_DELAY)) {
+        ESP_LOGE(
+            TAG,
+            "Failed to lock shared SPI bus"
+        );
 
-    ESP_RETURN_ON_ERROR(
-        display_panel_init(),
-        TAG,
-        "ILI9488 initialization failed"
-    );
+        return ESP_ERR_TIMEOUT;
+    }
+
+    esp_err_t result = display_panel_io_init();
+
+    if (result == ESP_OK) {
+        result = display_panel_init();
+    }
+
+    board_spi_unlock();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Display initialization failed: %s",
+            esp_err_to_name(result)
+        );
+
+        display_driver_cleanup();
+
+        return result;
+    }
 
     s_display_initialized = true;
+
+    ESP_LOGI(
+        TAG,
+        "Display driver initialized"
+    );
 
     return ESP_OK;
 }

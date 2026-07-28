@@ -12,4 +12,5 @@ idf_component_register(
         drivers
         esp_timer
         freertos
+        app
 )
