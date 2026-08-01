@@ -127,14 +127,14 @@ esp_err_t tinyusb_net_init(const tinyusb_net_config_t *cfg)
     s_net_obj.init_cb = cfg->on_init_callback;
     s_net_obj.tx_buff_free_cb = cfg->free_tx_buffer;
     s_net_obj.ctx = cfg->user_context;
-
+#if CONFIG_TINYUSB_NET_MODE_NCM
     const uint8_t *mac = &cfg->mac_addr[0];
     snprintf(s_net_obj.mac_str, sizeof(s_net_obj.mac_str), "%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     uint8_t mac_id = tusb_get_mac_string_id();
     // Pass it to Descriptor control module
     tinyusb_descriptors_set_string(s_net_obj.mac_str, mac_id);
-
+#endif
     s_net_obj.initialized = true;
 
     return ESP_OK;
