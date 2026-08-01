@@ -1,42 +1,63 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include "esp_err.h"
+#include "esp_log.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "esp_heap_caps.h"
-#include "esp_check.h"
-#include "esp_log.h"
-
 #include "board.h"
-#include "board_config.h"
 #include "display_driver.h"
 #include "touch_driver.h"
-#include "lvgl_port.h"
-
 #include "system_model.h"
-
-#include "app_config.h"
 #include "system_service.h"
 #include "storage_service.h"
 #include "storage_sd_service.h"
 #include "settings_service.h"
 #include "gui_service.h"
-
 #include "logging_service.h"
+
+#define STARTUP_TASK_STACK_SIZE  (6144U)
+#define STARTUP_TASK_PRIORITY    (5U)
 
 static const char *TAG = "app_main";
 
-static esp_err_t start_service(const char *name, esp_err_t (*start)(void))
+static esp_err_t start_service(
+    const char *name,
+    esp_err_t (*start)(void)
+)
 {
-    ESP_LOGI(TAG, "starting %s service...", name);
+    if ((name == NULL) ||
+        (start == NULL)) {
 
-    esp_err_t err = start();
-    ESP_ERROR_CHECK(err);
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    ESP_LOGI(TAG, "%s started with code %d", name, err);
+    ESP_LOGI(
+        TAG,
+        "Starting %s service",
+        name
+    );
 
-    return err;
+    const esp_err_t result =
+        start();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to start %s service: %s",
+            name,
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "%s service started",
+        name
+    );
+
+    return ESP_OK;
 }
 
 static void startup_task(
@@ -45,78 +66,33 @@ static void startup_task(
 {
     (void)argument;
 
-    esp_err_t result;
-
-    gui_service_init();
-
-    gui_service_set_boot_progress(
-        5,
-        "Starting system"
-    );
-
-    /*
-     * Mount the storage.
-     */
-    result = storage_service_init();
+    esp_err_t result =
+        storage_service_init();
 
     if (result != ESP_OK) {
         ESP_LOGE(
             TAG,
-            "[%s] Internal storage is unavailable, continuing with defaults",
+            "Internal storage initialization failed: %s",
             esp_err_to_name(result)
-        );
-
-        gui_service_set_boot_progress(
-            5,
-            "Storage initialization failed"
         );
 
         vTaskDelete(NULL);
         return;
     }
 
-    start_service("System", system_service_start);
-
-    gui_service_set_boot_progress(
-        30,
-        "Storage ready"
+    result = start_service(
+        "System",
+        system_service_start
     );
-
-    /*
-     * Load the configuration.
-     */
-    result = settings_service_init();
 
     if (result != ESP_OK) {
-        ESP_LOGW(
-            TAG,
-            "[%s] Configuration loading failed, defaults are active",
-            esp_err_to_name(result)
-        );
-
-        gui_service_set_boot_progress(
-            30,
-            "Configuration error"
-        );
-
         vTaskDelete(NULL);
         return;
     }
 
-    gui_service_set_boot_progress(
-        50,
-        "Configuration loaded"
-    );
-
-    start_service("Storage SD card", storage_sd_service_start);
-
-    gui_service_set_boot_progress(
-        65,
-        "SD card interface ready"
-    );
-
     /*
-     * Initialize display driver.
+     * Display and touch must be ready before the GUI task initializes
+     * the LVGL port.
      */
     result = display_driver_init();
 
@@ -127,23 +103,10 @@ static void startup_task(
             esp_err_to_name(result)
         );
 
-        gui_service_set_boot_progress(
-            75,
-            "Display initialization failed"
-        );
-
         vTaskDelete(NULL);
         return;
     }
 
-    gui_service_set_boot_progress(
-        75,
-        "Display interface ready"
-    );
-
-    /*
-     * Initialize touch driver.
-     */
     result = touch_driver_init();
 
     if (result != ESP_OK) {
@@ -153,49 +116,130 @@ static void startup_task(
             esp_err_to_name(result)
         );
 
-        gui_service_set_boot_progress(
-            80,
-            "Touch initialization failed"
-        );
-
         vTaskDelete(NULL);
         return;
     }
 
-    gui_service_set_boot_progress(
-        80,
-        "Touch interface ready"
-    );
-
-    /*
-     * Initialize lvgl port.
-     */
-    result = lvgl_port_init();
+    result = gui_service_init();
 
     if (result != ESP_OK) {
         ESP_LOGE(
             TAG,
-            "LVGL port initialization failed: %s",
+            "Failed to initialize GUI service: %s",
             esp_err_to_name(result)
-        );
-
-        gui_service_set_boot_progress(
-            85,
-            "LVGL port initialization failed"
         );
 
         vTaskDelete(NULL);
         return;
     }
 
-    start_service("GUI", gui_service_start);
+    result = gui_service_set_boot_progress(
+        10U,
+        "Starting application"
+    );
 
-    gui_service_set_boot_progress(
-            100,
-            "Good :)"
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to set boot progress: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    result = start_service(
+        "GUI",
+        gui_service_start
+    );
+
+    if (result != ESP_OK) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    (void)gui_service_set_boot_progress(
+        30U,
+        "Storage ready"
+    );
+
+    /*
+     * Load the configuration after the GUI has started so loading
+     * progress can be displayed on the splash screen.
+     */
+    result = settings_service_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Configuration initialization failed: %s",
+            esp_err_to_name(result)
         );
 
-    vTaskDelay(pdMS_TO_TICKS(100));
+        (void)gui_service_set_boot_progress(
+            50U,
+            "Configuration error"
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    (void)gui_service_set_boot_progress(
+        60U,
+        "Configuration loaded"
+    );
+
+    result = start_service(
+        "Storage SD card",
+        storage_sd_service_start
+    );
+
+    if (result != ESP_OK) {
+        /*
+         * Decide whether an SD-service initialization error is fatal.
+         * Absence of a card should already be handled as ESP_OK by the
+         * SD storage service.
+         */
+        (void)gui_service_set_boot_progress(
+            80U,
+            "SD card initialization failed"
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    (void)gui_service_set_boot_progress(
+        85U,
+        "SD card interface ready"
+    );
+
+    result = settings_service_apply();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply settings: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)gui_service_set_boot_progress(
+            90U,
+            "Settings application failed"
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    (void)gui_service_set_boot_progress(
+        100U,
+        "Ready"
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Application startup completed"
+    );
 
     vTaskDelete(NULL);
 }
@@ -221,9 +265,9 @@ void app_main(void)
         xTaskCreate(
             startup_task,
             "startup_task",
-            6144,
+            STARTUP_TASK_STACK_SIZE,
             NULL,
-            5,
+            STARTUP_TASK_PRIORITY,
             NULL
         );
 
@@ -232,7 +276,12 @@ void app_main(void)
             TAG,
             "Failed to create startup task"
         );
+
+        return;
     }
 
-    ESP_LOGI(TAG, "Application started");
+    ESP_LOGI(
+        TAG,
+        "Startup task created"
+    );
 }

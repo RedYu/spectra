@@ -4,17 +4,20 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_log.h"
+
 #include "system_model.h"
 #include "widgets/toolbar.h"
 #include "widgets/modal_dialog.h"
 #include "widgets/sd_card_modal.h"
 #include "assets/gui_images.h"
 
-#include "screen_manager.h"
 #include "gui_config.h"
+#include "board_config.h"
+#include "screen_manager.h"
 
-#define TOOLBAR_HEIGHT          56
-#define MAIN_SCREEN_UPDATE_MS   1000
+#define TOOLBAR_HEIGHT          (56U)
+#define MAIN_SCREEN_UPDATE_MS   (1000U)
 
 typedef struct
 {
@@ -36,17 +39,35 @@ typedef struct
 
 } main_screen_context_t;
 
+static const char *TAG = "main_screen";
+
 static main_screen_context_t s_context = {0};
 
-static modal_dialog_t s_update_dialog;
+static modal_dialog_t s_update_dialog = {0};
 
 static void main_screen_settings_action(void)
 {
-    screen_manager_show(
-        SCREEN_ID_SETTINGS,
-        gui_config_are_animations_enabled() ? LV_SCR_LOAD_ANIM_MOVE_LEFT : LV_SCR_LOAD_ANIM_NONE,
-        200
-    );
+    const bool animations_enabled =
+        gui_config_get_animations_enabled();
+
+    const esp_err_t result =
+        screen_manager_show(
+            SCREEN_ID_SETTINGS,
+            animations_enabled
+                ? LV_SCR_LOAD_ANIM_MOVE_LEFT
+                : LV_SCR_LOAD_ANIM_NONE,
+            animations_enabled
+                ? 200U
+                : 0U
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to show settings screen: %s",
+            esp_err_to_name(result)
+        );
+    }
 }
 
 static void format_uptime(
@@ -56,18 +77,18 @@ static void format_uptime(
 )
 {
     uint32_t days =
-        uptime_sec / 86400;
+        uptime_sec / 86400U;
 
     uint32_t hours =
-        (uptime_sec % 86400) / 3600;
+        (uptime_sec % 86400U) / 3600U;
 
     uint32_t minutes =
-        (uptime_sec % 3600) / 60;
+        (uptime_sec % 3600U) / 60U;
 
     uint32_t seconds =
-        uptime_sec % 60;
+        uptime_sec % 60U;
 
-    if (days > 0) {
+    if (days > 0U) {
         snprintf(
             buffer,
             buffer_size,
@@ -100,7 +121,7 @@ static void main_screen_update(void)
     if (system_model_get_snapshot(&model) != ESP_OK) {
         return;
     }
-    
+
     toolbar_set_sd_mounted(
         &s_context.toolbar,
         model.sd_card_mounted
@@ -136,7 +157,7 @@ static void main_screen_update(void)
         buffer,
         sizeof(buffer),
         "Free heap: %" PRIu32 " KB",
-        model.free_heap / 1024
+        model.free_heap / 1024U
     );
 
     lv_label_set_text(
@@ -148,7 +169,7 @@ static void main_screen_update(void)
         buffer,
         sizeof(buffer),
         "Minimum heap: %" PRIu32 " KB",
-        model.minimum_free_heap / 1024
+        model.minimum_free_heap / 1024U
     );
 
     lv_label_set_text(
@@ -206,6 +227,9 @@ static void main_screen_delete_event_cb(
     s_context.cpu_label = NULL;
 
     s_context.toolbar = (toolbar_t){0};
+
+    s_update_dialog =
+        (modal_dialog_t){0};
 }
 
 static lv_obj_t *create_info_label(
@@ -238,9 +262,15 @@ static lv_obj_t *create_info_label(
 
 static void sd_button_action(void)
 {
-    sd_card_modal_open(
-        lv_screen_active()
-    );
+    if (!sd_card_modal_open(
+            lv_screen_active()
+        )) {
+
+        ESP_LOGW(
+            TAG,
+            "Failed to open SD-card dialog"
+        );
+    }
 }
 
 static void ota_button_action(void)
@@ -260,18 +290,27 @@ static void ota_button_action(void)
         .close_on_secondary_action = false,
 
         .show_progress_bar = true,
-        .initial_progress = 0,
+        .initial_progress = 0U,
         .progress_text = "Connecting to server...",
 
-        .animate_open = true && gui_config_are_animations_enabled(),
-        .close_on_overlay_click = false
+        .animate_open =
+            gui_config_get_animations_enabled(),
+        .close_on_overlay_click = false,
     };
 
-    modal_dialog_create(
-        &s_update_dialog,
-        lv_screen_active(),
-        &config
-    );
+    if (!modal_dialog_create(
+            &s_update_dialog,
+            lv_screen_active(),
+            &config
+        )) {
+
+        ESP_LOGW(
+            TAG,
+            "Failed to create software update dialog"
+        );
+
+        return;
+    }
 
     modal_dialog_set_progress_text(
         &s_update_dialog,
@@ -280,7 +319,7 @@ static void ota_button_action(void)
 
     modal_dialog_set_progress(
         &s_update_dialog,
-        45,
+        45U,
         true
     );
 
@@ -296,7 +335,7 @@ static void ota_button_action(void)
 
     modal_dialog_set_progress(
         &s_update_dialog,
-        100,
+        100U,
         true
     );
 }
@@ -311,6 +350,15 @@ lv_obj_t *main_screen_create(void)
 
     lv_obj_t *screen =
         lv_obj_create(NULL);
+
+    if (screen == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create main screen"
+        );
+
+        return NULL;
+    }
 
     s_context.root = screen;
 
@@ -363,16 +411,42 @@ lv_obj_t *main_screen_create(void)
             &toolbar_config
         );
 
+    if (s_context.toolbar.root == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create main-screen toolbar"
+        );
+
+        lv_obj_delete(
+            screen
+        );
+
+        return NULL;
+    }
+
     /*
      * Main scrollable content container.
      */
     lv_obj_t *content =
         lv_obj_create(screen);
 
+    if (content == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create main-screen content"
+        );
+
+        lv_obj_delete(
+            screen
+        );
+
+        return NULL;
+    }
+
     lv_obj_set_size(
         content,
         LV_PCT(100),
-        320 - TOOLBAR_HEIGHT
+        LCD_V_RES - TOOLBAR_HEIGHT
     );
 
     lv_obj_align(
@@ -551,6 +625,13 @@ lv_obj_t *main_screen_create(void)
             NULL
         );
 
+    if (s_context.update_timer == NULL) {
+        ESP_LOGW(
+            TAG,
+            "Failed to create main-screen update timer"
+        );
+    }
+
     lv_obj_update_layout(
         s_context.toolbar.root
     );
@@ -562,12 +643,15 @@ lv_obj_t *main_screen_create(void)
     return screen;
 }
 
-
 void main_screen_on_show(
     lv_obj_t *screen
 )
 {
-    (void)screen;
+    if ((screen == NULL) ||
+        (screen != s_context.root)) {
+
+        return;
+    }
 
     main_screen_update();
 
@@ -575,9 +659,16 @@ void main_screen_on_show(
         s_context.update_timer =
             lv_timer_create(
                 main_screen_update_timer_cb,
-                1000,
+                MAIN_SCREEN_UPDATE_MS,
                 NULL
             );
+
+        if (s_context.update_timer == NULL) {
+            ESP_LOGW(
+                TAG,
+                "Failed to create main-screen update timer"
+            );
+        }
     }
 }
 
@@ -585,15 +676,18 @@ void main_screen_on_hide(
     lv_obj_t *screen
 )
 {
-    (void)screen;
+    if ((screen == NULL) ||
+        (screen != s_context.root)) {
+
+        return;
+    }
 
     if (s_context.update_timer != NULL) {
         lv_timer_delete(
             s_context.update_timer
         );
 
-        s_context.update_timer =
-            NULL;
+        s_context.update_timer = NULL;
     }
 }
 
@@ -601,6 +695,12 @@ void main_screen_destroy(
     lv_obj_t *screen
 )
 {
+    if ((screen == NULL) ||
+        (screen != s_context.root)) {
+
+        return;
+    }
+
     main_screen_on_hide(
         screen
     );
@@ -609,6 +709,10 @@ void main_screen_destroy(
         screen
     );
 
+    /*
+     * The LV_EVENT_DELETE callback performs the main cleanup. This
+     * additional reset keeps the context deterministic.
+     */
     memset(
         &s_context,
         0,

@@ -16,6 +16,8 @@
 #include "display_driver.h"
 #include "touch_driver.h"
 
+#define LVGL_SPI_LOCK_TIMEOUT_MS  (5000U)
+
 static const char *TAG = "lvgl_port";
 
 static lv_display_t *s_display = NULL;
@@ -77,7 +79,7 @@ static void lvgl_display_flush_cb(
 )
 {
     if (!board_spi_lock(
-            pdMS_TO_TICKS(1000U)
+            pdMS_TO_TICKS(LVGL_SPI_LOCK_TIMEOUT_MS)
         )) {
 
         ESP_LOGE(

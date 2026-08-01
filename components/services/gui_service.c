@@ -1,6 +1,7 @@
 #include "gui_service.h"
 
 #include <string.h>
+#include <stdatomic.h>
 
 #include "screens/splash_screen.h"
 #include "screens/main_screen.h"
@@ -8,22 +9,21 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 
 #include "esp_check.h"
 #include "esp_err.h"
 #include "esp_log.h"
 
 #include "lvgl.h"
+#include "lvgl_port.h"
 #include "screen_manager.h"
 #include "gui_config.h"
 
-static const char *TAG = "gui_service";
-
-#define GUI_TASK_STACK_SIZE 8192
-#define GUI_TASK_PRIORITY   5
-
-#define GUI_BOOT_STATUS_LENGTH 48
-#define GUI_BOOT_QUEUE_LENGTH  8
+#define GUI_TASK_STACK_SIZE       (8192U)
+#define GUI_TASK_PRIORITY         (5U)
+#define GUI_BOOT_STATUS_LENGTH    (48U)
+#define GUI_BOOT_QUEUE_LENGTH     (1U)
 
 typedef struct
 {
@@ -32,40 +32,61 @@ typedef struct
 
 } gui_boot_message_t;
 
+static const char *TAG = "gui_service";
+
 static QueueHandle_t s_boot_queue = NULL;
 static bool s_main_screen_opened = false;
 
-static void gui_service_process_boot_progress(void)
+static bool s_initialized = false;
+static atomic_bool s_started =
+    ATOMIC_VAR_INIT(false);
+
+/*
+ * TODO:
+ * Add complete LVGL and screen-manager cleanup together with startup
+ * result synchronization before supporting GUI service restart.
+ */
+
+static void gui_service_process_boot_progress(void);
+
+esp_err_t gui_service_set_boot_progress(
+    uint8_t progress,
+    const char *status
+)
 {
-    if (s_boot_queue == NULL) {
-        return;
+    if (status == NULL) {
+        return ESP_ERR_INVALID_ARG;
     }
 
-    gui_boot_message_t message;
+    if (!s_initialized ||
+        s_boot_queue == NULL) {
 
-    while (xQueueReceive(
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    gui_boot_message_t message = {
+        .progress =
+            (progress <= 100U)
+                ? progress
+                : 100U,
+        .status = {0},
+    };
+
+    strlcpy(
+        message.status,
+        status,
+        sizeof(message.status)
+    );
+
+    if (xQueueOverwrite(
             s_boot_queue,
-            &message,
-            0
-        ) == pdTRUE) {
+            &message
+        ) != pdTRUE) {
 
-        splash_screen_set_progress(
-            message.progress,
-            message.status
-        );
-
-        if (message.progress >= 100 &&
-            !s_main_screen_opened) {
-
-            s_main_screen_opened = true;
-
-            screen_manager_show(
-                SCREEN_ID_MAIN,
-                gui_config_are_animations_enabled() ? LV_SCR_LOAD_ANIM_FADE_IN : LV_SCR_LOAD_ANIM_NONE,
-                gui_config_are_animations_enabled() ? 300 : 0
-            );
-        }
+        return ESP_FAIL;
     }
+
+    return ESP_OK;
 }
 
 static esp_err_t gui_register_screens(void)
@@ -145,7 +166,7 @@ static esp_err_t gui_initialize_screens(void)
         screen_manager_show(
             SCREEN_ID_SPLASH,
             LV_SCR_LOAD_ANIM_NONE,
-            0
+            0U
         ),
         TAG,
         "Failed to show splash screen"
@@ -154,13 +175,18 @@ static esp_err_t gui_initialize_screens(void)
     return ESP_OK;
 }
 
-esp_err_t gui_service_init(void) 
+esp_err_t gui_service_init(void)
 {
-    s_boot_queue =
-        xQueueCreate(
-            GUI_BOOT_QUEUE_LENGTH,
-            sizeof(gui_boot_message_t)
-        );
+    if (s_initialized ||
+        s_boot_queue != NULL) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_boot_queue = xQueueCreate(
+        GUI_BOOT_QUEUE_LENGTH,
+        sizeof(gui_boot_message_t)
+    );
 
     if (s_boot_queue == NULL) {
         ESP_LOGE(
@@ -171,46 +197,91 @@ esp_err_t gui_service_init(void)
         return ESP_ERR_NO_MEM;
     }
 
+    s_main_screen_opened = false;
+    s_initialized = true;
+
     return ESP_OK;
 }
 
-static void gui_task(void *argument)
+static void gui_task(
+    void *argument
+)
 {
     (void)argument;
 
-    
+    esp_err_t result =
+        lvgl_port_init();
 
-    /*
-     * Initialize display, input and LVGL here.
-     */
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize LVGL port: %s",
+            esp_err_to_name(result)
+        );
 
-    ESP_ERROR_CHECK(
-        gui_initialize_screens()
-    );
+        atomic_store(&s_started, false);
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    result =
+        gui_initialize_screens();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize GUI screens: %s",
+            esp_err_to_name(result)
+        );
+
+        /*
+         * Keep the service in the started state because LVGL and the
+         * screen manager may be partially initialized. Restart requires
+         * complete cleanup support.
+         */
+        vTaskDelete(NULL);
+        return;
+    }
 
     while (true) {
         gui_service_process_boot_progress();
 
         uint32_t delay_ms =
-            lv_timer_handler();
+            lvgl_port_handler();
 
-        if (delay_ms < 5) {
-            delay_ms = 5;
-        }
-
-        if (delay_ms > 20) {
-            delay_ms = 20;
+        if (delay_ms < 5U) {
+            delay_ms = 5U;
+        } else if (delay_ms > 20U) {
+            delay_ms = 20U;
         }
 
         vTaskDelay(
-            pdMS_TO_TICKS(delay_ms)
+            pdMS_TO_TICKS(
+                delay_ms
+            )
         );
     }
 }
 
 esp_err_t gui_service_start(void)
 {
-    BaseType_t result =
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool expected = false;
+
+    if (!atomic_compare_exchange_strong(
+            &s_started,
+            &expected,
+            true
+        )) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const BaseType_t task_result =
         xTaskCreatePinnedToCore(
             gui_task,
             "gui_task",
@@ -221,7 +292,12 @@ esp_err_t gui_service_start(void)
             1
         );
 
-    if (result != pdPASS) {
+    if (task_result != pdPASS) {
+        atomic_store(
+            &s_started,
+            false
+        );
+
         ESP_LOGE(
             TAG,
             "Failed to create GUI task"
@@ -230,52 +306,71 @@ esp_err_t gui_service_start(void)
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "GUI service started");
+    ESP_LOGI(
+        TAG,
+        "GUI task created"
+    );
 
     return ESP_OK;
 }
 
-void gui_service_set_boot_progress(
-    uint8_t progress,
-    const char *status
-)
+static void gui_service_process_boot_progress(void)
 {
     if (s_boot_queue == NULL) {
         return;
     }
 
-    gui_boot_message_t message = {
-        .progress = progress,
-    };
+    gui_boot_message_t message;
 
-    strlcpy(
-        message.status,
-        status != NULL ? status : "",
-        sizeof(message.status)
-    );
-
-    if (xQueueSend(
+    if (xQueueReceive(
             s_boot_queue,
             &message,
-            0
+            0U
         ) != pdTRUE) {
 
-        /*
-         * If the queue is full, remove the oldest message
-         * and preserve the newest progress value.
-         */
-        gui_boot_message_t discarded;
-
-        xQueueReceive(
-            s_boot_queue,
-            &discarded,
-            0
-        );
-
-        xQueueSend(
-            s_boot_queue,
-            &message,
-            0
-        );
+        return;
     }
+
+    /*
+     * The splash screen may already have been destroyed by the screen
+     * manager. Ignore late boot-progress updates after opening main.
+     */
+    if (s_main_screen_opened) {
+        return;
+    }
+
+    splash_screen_set_progress(
+        message.progress,
+        message.status
+    );
+
+    if (message.progress < 100U) {
+        return;
+    }
+
+    const bool animations_enabled =
+        gui_config_get_animations_enabled();
+
+    const esp_err_t result =
+        screen_manager_show(
+            SCREEN_ID_MAIN,
+            animations_enabled
+                ? LV_SCR_LOAD_ANIM_FADE_IN
+                : LV_SCR_LOAD_ANIM_NONE,
+            animations_enabled
+                ? 300U
+                : 0U
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to show main screen: %s",
+            esp_err_to_name(result)
+        );
+
+        return;
+    }
+
+    s_main_screen_opened = true;
 }

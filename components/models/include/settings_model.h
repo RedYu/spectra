@@ -1,24 +1,28 @@
 #pragma once
 
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
-#define SETTINGS_DEVICE_NAME_MAX_LENGTH      32
-#define SETTINGS_DEVICE_TARGET_MAX_LENGTH    32
+#include "esp_err.h"
 
-#define SETTINGS_DISPLAY_BRIGHTNESS_MIN      10
-#define SETTINGS_DISPLAY_BRIGHTNESS_MAX      100
-#define SETTINGS_DISPLAY_BRIGHTNESS_DEFAULT  80
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#define SETTINGS_LOGGING_SD_ENABLED_DEFAULT  false
-#define SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT false
+#define SETTINGS_DEVICE_NAME_MAX_LENGTH          (32U)
+#define SETTINGS_DEVICE_TARGET_MAX_LENGTH        (32U)
+
+#define SETTINGS_DISPLAY_BRIGHTNESS_MIN          (10U)
+#define SETTINGS_DISPLAY_BRIGHTNESS_MAX          (100U)
+#define SETTINGS_DISPLAY_BRIGHTNESS_DEFAULT      (80U)
+
+#define SETTINGS_LOGGING_SD_ENABLED_DEFAULT      (false)
+#define SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT   (false)
 
 typedef struct
 {
     char target[SETTINGS_DEVICE_TARGET_MAX_LENGTH];
     char name[SETTINGS_DEVICE_NAME_MAX_LENGTH];
-
 
 } device_settings_t;
 
@@ -32,13 +36,13 @@ typedef struct
 {
     bool sd_enabled;
 
-} app_logging_config_t;
+} logging_settings_t;
 
 typedef struct
 {
     bool animations_enabled;
 
-} app_ui_config_t;
+} ui_settings_t;
 
 typedef struct
 {
@@ -46,13 +50,56 @@ typedef struct
 
     device_settings_t device;
     display_settings_t display;
-    app_logging_config_t logging;
-    app_ui_config_t ui;
-    
+    logging_settings_t logging;
+    ui_settings_t ui;
+
 } app_settings_t;
 
-void settings_model_set_defaults(app_settings_t *settings);
+/**
+ * @brief Initialize the settings model and its synchronization resources.
+ *
+ * @return ESP_OK on success, ESP_ERR_NO_MEM if synchronization
+ * resources cannot be created, otherwise an ESP-IDF error code.
+ */
+esp_err_t settings_model_init(void);
 
-void settings_model_set(const app_settings_t *settings);
+/**
+ * @brief Fill a settings structure with default values.
+ *
+ * @param[out] settings Settings structure to initialize.
+ *
+ * @return ESP_OK on success or ESP_ERR_INVALID_ARG if settings is NULL.
+ */
+esp_err_t settings_model_set_defaults(
+    app_settings_t *settings
+);
 
-const app_settings_t *settings_model_get(void);
+/**
+ * @brief Validate and store the current application settings.
+ *
+ * @param[in] settings Settings to store.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if settings is NULL,
+ * ESP_ERR_INVALID_STATE if the model is not initialized, or
+ * ESP_ERR_TIMEOUT if the model lock cannot be acquired.
+ */
+esp_err_t settings_model_set(
+    const app_settings_t *settings
+);
+
+/**
+ * @brief Copy the current application settings.
+ *
+ * @param[out] settings Destination settings structure.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if settings is NULL,
+ * ESP_ERR_INVALID_STATE if the model is not initialized, or
+ * ESP_ERR_TIMEOUT if the model lock cannot be acquired.
+ */
+esp_err_t settings_model_get(
+    app_settings_t *settings
+);
+
+#ifdef __cplusplus
+}
+#endif

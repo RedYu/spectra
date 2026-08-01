@@ -2,8 +2,6 @@
 
 #include <stddef.h>
 
-#include "gui_config.h"
-
 #define MODAL_DIALOG_WIDTH   360
 #define MODAL_DIALOG_HEIGHT  260
 
@@ -36,6 +34,10 @@
 #define MODAL_DISABLED_COLOR            0xBFC6CE
 #define MODAL_PROGRESS_BACKGROUND       0xE5E7EB
 #define MODAL_PROGRESS_INDICATOR        0x4B77D1
+
+static void modal_dialog_delete_event_cb(
+    lv_event_t *event
+);
 
 static void modal_dialog_primary_event_cb(
     lv_event_t *event
@@ -78,14 +80,24 @@ bool modal_dialog_create(
     const modal_dialog_config_t *config
 )
 {
-    if (dialog == NULL ||
-        parent == NULL ||
-        config == NULL) {
+    if ((dialog == NULL) ||
+        (parent == NULL) ||
+        (config == NULL)) {
 
         return false;
     }
 
-    *dialog = (modal_dialog_t){0};
+    /*
+     * The dialog instance must be initialized to zero before its
+     * first use. Do not replace an existing open dialog.
+     */
+    if (dialog->overlay != NULL) {
+        return false;
+    }
+
+    modal_dialog_reset(
+        dialog
+    );
 
     dialog->primary_action =
         config->primary_action;
@@ -102,13 +114,16 @@ bool modal_dialog_create(
     dialog->close_on_overlay_click =
         config->close_on_overlay_click;
 
-    /*
-     * Full-screen overlay.
-     *
-     * It blocks interaction with all objects behind the dialog.
-     */
     dialog->overlay =
         lv_obj_create(parent);
+
+    if (dialog->overlay == NULL) {
+        modal_dialog_reset(
+            dialog
+        );
+
+        return false;
+    }
 
     lv_obj_set_size(
         dialog->overlay,
@@ -169,19 +184,21 @@ bool modal_dialog_create(
         dialog->overlay
     );
 
-    /*
-     * The overlay callback receives the dialog structure through
-     * user data. The caller must keep the returned structure alive.
-     */
-    lv_obj_set_user_data(
-        dialog->overlay,
-        NULL
-    );
-
     lv_obj_add_event_cb(
         dialog->overlay,
         modal_dialog_overlay_event_cb,
         LV_EVENT_CLICKED,
+        dialog
+    );
+
+    /*
+     * Clear the context when the overlay is deleted together with its
+     * parent screen or directly through modal_dialog_close().
+     */
+    lv_obj_add_event_cb(
+        dialog->overlay,
+        modal_dialog_delete_event_cb,
+        LV_EVENT_DELETE,
         dialog
     );
 
@@ -703,19 +720,6 @@ bool modal_dialog_create(
         );
     }
 
-    /*
-     * Important:
-     *
-     * Event user data currently points to the local result variable.
-     * It must be replaced by the final dialog address after this function
-     * returns. Therefore the caller should call modal_dialog_bind()
-     * or use a persistent object.
-     *
-     * To avoid that problem, callbacks below retrieve the dialog pointer
-     * stored in the overlay. The caller should set it immediately after
-     * assigning the returned structure.
-     */
-
     lv_obj_set_style_transform_scale(
         dialog->dialog,
         256,
@@ -785,16 +789,29 @@ void modal_dialog_close(
     modal_dialog_t *dialog
 )
 {
-    if (dialog == NULL ||
-        dialog->overlay == NULL) {
+    if ((dialog == NULL) ||
+        (dialog->overlay == NULL)) {
 
         return;
     }
 
+    lv_obj_t *overlay =
+        dialog->overlay;
+
+    /*
+     * Mark the dialog as closed before LVGL starts dispatching delete
+     * events. This also prevents recursive closing.
+     */
+    dialog->overlay = NULL;
+
     lv_obj_delete(
-        dialog->overlay
+        overlay
     );
 
+    /*
+     * The delete callback normally resets the structure. Reset it
+     * again to keep this function safe if callback dispatch changes.
+     */
     modal_dialog_reset(
         dialog
     );
@@ -804,8 +821,8 @@ bool modal_dialog_is_open(
     const modal_dialog_t *dialog
 )
 {
-    return dialog != NULL &&
-        dialog->overlay != NULL;
+    return (dialog != NULL) &&
+           (dialog->overlay != NULL);
 }
 
 void modal_dialog_set_title(
@@ -975,6 +992,22 @@ void modal_dialog_set_secondary_enabled(
     );
 }
 
+static void modal_dialog_delete_event_cb(
+    lv_event_t *event
+)
+{
+    modal_dialog_t *dialog =
+        lv_event_get_user_data(event);
+
+    if (dialog == NULL) {
+        return;
+    }
+
+    modal_dialog_reset(
+        dialog
+    );
+}
+
 static lv_obj_t *modal_dialog_button_create(
     lv_obj_t *parent,
     const char *text,
@@ -1075,24 +1108,34 @@ static void modal_dialog_primary_event_cb(
     modal_dialog_t *dialog =
         lv_event_get_user_data(event);
 
-    if (dialog == NULL) {
+    if ((dialog == NULL) ||
+        !modal_dialog_is_open(dialog)) {
+
         return;
     }
 
-    modal_dialog_action_cb_t action =
+    const modal_dialog_action_cb_t action =
         dialog->primary_action;
 
     const bool close_after_action =
         dialog->close_on_primary_action;
 
+    /*
+     * The user action is intentionally called before automatic close.
+     * It may close the dialog itself.
+     */
     if (action != NULL) {
-        action(dialog);
+        action(
+            dialog
+        );
     }
 
     if (close_after_action &&
         modal_dialog_is_open(dialog)) {
 
-        modal_dialog_close(dialog);
+        modal_dialog_close(
+            dialog
+        );
     }
 }
 
@@ -1103,24 +1146,30 @@ static void modal_dialog_secondary_event_cb(
     modal_dialog_t *dialog =
         lv_event_get_user_data(event);
 
-    if (dialog == NULL) {
+    if ((dialog == NULL) ||
+        !modal_dialog_is_open(dialog)) {
+
         return;
     }
 
-    modal_dialog_action_cb_t action =
+    const modal_dialog_action_cb_t action =
         dialog->secondary_action;
 
     const bool close_after_action =
         dialog->close_on_secondary_action;
 
     if (action != NULL) {
-        action(dialog);
+        action(
+            dialog
+        );
     }
 
     if (close_after_action &&
         modal_dialog_is_open(dialog)) {
 
-        modal_dialog_close(dialog);
+        modal_dialog_close(
+            dialog
+        );
     }
 }
 
@@ -1131,7 +1180,8 @@ static void modal_dialog_overlay_event_cb(
     modal_dialog_t *dialog =
         lv_event_get_user_data(event);
 
-    if (dialog == NULL ||
+    if ((dialog == NULL) ||
+        !modal_dialog_is_open(dialog) ||
         !dialog->close_on_overlay_click) {
 
         return;
@@ -1144,11 +1194,13 @@ static void modal_dialog_overlay_event_cb(
         lv_event_get_current_target_obj(event);
 
     /*
-     * Close only when the overlay itself was pressed,
-     * not when a child object was pressed.
+     * Events from child controls may bubble to the overlay. Close only
+     * when the overlay itself was clicked.
      */
     if (target == current_target) {
-        modal_dialog_close(dialog);
+        modal_dialog_close(
+            dialog
+        );
     }
 }
 

@@ -1,11 +1,26 @@
 #include "screens/splash_screen.h"
 
+#include <stdbool.h>
 #include <string.h>
 
-#include "assets/gui_images.h"
+#include "esp_log.h"
 
-#include "screen_manager.h"
+#include "assets/gui_images.h"
 #include "gui_config.h"
+#include "screen_manager.h"
+
+#define SPLASH_PROGRESS_MAX          (100U)
+#define SPLASH_SHOW_TIME_MS          (1500U)
+#define SPLASH_TRANSITION_TIME_MS    (300U)
+
+#define SPLASH_LOGO_OFFSET_Y         (-45)
+#define SPLASH_STATUS_OFFSET_Y       (-48)
+#define SPLASH_PROGRESS_OFFSET_Y     (-25)
+
+#define SPLASH_PROGRESS_WIDTH        (280)
+#define SPLASH_PROGRESS_HEIGHT       (8)
+
+static const char *TAG = "splash_screen";
 
 typedef struct
 {
@@ -14,9 +29,33 @@ typedef struct
     lv_obj_t *progress_bar;
     lv_obj_t *status_label;
 
+    uint8_t progress;
+    bool active;
+
 } splash_screen_context_t;
 
 static splash_screen_context_t s_context = {0};
+
+static void splash_screen_delete_event_cb(
+    lv_event_t *event
+)
+{
+    (void)event;
+
+    if (s_context.timer != NULL) {
+        lv_timer_delete(
+            s_context.timer
+        );
+
+        s_context.timer = NULL;
+    }
+
+    memset(
+        &s_context,
+        0,
+        sizeof(s_context)
+    );
+}
 
 static void splash_screen_timer_cb(
     lv_timer_t *timer
@@ -26,26 +65,106 @@ static void splash_screen_timer_cb(
 
     s_context.timer = NULL;
 
-    screen_manager_clear_history();
+    if (!s_context.active ||
+        (s_context.progress < SPLASH_PROGRESS_MAX)) {
 
-    screen_manager_show(
-        SCREEN_ID_MAIN,
-        gui_config_are_animations_enabled() ? LV_SCR_LOAD_ANIM_FADE_IN : LV_SCR_LOAD_ANIM_NONE,
-        300
+        return;
+    }
+
+    const bool animations_enabled =
+        gui_config_get_animations_enabled();
+
+    const lv_screen_load_anim_t animation =
+        animations_enabled
+            ? LV_SCR_LOAD_ANIM_FADE_IN
+            : LV_SCR_LOAD_ANIM_NONE;
+
+    const uint32_t animation_time_ms =
+        animations_enabled
+            ? SPLASH_TRANSITION_TIME_MS
+            : 0U;
+
+    const esp_err_t result =
+        screen_manager_show(
+            SCREEN_ID_MAIN,
+            animation,
+            animation_time_ms
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to show main screen: %s",
+            esp_err_to_name(result)
+        );
+
+        return;
+    }
+
+    /*
+     * The splash screen must not be reachable through Back navigation.
+     */
+    screen_manager_clear_history();
+}
+
+static void splash_screen_start_transition_timer(void)
+{
+    if (!s_context.active ||
+        (s_context.progress < SPLASH_PROGRESS_MAX) ||
+        (s_context.timer != NULL)) {
+
+        return;
+    }
+
+    s_context.timer =
+        lv_timer_create(
+            splash_screen_timer_cb,
+            SPLASH_SHOW_TIME_MS,
+            NULL
+        );
+
+    if (s_context.timer == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create splash-screen timer"
+        );
+
+        return;
+    }
+
+    lv_timer_set_repeat_count(
+        s_context.timer,
+        1
     );
 }
 
 lv_obj_t *splash_screen_create(void)
 {
     lv_obj_t *screen =
-            lv_obj_create(NULL);
+        lv_obj_create(NULL);
 
-    s_context.root =
-        screen;
+    if (screen == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create splash screen"
+        );
 
-    lv_obj_remove_flag(
+        return NULL;
+    }
+
+    memset(
+        &s_context,
+        0,
+        sizeof(s_context)
+    );
+
+    s_context.root = screen;
+
+    lv_obj_add_event_cb(
         screen,
-        LV_OBJ_FLAG_SCROLLABLE
+        splash_screen_delete_event_cb,
+        LV_EVENT_DELETE,
+        NULL
     );
 
     lv_obj_remove_flag(
@@ -55,7 +174,7 @@ lv_obj_t *splash_screen_create(void)
 
     lv_obj_set_style_bg_color(
         screen,
-        lv_color_hex(0xFFFFFF),
+        lv_color_hex(0xFFFFFFU),
         LV_PART_MAIN
     );
 
@@ -68,20 +187,35 @@ lv_obj_t *splash_screen_create(void)
     lv_obj_t *logo_image =
         lv_image_create(screen);
 
-    lv_image_set_src(
-        logo_image,
-        &dev_logo
-    );
+    if (logo_image != NULL) {
+        lv_image_set_src(
+            logo_image,
+            &dev_logo
+        );
 
-    lv_obj_align(
-        logo_image,
-        LV_ALIGN_CENTER,
-        0,
-        -45
-    );
+        lv_obj_align(
+            logo_image,
+            LV_ALIGN_CENTER,
+            0,
+            SPLASH_LOGO_OFFSET_Y
+        );
+    }
 
     s_context.status_label =
         lv_label_create(screen);
+
+    if (s_context.status_label == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create splash-screen status label"
+        );
+
+        lv_obj_delete(
+            screen
+        );
+
+        return NULL;
+    }
 
     lv_label_set_text(
         s_context.status_label,
@@ -96,7 +230,7 @@ lv_obj_t *splash_screen_create(void)
 
     lv_obj_set_style_text_color(
         s_context.status_label,
-        lv_color_hex(0xA0A8B0),
+        lv_color_hex(0xA0A8B0U),
         LV_PART_MAIN
     );
 
@@ -104,29 +238,42 @@ lv_obj_t *splash_screen_create(void)
         s_context.status_label,
         LV_ALIGN_BOTTOM_MID,
         0,
-        -48
+        SPLASH_STATUS_OFFSET_Y
     );
 
     s_context.progress_bar =
         lv_bar_create(screen);
 
+    if (s_context.progress_bar == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create splash-screen progress bar"
+        );
+
+        lv_obj_delete(
+            screen
+        );
+
+        return NULL;
+    }
+
     lv_obj_set_size(
         s_context.progress_bar,
-        280,
-        8
+        SPLASH_PROGRESS_WIDTH,
+        SPLASH_PROGRESS_HEIGHT
     );
 
     lv_obj_align(
         s_context.progress_bar,
         LV_ALIGN_BOTTOM_MID,
         0,
-        -25
+        SPLASH_PROGRESS_OFFSET_Y
     );
 
     lv_bar_set_range(
         s_context.progress_bar,
         0,
-        100
+        (int32_t)SPLASH_PROGRESS_MAX
     );
 
     lv_bar_set_value(
@@ -143,64 +290,68 @@ void splash_screen_set_progress(
     const char *status
 )
 {
-    if (s_context.progress_bar == NULL) {
-        return;
+    if (progress > SPLASH_PROGRESS_MAX) {
+        progress = SPLASH_PROGRESS_MAX;
     }
 
-    if (progress > 100) {
-        progress = 100;
+    s_context.progress = progress;
+
+    if (s_context.progress_bar != NULL) {
+        lv_bar_set_value(
+            s_context.progress_bar,
+            (int32_t)progress,
+            LV_ANIM_ON
+        );
     }
 
-    lv_bar_set_value(
-        s_context.progress_bar,
-        progress,
-        LV_ANIM_ON
-    );
-
-    if (status != NULL &&
-        s_context.status_label != NULL) {
+    if ((status != NULL) &&
+        (s_context.status_label != NULL)) {
 
         lv_label_set_text(
             s_context.status_label,
             status
         );
     }
+
+    splash_screen_start_transition_timer();
 }
 
 void splash_screen_on_show(
     lv_obj_t *screen
 )
 {
-    (void)screen;
+    if ((screen == NULL) ||
+        (screen != s_context.root)) {
 
-    if (s_context.timer == NULL) {
-        s_context.timer =
-            lv_timer_create(
-                splash_screen_timer_cb,
-                1500,
-                NULL
-            );
-
-        lv_timer_set_repeat_count(
-            s_context.timer,
-            1
-        );
+        return;
     }
+
+    s_context.active = true;
+
+    /*
+     * Progress may have reached 100 before the screen became active.
+     */
+    splash_screen_start_transition_timer();
 }
 
 void splash_screen_on_hide(
     lv_obj_t *screen
 )
 {
-    (void)screen;
+    if ((screen == NULL) ||
+        (screen != s_context.root)) {
+
+        return;
+    }
+
+    s_context.active = false;
 
     if (s_context.timer != NULL) {
         lv_timer_delete(
             s_context.timer
         );
 
-        s_context.timer =
-            NULL;
+        s_context.timer = NULL;
     }
 }
 
@@ -208,17 +359,20 @@ void splash_screen_destroy(
     lv_obj_t *screen
 )
 {
+    if ((screen == NULL) ||
+        (screen != s_context.root)) {
+
+        return;
+    }
+
     splash_screen_on_hide(
         screen
     );
 
+    /*
+     * The delete callback performs the final context cleanup.
+     */
     lv_obj_delete(
         screen
-    );
-
-    memset(
-        &s_context,
-        0,
-        sizeof(s_context)
     );
 }

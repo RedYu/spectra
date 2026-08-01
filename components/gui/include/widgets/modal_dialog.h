@@ -1,5 +1,13 @@
 #pragma once
 
+/**
+ * @file modal_dialog.h
+ * @brief Create and manage modal LVGL dialogs.
+ *
+ * All functions must be called from the GUI task because they access
+ * LVGL objects directly.
+ */
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -14,11 +22,21 @@ typedef struct modal_dialog_t modal_dialog_t;
 /**
  * @brief Modal dialog button callback.
  *
- * @param dialog Dialog instance that triggered the callback.
+ * The callback is invoked before automatic closing when the associated
+ * close_on_*_action option is enabled. The callback must not retain the
+ * dialog pointer after the dialog has been closed.
+ *
+ * @param[in,out] dialog Dialog instance that triggered the callback.
  */
 typedef void (*modal_dialog_action_cb_t)(
     modal_dialog_t *dialog
 );
+
+/*
+ * Text strings are copied by the corresponding LVGL labels. The
+ * configuration structure itself only needs to remain valid during
+ * modal_dialog_create().
+ */
 
 typedef struct
 {
@@ -110,16 +128,23 @@ struct modal_dialog_t
  * @brief Create and initialize a modal dialog.
  *
  * The dialog is created in the center of the parent object and blocks
- * interaction with all objects behind it until the dialog is closed.
+ * interaction with objects behind it until it is closed.
+ *
+ * The dialog instance must be initialized to zero before its first use:
+ *
+ * @code
+ * static modal_dialog_t dialog = {0};
+ * @endcode
  *
  * The caller must keep the modal_dialog_t instance valid for the entire
- * lifetime of the dialog.
+ * lifetime of the dialog. Calling this function for an already open
+ * dialog fails.
  *
- * @param dialog Dialog instance to initialize.
- * @param parent Parent object, normally lv_screen_active().
- * @param config Dialog configuration.
+ * @param[in,out] dialog Zero-initialized dialog instance.
+ * @param[in] parent Parent object, normally lv_screen_active().
+ * @param[in] config Dialog configuration.
  *
- * @return true if the dialog was created successfully, false otherwise.
+ * @return true if the dialog was created successfully; otherwise false.
  */
 bool modal_dialog_create(
     modal_dialog_t *dialog,
@@ -130,7 +155,10 @@ bool modal_dialog_create(
 /**
  * @brief Close and destroy a modal dialog.
  *
- * @param dialog Dialog instance.
+ * Calling this function for an already closed dialog has no effect.
+ * All internally stored LVGL object pointers are cleared.
+ *
+ * @param[in,out] dialog Dialog instance.
  */
 void modal_dialog_close(
     modal_dialog_t *dialog

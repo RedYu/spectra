@@ -4,9 +4,8 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
-#include "gui_config.h"
 
-#define SCREEN_HISTORY_SIZE 4
+#define SCREEN_HISTORY_SIZE  (4U)
 
 static const char *TAG = "screen_manager";
 
@@ -23,15 +22,28 @@ static screen_id_t s_current =
     SCREEN_ID_INVALID;
 
 static screen_id_t s_history[SCREEN_HISTORY_SIZE];
-static uint8_t s_history_count = 0;
+static uint8_t s_history_count = 0U;
 
 static bool s_initialized = false;
+static bool s_transition_in_progress = false;
+
+static void screen_transition_event_cb(
+    lv_event_t *event
+)
+{
+    if (lv_event_get_code(event) ==
+        LV_EVENT_SCREEN_LOADED) {
+
+        s_transition_in_progress = false;
+    }
+}
 
 static bool screen_id_is_valid(
     screen_id_t id
 )
 {
-    return id < SCREEN_ID_COUNT;
+    return (id >= SCREEN_ID_SPLASH) &&
+           (id < SCREEN_ID_COUNT);
 }
 
 static const char *screen_get_name(
@@ -61,8 +73,8 @@ static void history_push(
     /*
      * Avoid duplicate adjacent history entries.
      */
-    if (s_history_count > 0 &&
-        s_history[s_history_count - 1] == id) {
+    if ((s_history_count > 0U) &&
+        (s_history[s_history_count - 1U] == id)) {
         return;
     }
 
@@ -73,27 +85,16 @@ static void history_push(
         memmove(
             &s_history[0],
             &s_history[1],
-            (SCREEN_HISTORY_SIZE - 1) *
+            (SCREEN_HISTORY_SIZE - 1U) *
                 sizeof(screen_id_t)
         );
 
         s_history_count =
-            SCREEN_HISTORY_SIZE - 1;
+            SCREEN_HISTORY_SIZE - 1U;
     }
 
     s_history[s_history_count++] =
         id;
-}
-
-static screen_id_t history_pop(void)
-{
-    if (s_history_count == 0) {
-        return SCREEN_ID_INVALID;
-    }
-
-    s_history_count--;
-
-    return s_history[s_history_count];
 }
 
 static lv_obj_t *screen_get_or_create(
@@ -125,6 +126,13 @@ static lv_obj_t *screen_get_or_create(
 
         return NULL;
     }
+
+    lv_obj_add_event_cb(
+        instance->object,
+        screen_transition_event_cb,
+        LV_EVENT_SCREEN_LOADED,
+        NULL
+    );
 
     ESP_LOGD(
         TAG,
@@ -176,12 +184,25 @@ static esp_err_t screen_manager_load(
         return ESP_OK;
     }
 
+    ESP_RETURN_ON_FALSE(
+        !s_transition_in_progress,
+        ESP_ERR_INVALID_STATE,
+        TAG,
+        "Another screen transition is in progress"
+    );
+
     lv_obj_t *next_screen =
         screen_get_or_create(id);
 
     if (next_screen == NULL) {
         return ESP_FAIL;
     }
+
+    /*
+     * Block nested navigation from lifecycle callbacks.
+     * No failing operations remain after this point.
+     */
+    s_transition_in_progress = true;
 
     const screen_id_t previous_id =
         s_current;
@@ -223,7 +244,7 @@ static esp_err_t screen_manager_load(
         next_screen,
         animation,
         animation_time_ms,
-        0,
+        0U,
         false
     );
 
@@ -279,7 +300,10 @@ esp_err_t screen_manager_init(void)
         SCREEN_ID_INVALID;
 
     s_history_count =
-        0;
+        0U;
+
+    s_transition_in_progress =
+        false;
 
     s_initialized =
         true;
@@ -370,10 +394,7 @@ esp_err_t screen_manager_back(
         "Screen manager is not initialized"
     );
 
-    const screen_id_t previous_id =
-        history_pop();
-
-    if (!screen_id_is_valid(previous_id)) {
+    if (s_history_count == 0U) {
         ESP_LOGW(
             TAG,
             "No previous screen in history"
@@ -382,16 +403,30 @@ esp_err_t screen_manager_back(
         return ESP_ERR_NOT_FOUND;
     }
 
+    const screen_id_t previous_id =
+        s_history[s_history_count - 1U];
+
+    const esp_err_t result =
+        screen_manager_load(
+            previous_id,
+            animation,
+            animation_time_ms,
+            false
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
     /*
-     * Back navigation must not add the current screen
-     * to history again.
+     * Remove the history entry only after successful navigation.
      */
-    return screen_manager_load(
-        previous_id,
-        animation,
-        animation_time_ms,
-        false
-    );
+    s_history_count--;
+
+    s_history[s_history_count] =
+        SCREEN_ID_INVALID;
+
+    return ESP_OK;
 }
 
 esp_err_t screen_manager_destroy(
@@ -417,6 +452,13 @@ esp_err_t screen_manager_destroy(
         ESP_ERR_INVALID_STATE,
         TAG,
         "Cannot destroy the active screen"
+    );
+
+    ESP_RETURN_ON_FALSE(
+        !s_transition_in_progress,
+        ESP_ERR_INVALID_STATE,
+        TAG,
+        "Cannot destroy a screen during transition"
     );
 
     screen_instance_t *instance =
@@ -453,7 +495,7 @@ esp_err_t screen_manager_destroy(
 
 void screen_manager_clear_history(void)
 {
-    s_history_count = 0;
+    s_history_count = 0U;
 
     memset(
         s_history,
@@ -469,7 +511,7 @@ void screen_manager_clear_history(void)
 
 bool screen_manager_can_go_back(void)
 {
-    return s_history_count > 0;
+    return s_history_count > 0U;
 }
 
 screen_id_t screen_manager_get_current(void)

@@ -6,16 +6,16 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_err.h"
-#include "esp_check.h"
-#include "display_backlight.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
-#include "system_model.h"
+#include "app_config.h"
+#include "gui_config.h"
+#include "storage_sd_service.h"
+#include "display_backlight.h"
 #include "settings_model.h"
 #include "storage_service.h"
 #include "logging_service.h"
-#include "sd_card_driver.h"
-
-#include "gui_config.h"
 
 static const char *TAG = "settings_service";
 
@@ -25,110 +25,66 @@ static const char *CONFIG_FILE_PATH =
 static const char *CONFIG_FILE_PATH_TMP =
     "/storage/device_config.json.tmp";
 
-static const uint32_t SUPPORTED_SCHEMA_VERSION = 1;
+static const uint32_t SUPPORTED_SCHEMA_VERSION = 1U;
 
-static void parse_string(
-    const cJSON *object,
-    const char *name,
-    char *destination,
-    size_t destination_size
-)
+#define SETTINGS_SERVICE_LOCK_TIMEOUT_MS  (1000U)
+
+static bool s_initialized = false;
+static SemaphoreHandle_t s_mutex = NULL;
+
+/*
+ * TODO:
+ * Move internal-storage write, remove and rename operations to
+ * storage_service so settings saving is synchronized with filesystem
+ * reads and storage deinitialization. Add a backup or recovery strategy
+ * to prevent losing the previous configuration if file replacement
+ * fails.
+ */
+
+static esp_err_t settings_service_lock(void);
+static void settings_service_unlock(void);
+
+static esp_err_t settings_service_reload_internal(void);
+static esp_err_t settings_service_save_internal(void);
+
+static esp_err_t settings_service_set_brightness_internal(
+    uint8_t brightness
+);
+
+static esp_err_t settings_service_set_sd_logging_enabled_internal(
+    bool enabled
+);
+
+static esp_err_t settings_service_set_animations_enabled_internal(
+    bool enabled
+);
+
+static esp_err_t settings_service_apply_internal(void);
+
+static esp_err_t settings_service_lock(void)
 {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
-
-    if (!cJSON_IsString(item) || item->valuestring == NULL) {
-        return;
+    if (s_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
     }
 
-    strlcpy(destination, item->valuestring, destination_size);
+    if (xSemaphoreTake(
+            s_mutex,
+            pdMS_TO_TICKS(
+                SETTINGS_SERVICE_LOCK_TIMEOUT_MS
+            )
+        ) != pdTRUE) {
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+    return ESP_OK;
 }
 
-static void parse_bool(
-    const cJSON *object,
-    const char *name,
-    bool *destination
-)
+static void settings_service_unlock(void)
 {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
-
-    if (!cJSON_IsBool(item)) {
-        return;
-    }
-
-    *destination = cJSON_IsTrue(item);
-}
-
-static void parse_u8_range(
-    const cJSON *object,
-    const char *name,
-    uint8_t *destination,
-    uint8_t minimum,
-    uint8_t maximum
-)
-{
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
-
-    if (!cJSON_IsNumber(item)) {
-        return;
-    }
-
-    const double value = item->valuedouble;
-
-    if (value < minimum || value > maximum) {
-        ESP_LOGW(
-            TAG,
-            "Value '%s' is outside the allowed range",
-            name
-        );
-
-        return;
-    }
-
-    *destination = (uint8_t)value;
-}
-
-static void parse_u16_range(
-    const cJSON *object,
-    const char *name,
-    uint16_t *destination,
-    uint16_t minimum,
-    uint16_t maximum
-)
-{
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
-
-    if (!cJSON_IsNumber(item)) {
-        return;
-    }
-
-    const double value = item->valuedouble;
-
-    if (value < minimum || value > maximum) {
-        ESP_LOGW(
-            TAG,
-            "Value '%s' is outside the allowed range",
-            name
-        );
-
-        return;
-    }
-
-    *destination = (uint16_t)value;
-}
-
-static void parse_u32(
-    const cJSON *object,
-    const char *name,
-    uint32_t *destination
-)
-{
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
-
-    if (!cJSON_IsNumber(item) || item->valuedouble < 0) {
-        return;
-    }
-
-    *destination = (uint32_t)item->valuedouble;
+    (void)xSemaphoreGive(
+        s_mutex
+    );
 }
 
 static esp_err_t parse_config(
@@ -176,9 +132,13 @@ static esp_err_t parse_config(
      */
     app_settings_t parsed_settings;
 
-    settings_model_set_defaults(
+    result = settings_model_set_defaults(
         &parsed_settings
     );
+
+    if (result != ESP_OK) {
+        goto cleanup;
+    }
 
     /*
      * Validate schema version.
@@ -266,33 +226,16 @@ static esp_err_t parse_config(
         goto cleanup;
     }
 
-    system_model_t system_model;
-
-    result =
-        system_model_get_snapshot(
-            &system_model
-        );
-
-    if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to read system model: %s",
-            esp_err_to_name(result)
-        );
-
-        goto cleanup;
-    }
-
     if (strcmp(
             device_target->valuestring,
-            system_model.device_id
+            SPECTRA_APP_TARGET
         ) != 0) {
 
         ESP_LOGE(
             TAG,
-            "Configuration device mismatch: "
+            "Configuration target mismatch: "
             "expected='%s', received='%s'",
-            system_model.device_id,
+            SPECTRA_APP_TARGET,
             device_target->valuestring
         );
 
@@ -376,19 +319,16 @@ static esp_err_t parse_config(
         ESP_LOGE(
             TAG,
             "display.brightness is out of range: %d "
-            "(allowed %d-%d)",
+            "(allowed %u-%u)",
             brightness->valueint,
-            SETTINGS_DISPLAY_BRIGHTNESS_MIN,
-            SETTINGS_DISPLAY_BRIGHTNESS_MAX
+            (unsigned int)SETTINGS_DISPLAY_BRIGHTNESS_MIN,
+            (unsigned int)SETTINGS_DISPLAY_BRIGHTNESS_MAX
         );
 
         result = ESP_ERR_INVALID_ARG;
         goto cleanup;
     }
 
-    /*
-     * All configuration values are valid.
-     */
     parsed_settings.schema_version =
         version;
 
@@ -484,6 +424,8 @@ static esp_err_t parse_config(
         cJSON_IsTrue(animations_enabled);
 
     /*
+     * All configuration values are valid.
+     *
      * Apply the fully validated configuration.
      */
     *settings =
@@ -491,8 +433,8 @@ static esp_err_t parse_config(
 
     ESP_LOGI(
         TAG,
-        "Configuration validated for device: %s",
-        system_model.device_id
+        "Configuration validated for target: %s",
+        parsed_settings.device.target
     );
 
     ESP_LOGD(
@@ -639,18 +581,22 @@ error:
     return NULL;
 }
 
-esp_err_t settings_service_save(void)
+static esp_err_t settings_service_save_internal(void)
 {
-    const app_settings_t *settings =
-        settings_model_get();
+    app_settings_t settings;
 
-    if (settings == NULL) {
-        return ESP_ERR_INVALID_STATE;
+    esp_err_t result =
+        settings_model_get(
+            &settings
+        );
+
+    if (result != ESP_OK) {
+        return result;
     }
 
     cJSON *root =
         settings_service_create_json(
-            settings
+            &settings
         );
 
     if (root == NULL) {
@@ -666,11 +612,10 @@ esp_err_t settings_service_save(void)
         return ESP_ERR_NO_MEM;
     }
 
-    FILE *file =
-        fopen(
-            CONFIG_FILE_PATH_TMP,
-            "w"
-        );
+    FILE *file = fopen(
+        CONFIG_FILE_PATH_TMP,
+        "w"
+    );
 
     if (file == NULL) {
         cJSON_free(json_text);
@@ -680,36 +625,34 @@ esp_err_t settings_service_save(void)
     const size_t length =
         strlen(json_text);
 
-    const size_t written =
-        fwrite(
-            json_text,
-            1,
-            length,
-            file
-        );
+    const size_t written = fwrite(
+        json_text,
+        1U,
+        length,
+        file
+    );
 
-    esp_err_t result =
-        ESP_OK;
+    result = ESP_OK;
 
     if (written != length) {
-        result =
-            ESP_FAIL;
+        result = ESP_FAIL;
     }
 
     if (fflush(file) != 0) {
-        result =
-            ESP_FAIL;
+        result = ESP_FAIL;
     }
 
     if (fclose(file) != 0) {
-        result =
-            ESP_FAIL;
+        result = ESP_FAIL;
     }
 
+    file = NULL;
+
     cJSON_free(json_text);
+    json_text = NULL;
 
     if (result != ESP_OK) {
-        remove(
+        (void)remove(
             CONFIG_FILE_PATH_TMP
         );
 
@@ -721,7 +664,11 @@ esp_err_t settings_service_save(void)
         return result;
     }
 
-    remove(
+    /*
+     * SPIFFS may not replace an existing destination during rename.
+     * A backup API should be added later for stronger crash safety.
+     */
+    (void)remove(
         CONFIG_FILE_PATH
     );
 
@@ -735,7 +682,7 @@ esp_err_t settings_service_save(void)
             "Failed to replace settings file"
         );
 
-        remove(
+        (void)remove(
             CONFIG_FILE_PATH_TMP
         );
 
@@ -750,45 +697,76 @@ esp_err_t settings_service_save(void)
     return ESP_OK;
 }
 
-esp_err_t settings_service_reload(void)
+static esp_err_t settings_service_reload_internal(void)
 {
     app_settings_t settings;
 
-    /*
-     * Always begin with a complete valid configuration.
-     * Values found in JSON override these defaults.
-     */
-    settings_model_set_defaults(&settings);
+    esp_err_t result =
+        settings_model_set_defaults(
+            &settings
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
 
     char *file_data = NULL;
-    size_t file_size = 0;
+    size_t file_size = 0U;
 
-    esp_err_t err = storage_service_read_file(
+    result = storage_service_read_file(
         CONFIG_FILE_PATH,
         &file_data,
         &file_size
     );
 
-    if (err == ESP_ERR_NOT_FOUND) {
+    if (result == ESP_ERR_NOT_FOUND) {
         ESP_LOGW(
             TAG,
             "Configuration file not found, using defaults"
         );
 
-        settings_model_set(&settings);
-        return settings_service_apply();
+        result = settings_model_set(
+            &settings
+        );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        return settings_service_apply_internal();
     }
 
-    if (err != ESP_OK) {
+    if (result != ESP_OK) {
+        const esp_err_t read_result =
+            result;
+
         ESP_LOGE(
             TAG,
             "Failed to read configuration: %s",
-            esp_err_to_name(err)
+            esp_err_to_name(read_result)
         );
 
-        settings_model_set(&settings);
-        settings_service_apply();
-        return err;
+        result = settings_model_set(
+            &settings
+        );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        result =
+            settings_service_apply_internal();
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        ESP_LOGW(
+            TAG,
+            "Default settings applied after read failure"
+        );
+
+        return read_result;
     }
 
     ESP_LOGI(
@@ -797,200 +775,574 @@ esp_err_t settings_service_reload(void)
         (unsigned int)file_size
     );
 
-    err = parse_config(file_data, &settings);
+    result = parse_config(
+        file_data,
+        &settings
+    );
 
     free(file_data);
+    file_data = NULL;
 
-    if (err != ESP_OK) {
+    if (result != ESP_OK) {
         ESP_LOGE(
             TAG,
             "Invalid configuration, using defaults"
         );
 
-        settings_model_set_defaults(&settings);
-        settings_model_set(&settings);
-        settings_service_apply();
+        const esp_err_t defaults_result =
+            settings_model_set_defaults(
+                &settings
+            );
 
-        return err;
-    }
-
-    settings_model_set(&settings);
-
-    ESP_LOGI(TAG, "Configuration applied successfully");
-
-    return settings_service_apply();
-}
-
-esp_err_t settings_service_init(void)
-{
-    return settings_service_reload();
-}
-
-esp_err_t settings_service_set_brightness(
-    uint8_t brightness
-)
-{
-    const app_settings_t *current =
-        settings_model_get();
-
-    if (current == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    app_settings_t updated =
-        *current;
-
-    updated.display.brightness =
-        brightness;
-
-    settings_model_set(
-        &updated
-    );
-
-    const app_settings_t *applied =
-        settings_model_get();
-
-    return display_backlight_set_brightness(
-        applied->display.brightness
-    );
-}
-
-esp_err_t settings_service_set_sd_logging_enabled(
-    bool enabled
-)
-{
-    const app_settings_t *current =
-        settings_model_get();
-
-    if (current == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    app_settings_t updated =
-        *current;
-
-    updated.logging.sd_enabled =
-        enabled;
-
-    settings_model_set(
-        &updated
-    );
-
-    const app_settings_t *applied =
-        settings_model_get();
-
-    if (applied == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    if (applied->logging.sd_enabled) {
-        if (sd_card_driver_is_mounted()) {
-            return logging_service_enable_file();
+        if (defaults_result != ESP_OK) {
+            return defaults_result;
         }
+
+        const esp_err_t model_result =
+            settings_model_set(
+                &settings
+            );
+
+        if (model_result != ESP_OK) {
+            return model_result;
+        }
+
+        result = settings_service_apply_internal();
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        ESP_LOGW(
+            TAG,
+            "Default settings applied after validation failure"
+        );
 
         return ESP_OK;
     }
 
-    return logging_service_disable_file();
-}
-
-esp_err_t settings_service_set_animations_enabled(
-    bool enabled
-)
-{
-    const app_settings_t *current =
-        settings_model_get();
-
-    if (current == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    app_settings_t updated =
-        *current;
-
-    updated.ui.animations_enabled =
-        enabled;
-
-    settings_model_set(
-        &updated
+    result = settings_model_set(
+        &settings
     );
 
-    const app_settings_t *applied =
-        settings_model_get();
-
-    if (applied == NULL) {
-        return ESP_ERR_INVALID_STATE;
+    if (result != ESP_OK) {
+        return result;
     }
 
-    gui_config_set_animations_enabled(
-        applied->ui.animations_enabled
+    result = settings_service_apply_internal();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Configuration applied successfully"
     );
 
     return ESP_OK;
 }
 
-esp_err_t settings_service_apply(void)
+esp_err_t settings_service_init(void)
 {
-    const app_settings_t *settings =
-        settings_model_get();
+    /*
+     * Service initialization is expected to be called from one startup
+     * task. Concurrent first-time initialization is not supported.
+     */
+    if (s_mutex == NULL) {
+        s_mutex = xSemaphoreCreateMutex();
 
-    if (settings == NULL) {
-        ESP_LOGE(
-            TAG,
-            "Settings model is unavailable"
-        );
+        if (s_mutex == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
 
+    esp_err_t result =
+        settings_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (s_initialized) {
+        settings_service_unlock();
         return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_RETURN_ON_ERROR(
-        display_backlight_set_brightness(
-            settings->display.brightness
-        ),
-        TAG,
-        "Failed to apply display brightness"
+    result = settings_model_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize settings model: %s",
+            esp_err_to_name(result)
+        );
+
+        settings_service_unlock();
+        return result;
+    }
+
+    /*
+     * Internal reload requires the service to be marked initialized.
+     */
+    s_initialized = true;
+
+    result =
+        settings_service_reload_internal();
+
+    if (result != ESP_OK) {
+        s_initialized = false;
+
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize settings service: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
+static esp_err_t settings_service_set_brightness_internal(
+    uint8_t brightness
+)
+{
+    app_settings_t previous;
+
+    esp_err_t result =
+        settings_model_get(
+            &previous
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    app_settings_t updated =
+        previous;
+
+    updated.display.brightness =
+        brightness;
+
+    result = settings_model_set(
+        &updated
     );
 
-    gui_config_set_animations_enabled(
-        settings->ui.animations_enabled
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    /*
+     * Read the validated value back from the model.
+     */
+    result = settings_model_get(
+        &updated
     );
 
-    if (!settings->logging.sd_enabled) {
-        if (logging_service_is_file_enabled()) {
-            ESP_RETURN_ON_ERROR(
-                logging_service_disable_file(),
-                TAG,
-                "Failed to disable SD logging"
+    if (result != ESP_OK) {
+        (void)settings_model_set(
+            &previous
+        );
+
+        return result;
+    }
+
+    result = display_backlight_set_brightness(
+        updated.display.brightness
+    );
+
+    if (result != ESP_OK) {
+        (void)settings_model_set(
+            &previous
+        );
+
+        return result;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t settings_service_set_sd_logging_enabled_internal(
+    bool enabled
+)
+{
+    app_settings_t previous;
+
+    esp_err_t result =
+        settings_model_get(
+            &previous
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    app_settings_t updated =
+        previous;
+
+    updated.logging.sd_enabled =
+        enabled;
+
+    result = settings_model_set(
+        &updated
+    );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!enabled) {
+        result = logging_service_disable_file();
+
+        if (result != ESP_OK) {
+            (void)settings_model_set(
+                &previous
             );
         }
-    } else if (sd_card_driver_is_mounted()) {
-        if (!logging_service_is_file_enabled()) {
-            ESP_RETURN_ON_ERROR(
-                logging_service_enable_file(),
-                TAG,
-                "Failed to enable SD logging"
-            );
-        }
-    } else {
+
+        return result;
+    }
+
+    storage_sd_state_t storage_state;
+
+    result = storage_sd_service_get_state(
+        &storage_state
+    );
+
+    if (result == ESP_ERR_INVALID_STATE) {
         ESP_LOGW(
             TAG,
-            "SD logging is enabled in settings, "
-            "but the SD card is not mounted"
+            "SD storage service is not started; "
+            "SD logging will be applied later"
         );
+
+        /*
+         * Preserve the enabled preference. It will be applied when the
+         * SD storage service becomes available.
+         */
+        return ESP_OK;
+    }
+
+    if (result != ESP_OK) {
+        (void)settings_model_set(
+            &previous
+        );
+
+        return result;
+    }
+
+    /*
+     * Keep the preference enabled when no card is present. The SD
+     * storage service can enable logging after the card is mounted.
+     */
+    if (storage_state != STORAGE_SD_STATE_MOUNTED) {
+        return ESP_OK;
+    }
+
+    bool file_enabled = false;
+
+    result = logging_service_get_file_enabled(
+        &file_enabled
+    );
+
+    if (result != ESP_OK) {
+        (void)settings_model_set(
+            &previous
+        );
+
+        return result;
+    }
+
+    if (!file_enabled) {
+        result = logging_service_enable_file();
+
+        if (result != ESP_OK) {
+            (void)settings_model_set(
+                &previous
+            );
+        }
+    }
+
+    return result;
+}
+
+static esp_err_t settings_service_set_animations_enabled_internal(
+    bool enabled
+)
+{
+    app_settings_t settings;
+
+    esp_err_t result =
+        settings_model_get(
+            &settings
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    settings.ui.animations_enabled =
+        enabled;
+
+    result = settings_model_set(
+        &settings
+    );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    gui_config_set_animations_enabled(
+        enabled
+    );
+
+    return ESP_OK;
+}
+
+static esp_err_t settings_service_apply_internal(void)
+{
+    app_settings_t settings;
+
+    esp_err_t result =
+        settings_model_get(
+            &settings
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result = display_backlight_set_brightness(
+        settings.display.brightness
+    );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply display brightness: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    gui_config_set_animations_enabled(
+        settings.ui.animations_enabled
+    );
+
+    bool file_enabled = false;
+
+    result = logging_service_get_file_enabled(
+        &file_enabled
+    );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!settings.logging.sd_enabled) {
+        if (file_enabled) {
+            result =
+                logging_service_disable_file();
+
+            if (result != ESP_OK) {
+                return result;
+            }
+        }
+    } else {
+        storage_sd_state_t storage_state;
+
+        result = storage_sd_service_get_state(
+            &storage_state
+        );
+
+        if (result == ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(
+                TAG,
+                "SD storage service is not started; "
+                "SD logging will be applied later"
+            );
+
+            return ESP_OK;
+        }
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        if ((storage_state ==
+             STORAGE_SD_STATE_MOUNTED) &&
+            !file_enabled) {
+
+            result =
+                logging_service_enable_file();
+
+            if (result != ESP_OK) {
+                return result;
+            }
+        } else if (storage_state !=
+                   STORAGE_SD_STATE_MOUNTED) {
+
+            ESP_LOGW(
+                TAG,
+                "SD logging is enabled in settings, "
+                "but the SD card is not mounted"
+            );
+        }
     }
 
     ESP_LOGI(
         TAG,
         "Settings applied: brightness=%u%%, "
         "SD logging=%s, animations=%s",
-        settings->display.brightness,
-        settings->logging.sd_enabled
+        settings.display.brightness,
+        settings.logging.sd_enabled
             ? "enabled"
             : "disabled",
-        settings->ui.animations_enabled
+        settings.ui.animations_enabled
             ? "enabled"
             : "disabled"
     );
 
     return ESP_OK;
+}
+
+esp_err_t settings_service_reload(void)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+
+    if (s_initialized) {
+        result =
+            settings_service_reload_internal();
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
+esp_err_t settings_service_save(void)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+
+    if (s_initialized) {
+        result =
+            settings_service_save_internal();
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
+esp_err_t settings_service_set_brightness(
+    uint8_t brightness
+)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+
+    if (s_initialized) {
+        result =
+            settings_service_set_brightness_internal(
+                brightness
+            );
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
+esp_err_t settings_service_set_sd_logging_enabled(
+    bool enabled
+)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+
+    if (s_initialized) {
+        result =
+            settings_service_set_sd_logging_enabled_internal(
+                enabled
+            );
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
+esp_err_t settings_service_set_animations_enabled(
+    bool enabled
+)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+
+    if (s_initialized) {
+        result =
+            settings_service_set_animations_enabled_internal(
+                enabled
+            );
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
+esp_err_t settings_service_apply(void)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+
+    if (s_initialized) {
+        result =
+            settings_service_apply_internal();
+    }
+
+    settings_service_unlock();
+
+    return result;
 }

@@ -6,7 +6,6 @@
 #include "esp_log.h"
 
 #include "widgets/modal_dialog.h"
-#include "storage_service.h"
 #include "logging_service.h"
 #include "settings_model.h"
 #include "storage_sd_service.h"
@@ -17,13 +16,9 @@
 static const char *TAG =
     "sd_card_modal";
 
-static modal_dialog_t s_sd_dialog;
+static modal_dialog_t s_sd_dialog = {0};
 
 static void sd_card_modal_action_cb(
-    modal_dialog_t *dialog
-);
-
-static void sd_card_modal_close_cb(
     modal_dialog_t *dialog
 );
 
@@ -37,26 +32,40 @@ static void sd_card_modal_show_result(
     bool mount_operation
 );
 
-void sd_card_modal_open(
+bool sd_card_modal_open(
     lv_obj_t *parent
 )
 {
     if (parent == NULL) {
-        return;
+        return false;
     }
 
-    /*
-     * Prevent creating a second dialog while the first one is open.
-     */
     if (modal_dialog_is_open(
             &s_sd_dialog
         )) {
 
-        return;
+        return true;
+    }
+
+    storage_sd_state_t state;
+
+    const esp_err_t state_result =
+        storage_sd_service_get_state(
+            &state
+        );
+
+    if (state_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to get SD storage state: %s",
+            esp_err_to_name(state_result)
+        );
+
+        return false;
     }
 
     const bool mounted =
-        sd_card_driver_is_mounted();
+        state == STORAGE_SD_STATE_MOUNTED;
 
     const modal_dialog_config_t config = {
         .title =
@@ -71,9 +80,6 @@ void sd_card_modal_open(
 
         .icon = NULL,
 
-        /*
-         * Primary button changes depending on the current state.
-         */
         .primary_button_text =
             mounted
                 ? "Unmount"
@@ -82,10 +88,6 @@ void sd_card_modal_open(
         .primary_action =
             sd_card_modal_action_cb,
 
-        /*
-         * Do not close automatically because the operation result
-         * must be displayed in the same dialog.
-         */
         .close_on_primary_action =
             false,
 
@@ -93,7 +95,7 @@ void sd_card_modal_open(
             "Close",
 
         .secondary_action =
-            sd_card_modal_close_cb,
+            NULL,
 
         .close_on_secondary_action =
             true,
@@ -102,16 +104,16 @@ void sd_card_modal_open(
             false,
 
         .initial_progress =
-            0,
+            0U,
 
         .progress_text =
             NULL,
 
         .animate_open =
-            true && gui_config_are_animations_enabled(),
+            gui_config_get_animations_enabled(),
 
         .close_on_overlay_click =
-            false
+            false,
     };
 
     if (!modal_dialog_create(
@@ -122,29 +124,68 @@ void sd_card_modal_open(
 
         ESP_LOGE(
             TAG,
-            "Failed to create SD card dialog"
+            "Failed to create SD-card dialog"
         );
 
-        return;
+        return false;
     }
+
+    sd_card_modal_update(
+        &s_sd_dialog
+    );
+
+    return true;
 }
 
 static void sd_card_modal_action_cb(
     modal_dialog_t *dialog
 )
 {
-    if (dialog == NULL) {
+    if ((dialog == NULL) ||
+        !modal_dialog_is_open(dialog)) {
+
         return;
     }
 
-    /*
-     * Read the state again.
-     *
-     * Do not rely only on the state that was read when the dialog
-     * was created because it may have changed.
-     */
-    const bool mounted =
-        sd_card_driver_is_mounted();
+    storage_sd_state_t state;
+
+    esp_err_t result =
+        storage_sd_service_get_state(
+            &state
+        );
+
+    if (result != ESP_OK) {
+        modal_dialog_set_title(
+            dialog,
+            "SD Card Error"
+        );
+
+        modal_dialog_set_message(
+            dialog,
+            "Failed to read the current SD-card state."
+        );
+
+        modal_dialog_set_primary_enabled(
+            dialog,
+            false
+        );
+
+        modal_dialog_set_secondary_enabled(
+            dialog,
+            true
+        );
+
+        ESP_LOGE(
+            TAG,
+            "Failed to get SD storage state: %s",
+            esp_err_to_name(result)
+        );
+
+        return;
+    }
+
+    const bool unmount_operation =
+        state == STORAGE_SD_STATE_MOUNTED;
 
     modal_dialog_set_primary_enabled(
         dialog,
@@ -156,7 +197,7 @@ static void sd_card_modal_action_cb(
         false
     );
 
-    if (mounted) {
+    if (unmount_operation) {
         modal_dialog_set_title(
             dialog,
             "Unmounting SD Card"
@@ -167,29 +208,8 @@ static void sd_card_modal_action_cb(
             "Please wait while the SD card is being unmounted."
         );
 
-        const esp_err_t logging_result =
-            logging_service_disable_file();
-
-        if (logging_result != ESP_OK) {
-            ESP_LOGW(
-                TAG,
-                "Failed to disable SD logging: %s",
-                esp_err_to_name(logging_result)
-            );
-        }
-
-        const esp_err_t result =
-            sd_card_driver_unmount();
-
-        storage_sd_service_set_state(result == ESP_OK ? 
-            STORAGE_STATE_UNAVAILABLE : STORAGE_STATE_ERROR
-        );
-        
-        sd_card_modal_show_result(
-            dialog,
-            result,
-            false
-        );
+        result =
+            storage_sd_service_unmount();
     } else {
         modal_dialog_set_title(
             dialog,
@@ -201,55 +221,45 @@ static void sd_card_modal_action_cb(
             "Please wait while the SD card is being mounted."
         );
 
-        const esp_err_t result =
-            sd_card_driver_mount();
-
-        storage_sd_service_set_state(result == ESP_OK ? 
-            STORAGE_STATE_MOUNTED : STORAGE_STATE_UNAVAILABLE
-        );
+        result =
+            storage_sd_service_mount();
 
         if (result == ESP_OK) {
-            const app_settings_t *settings =
-                settings_model_get();
+            app_settings_t settings;
 
-            if (settings != NULL &&
-                settings->logging.sd_enabled) {
+            const esp_err_t settings_result =
+                settings_model_get(
+                    &settings
+                );
 
+            if (settings_result != ESP_OK) {
+                ESP_LOGW(
+                    TAG,
+                    "Failed to get logging setting: %s",
+                    esp_err_to_name(settings_result)
+                );
+            } else if (settings.logging.sd_enabled) {
                 const esp_err_t logging_result =
                     logging_service_enable_file();
 
-                if (logging_result != ESP_OK) {
-                    ESP_LOGE(
+                if ((logging_result != ESP_OK) &&
+                    (logging_result != ESP_ERR_INVALID_STATE)) {
+
+                    ESP_LOGW(
                         TAG,
                         "Failed to enable SD logging: %s",
                         esp_err_to_name(logging_result)
                     );
-                } else {
-                    ESP_LOGI(
-                        TAG,
-                        "SD file logging enabled"
-                    );
                 }
             }
         }
-
-        sd_card_modal_show_result(
-            dialog,
-            result,
-            true
-        );
     }
-}
 
-static void sd_card_modal_close_cb(
-    modal_dialog_t *dialog
-)
-{
-    /*
-     * The dialog will be closed automatically because
-     * close_on_secondary_action is enabled.
-     */
-    (void)dialog;
+    sd_card_modal_show_result(
+        dialog,
+        result,
+        !unmount_operation
+    );
 }
 
 static void sd_card_modal_show_result(
@@ -316,26 +326,58 @@ static void sd_card_modal_update(
     modal_dialog_t *dialog
 )
 {
-    if (dialog == NULL) {
+    if ((dialog == NULL) ||
+        !modal_dialog_is_open(dialog)) {
+
         return;
     }
 
-    const bool mounted =
-        sd_card_driver_is_mounted();
+    storage_sd_state_t state;
 
-    if (mounted) {
-        static char card_info[768];
+    const esp_err_t state_result =
+        storage_sd_service_get_state(
+            &state
+        );
+
+    if (state_result != ESP_OK) {
+        modal_dialog_set_title(
+            dialog,
+            "SD Card Error"
+        );
+
+        modal_dialog_set_message(
+            dialog,
+            esp_err_to_name(state_result)
+        );
+
+        modal_dialog_set_primary_enabled(
+            dialog,
+            false
+        );
+
+        modal_dialog_set_secondary_enabled(
+            dialog,
+            true
+        );
+
+        return;
+    }
+
+    if (state == STORAGE_SD_STATE_MOUNTED) {
+        char card_info[768];
 
         modal_dialog_set_title(
             dialog,
             "SD Card Information"
         );
 
-        if (sd_card_get_info_text(
+        const esp_err_t info_result =
+            sd_card_driver_get_info_text(
                 card_info,
                 sizeof(card_info)
-            )) {
+            );
 
+        if (info_result == ESP_OK) {
             modal_dialog_set_message(
                 dialog,
                 card_info
@@ -345,11 +387,36 @@ static void sd_card_modal_update(
                 dialog,
                 "The SD card is mounted, but its information could not be read."
             );
+
+            ESP_LOGW(
+                TAG,
+                "Failed to get SD-card information: %s",
+                esp_err_to_name(info_result)
+            );
         }
 
         modal_dialog_set_primary_text(
             dialog,
             "Unmount"
+        );
+    } else if (state == STORAGE_SD_STATE_ERROR) {
+        modal_dialog_set_title(
+            dialog,
+            "SD Card Error"
+        );
+
+        modal_dialog_set_message(
+            dialog,
+            "The SD-card service reported an error."
+        );
+
+        /*
+         * Allow another mount attempt, which may recover a transient
+         * card or SPI error.
+         */
+        modal_dialog_set_primary_text(
+            dialog,
+            "Retry"
         );
     } else {
         modal_dialog_set_title(
@@ -378,4 +445,3 @@ static void sd_card_modal_update(
         true
     );
 }
-

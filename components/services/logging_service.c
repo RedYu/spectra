@@ -3,7 +3,6 @@
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "esp_log.h"
 
@@ -12,42 +11,53 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#include "storage_service.h"
 #include "storage_sd_service.h"
 
-/*
- * Logging configuration.
- */
-#define LOGGING_FILE_PATH             "/spectra.log"
+#define LOGGING_FILE_PATH                  ("spectra.log")
 
-#define LOGGING_QUEUE_LENGTH          64
-#define LOGGING_MESSAGE_MAX_LENGTH    256
+#define LOGGING_QUEUE_LENGTH               (64U)
+#define LOGGING_MESSAGE_MAX_LENGTH         (256U)
 
-#define LOGGING_TASK_NAME             "logging_task"
-#define LOGGING_TASK_STACK_SIZE       4096
-#define LOGGING_TASK_PRIORITY         4
+#define LOGGING_TASK_NAME                  ("logging_task")
+#define LOGGING_TASK_STACK_SIZE            (4096U)
+#define LOGGING_TASK_PRIORITY              (4U)
 
-#define LOGGING_FLUSH_INTERVAL_MS     1000
+#define LOGGING_FLUSH_INTERVAL_MS          (1000U)
+
+typedef enum
+{
+    LOGGING_QUEUE_ITEM_MESSAGE,
+    LOGGING_QUEUE_ITEM_OPEN,
+    LOGGING_QUEUE_ITEM_FLUSH,
+    LOGGING_QUEUE_ITEM_CLOSE
+
+} logging_queue_item_type_t;
 
 typedef struct
 {
+    logging_queue_item_type_t type;
+
     size_t length;
     char data[LOGGING_MESSAGE_MAX_LENGTH];
 
-} logging_message_t;
+} logging_queue_item_t;
 
-static QueueHandle_t s_log_queue;
-static SemaphoreHandle_t s_file_mutex;
-static TaskHandle_t s_logging_task;
+static QueueHandle_t s_log_queue = NULL;
+static SemaphoreHandle_t s_control_mutex = NULL;
+static SemaphoreHandle_t s_command_done = NULL;
+static TaskHandle_t s_logging_task = NULL;
 
-static FILE *s_log_file;
+static vprintf_like_t s_previous_vprintf = NULL;
 
-static vprintf_like_t s_previous_vprintf;
+static esp_err_t s_command_result = ESP_FAIL;
 
-static bool s_initialized;
-static bool s_file_logging_enabled;
+static atomic_bool s_initialized;
+static atomic_bool s_file_open;
+static atomic_bool s_accept_file_messages;
 
+static atomic_uint_fast32_t s_active_callbacks;
 static atomic_uint_fast32_t s_dropped_messages;
+static atomic_uint_fast32_t s_pending_dropped_messages;
 
 static int logging_service_vprintf(
     const char *format,
@@ -58,217 +68,372 @@ static void logging_service_task(
     void *argument
 );
 
-static esp_err_t logging_service_write_message(
-    const logging_message_t *message
+static esp_err_t logging_service_control_lock(void);
+
+static void logging_service_control_unlock(void);
+
+static esp_err_t logging_service_send_command(
+    logging_queue_item_type_t type
 );
 
-static esp_err_t logging_service_flush_internal(void);
+static void logging_service_record_dropped_message(void);
 
-static void logging_service_write_dropped_notice(void);
+static esp_err_t logging_service_write_message(
+    FILE *file,
+    const logging_queue_item_t *item
+);
+
+static esp_err_t logging_service_write_dropped_notice(
+    FILE *file
+);
+
+static esp_err_t logging_service_close_file(
+    FILE **file
+);
 
 esp_err_t logging_service_init(void)
 {
-    if (s_initialized) {
+    if (atomic_load(&s_initialized)) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    s_log_queue =
-        xQueueCreate(
-            LOGGING_QUEUE_LENGTH,
-            sizeof(logging_message_t)
-        );
+    s_log_queue = xQueueCreate(
+        LOGGING_QUEUE_LENGTH,
+        sizeof(logging_queue_item_t)
+    );
 
     if (s_log_queue == NULL) {
         return ESP_ERR_NO_MEM;
     }
 
-    s_file_mutex =
-        xSemaphoreCreateMutex();
+    s_control_mutex = xSemaphoreCreateMutex();
 
-    if (s_file_mutex == NULL) {
-        vQueueDelete(
-            s_log_queue
-        );
+    if (s_control_mutex == NULL) {
+        vQueueDelete(s_log_queue);
+        s_log_queue = NULL;
 
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_command_done = xSemaphoreCreateBinary();
+
+    if (s_command_done == NULL) {
+        vSemaphoreDelete(s_control_mutex);
+        vQueueDelete(s_log_queue);
+
+        s_control_mutex = NULL;
         s_log_queue = NULL;
 
         return ESP_ERR_NO_MEM;
     }
 
     atomic_store(
-        &s_dropped_messages,
-        0
+        &s_file_open,
+        false
     );
 
-    const BaseType_t task_created =
-        xTaskCreate(
-            logging_service_task,
-            LOGGING_TASK_NAME,
-            LOGGING_TASK_STACK_SIZE,
-            NULL,
-            LOGGING_TASK_PRIORITY,
-            &s_logging_task
-        );
+    atomic_store(
+        &s_accept_file_messages,
+        false
+    );
 
-    if (task_created != pdPASS) {
-        vSemaphoreDelete(
-            s_file_mutex
-        );
+    atomic_store(
+        &s_active_callbacks,
+        0U
+    );
 
-        vQueueDelete(
-            s_log_queue
-        );
+    atomic_store(
+        &s_dropped_messages,
+        0U
+    );
 
-        s_file_mutex = NULL;
+    atomic_store(
+        &s_pending_dropped_messages,
+        0U
+    );
+
+    const BaseType_t task_result = xTaskCreate(
+        logging_service_task,
+        LOGGING_TASK_NAME,
+        LOGGING_TASK_STACK_SIZE,
+        NULL,
+        LOGGING_TASK_PRIORITY,
+        &s_logging_task
+    );
+
+    if (task_result != pdPASS) {
+        vSemaphoreDelete(s_command_done);
+        vSemaphoreDelete(s_control_mutex);
+        vQueueDelete(s_log_queue);
+
+        s_command_done = NULL;
+        s_control_mutex = NULL;
         s_log_queue = NULL;
 
         return ESP_ERR_NO_MEM;
     }
 
     /*
-     * Save the previous output function so UART logging can continue.
+     * Preserve the previous output callback so UART logging continues.
      */
-    s_previous_vprintf =
-        esp_log_set_vprintf(
-            logging_service_vprintf
-        );
+    s_previous_vprintf = esp_log_set_vprintf(
+        logging_service_vprintf
+    );
 
-    s_initialized = true;
+    atomic_store(
+        &s_initialized,
+        true
+    );
 
     return ESP_OK;
 }
 
 esp_err_t logging_service_enable_file(void)
 {
-    if (!s_initialized ||
-        s_file_mutex == NULL) {
-
+    if (!atomic_load(&s_initialized)) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (!storage_service_is_mounted()) {
+    const esp_err_t lock_result =
+        logging_service_control_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (atomic_load(&s_file_open)) {
+        logging_service_control_unlock();
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTake(
-            s_file_mutex,
-            portMAX_DELAY
-        ) != pdTRUE) {
-
-        return ESP_FAIL;
-    }
-
-    if (s_file_logging_enabled ||
-        s_log_file != NULL) {
-
-        xSemaphoreGive(
-            s_file_mutex
+    const esp_err_t result =
+        logging_service_send_command(
+            LOGGING_QUEUE_ITEM_OPEN
         );
 
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    /*
-     * fopen() can access the SD card, so the shared SPI bus must be locked.
-     */
-
-    storage_sd_service_open(LOGGING_FILE_PATH, "a", &s_log_file);
-
-    if (s_log_file == NULL) {
-        xSemaphoreGive(
-            s_file_mutex
+    if (result == ESP_OK) {
+        atomic_store(
+            &s_accept_file_messages,
+            true
         );
-
-        return ESP_FAIL;
     }
 
-    /*
-     * Use a larger stdio buffer to reduce the number of SD writes.
-     */
-    setvbuf(
-        s_log_file,
-        NULL,
-        _IOFBF,
-        1024
-    );
+    logging_service_control_unlock();
 
-    s_file_logging_enabled = true;
-
-    xSemaphoreGive(
-        s_file_mutex
-    );
-
-    return ESP_OK;
+    return result;
 }
 
 esp_err_t logging_service_disable_file(void)
 {
-    if (!s_initialized ||
-        s_file_mutex == NULL) {
+    if (!atomic_load(&s_initialized)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const esp_err_t lock_result =
+        logging_service_control_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (!atomic_load(&s_file_open)) {
+        atomic_store(
+            &s_accept_file_messages,
+            false
+        );
+
+        logging_service_control_unlock();
+        return ESP_OK;
+    }
+
+    /*
+     * Prevent new callbacks from adding messages to the queue.
+     */
+    atomic_store(
+        &s_accept_file_messages,
+        false
+    );
+
+    /*
+     * A callback may have observed the previous enabled state but may
+     * not have submitted its message yet. Wait until all such callbacks
+     * have finished before placing CLOSE into the FIFO queue.
+     */
+    while (atomic_load(&s_active_callbacks) != 0U) {
+        vTaskDelay(1U);
+    }
+
+    /*
+     * CLOSE is placed after every previously accepted message.
+     * Consequently, the logging task drains the queue before flushing
+     * and closing the file.
+     */
+    const esp_err_t result =
+        logging_service_send_command(
+            LOGGING_QUEUE_ITEM_CLOSE
+        );
+
+    logging_service_control_unlock();
+
+    return result;
+}
+
+esp_err_t logging_service_flush(void)
+{
+    if (!atomic_load(&s_initialized) ||
+        !atomic_load(&s_file_open)) {
 
         return ESP_ERR_INVALID_STATE;
     }
 
+    const esp_err_t lock_result =
+        logging_service_control_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+
+    if (atomic_load(&s_file_open)) {
+        result = logging_service_send_command(
+            LOGGING_QUEUE_ITEM_FLUSH
+        );
+    }
+
+    logging_service_control_unlock();
+
+    return result;
+}
+
+esp_err_t logging_service_get_file_enabled(
+    bool *enabled
+)
+{
+    if (enabled == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *enabled = false;
+
+    if (!atomic_load(&s_initialized)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    *enabled = atomic_load(
+        &s_file_open
+    );
+
+    return ESP_OK;
+}
+
+esp_err_t logging_service_get_dropped_count(
+    uint32_t *count
+)
+{
+    if (count == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *count = 0U;
+
+    if (!atomic_load(&s_initialized)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    *count = (uint32_t)atomic_load(
+        &s_dropped_messages
+    );
+
+    return ESP_OK;
+}
+
+esp_err_t logging_service_reset_dropped_count(void)
+{
+    if (!atomic_load(&s_initialized)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    atomic_store(
+        &s_dropped_messages,
+        0U
+    );
+
+    atomic_store(
+        &s_pending_dropped_messages,
+        0U
+    );
+
+    return ESP_OK;
+}
+
+static esp_err_t logging_service_control_lock(void)
+{
+    if (s_control_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(
-            s_file_mutex,
+            s_control_mutex,
             portMAX_DELAY
         ) != pdTRUE) {
 
         return ESP_FAIL;
     }
 
-    /*
-     * Stop accepting new messages for the SD file before closing it.
-     * UART output continues normally.
-     */
-    s_file_logging_enabled = false;
-
-    if (s_log_file != NULL) {
-        storage_sd_service_flush(
-            s_log_file
-        );
-
-        storage_sd_service_close(
-            &s_log_file
-        );
-
-        s_log_file = NULL;
-    }
-
-    xSemaphoreGive(
-        s_file_mutex
-    );
-
     return ESP_OK;
 }
 
-esp_err_t logging_service_flush(void)
+static void logging_service_control_unlock(void)
 {
-    if (!s_initialized) {
+    (void)xSemaphoreGive(
+        s_control_mutex
+    );
+}
+
+static esp_err_t logging_service_send_command(
+    logging_queue_item_type_t type
+)
+{
+    if ((s_log_queue == NULL) ||
+        (s_command_done == NULL)) {
+
         return ESP_ERR_INVALID_STATE;
     }
 
-    return logging_service_flush_internal();
-}
+    logging_queue_item_t item = {
+        .type = type,
+        .length = 0U,
+        .data = {0},
+    };
 
-bool logging_service_is_file_enabled(void)
-{
-    return s_file_logging_enabled;
-}
-
-uint32_t logging_service_get_dropped_count(void)
-{
-    return (uint32_t)atomic_load(
-        &s_dropped_messages
+    /*
+     * Remove an unexpected stale notification before sending a new
+     * serialized control command.
+     */
+    (void)xSemaphoreTake(
+        s_command_done,
+        0U
     );
-}
 
-void logging_service_reset_dropped_count(void)
-{
-    atomic_store(
-        &s_dropped_messages,
-        0
-    );
+    if (xQueueSend(
+            s_log_queue,
+            &item,
+            portMAX_DELAY
+        ) != pdTRUE) {
+
+        return ESP_FAIL;
+    }
+
+    if (xSemaphoreTake(
+            s_command_done,
+            portMAX_DELAY
+        ) != pdTRUE) {
+
+        return ESP_FAIL;
+    }
+
+    return s_command_result;
 }
 
 static int logging_service_vprintf(
@@ -281,86 +446,109 @@ static int logging_service_vprintf(
     }
 
     va_list uart_arguments;
-    va_list queue_arguments;
 
     va_copy(
         uart_arguments,
         arguments
     );
 
-    va_copy(
-        queue_arguments,
-        arguments
-    );
-
-    int output_length = 0;
+    int output_length;
 
     /*
-     * Preserve the normal ESP-IDF UART output.
+     * Preserve normal ESP-IDF UART output.
      */
     if (s_previous_vprintf != NULL) {
-        output_length =
-            s_previous_vprintf(
-                format,
-                uart_arguments
-            );
+        output_length = s_previous_vprintf(
+            format,
+            uart_arguments
+        );
     } else {
-        output_length =
-            vprintf(
-                format,
-                uart_arguments
-            );
+        output_length = vprintf(
+            format,
+            uart_arguments
+        );
     }
 
     va_end(
         uart_arguments
     );
 
+    if (!atomic_load(&s_initialized)) {
+        return output_length;
+    }
+
     /*
-     * Never write to the SD card directly from this callback.
-     * Only copy the formatted message into the queue.
+     * Do not send messages generated by the logging task back to its
+     * own queue. Storage errors may otherwise create an endless loop
+     * of failed writes and additional error messages.
      */
-    if (s_initialized &&
-        s_file_logging_enabled &&
-        s_log_queue != NULL) {
+    if (xTaskGetCurrentTaskHandle() ==
+        s_logging_task) {
 
-        logging_message_t message = {0};
+        return output_length;
+    }
 
-        const int formatted_length =
-            vsnprintf(
-                message.data,
-                sizeof(message.data),
-                format,
-                queue_arguments
-            );
+    atomic_fetch_add(
+        &s_active_callbacks,
+        1U
+    );
+
+    /*
+     * Recheck the state after incrementing the active callback counter.
+     * This synchronizes the callback with logging_service_disable_file().
+     */
+    if (atomic_load(&s_accept_file_messages) &&
+        (s_log_queue != NULL)) {
+
+        logging_queue_item_t item = {
+            .type = LOGGING_QUEUE_ITEM_MESSAGE,
+            .length = 0U,
+            .data = {0},
+        };
+
+        va_list queue_arguments;
+
+        va_copy(
+            queue_arguments,
+            arguments
+        );
+
+        const int formatted_length = vsnprintf(
+            item.data,
+            sizeof(item.data),
+            format,
+            queue_arguments
+        );
+
+        va_end(
+            queue_arguments
+        );
 
         if (formatted_length > 0) {
             if ((size_t)formatted_length >=
-                sizeof(message.data)) {
+                sizeof(item.data)) {
 
-                message.length =
-                    sizeof(message.data) - 1;
+                item.length =
+                    sizeof(item.data) - 1U;
             } else {
-                message.length =
+                item.length =
                     (size_t)formatted_length;
             }
 
             if (xQueueSend(
                     s_log_queue,
-                    &message,
-                    0
+                    &item,
+                    0U
                 ) != pdTRUE) {
 
-                atomic_fetch_add(
-                    &s_dropped_messages,
-                    1
-                );
+                logging_service_record_dropped_message();
             }
         }
     }
 
-    va_end(
-        queue_arguments
+    atomic_fetch_sub(
+        &s_active_callbacks,
+        1U
     );
 
     return output_length;
@@ -372,164 +560,332 @@ static void logging_service_task(
 {
     (void)argument;
 
-    logging_message_t message;
+    FILE *log_file = NULL;
+    logging_queue_item_t item;
+
+    const TickType_t flush_interval_ticks =
+        pdMS_TO_TICKS(
+            LOGGING_FLUSH_INTERVAL_MS
+        );
+
+    TickType_t last_flush_tick =
+        xTaskGetTickCount();
 
     while (true) {
-        const BaseType_t received =
-            xQueueReceive(
-                s_log_queue,
-                &message,
-                pdMS_TO_TICKS(
-                    LOGGING_FLUSH_INTERVAL_MS
-                )
-            );
+        const BaseType_t received = xQueueReceive(
+            s_log_queue,
+            &item,
+            flush_interval_ticks
+        );
 
         if (received == pdTRUE) {
-            logging_service_write_message(
-                &message
-            );
-        } else {
-            /*
-             * Queue timeout is used as a periodic flush timer.
-             */
-            logging_service_write_dropped_notice();
+            switch (item.type) {
+                case LOGGING_QUEUE_ITEM_MESSAGE:
+                    if (log_file != NULL) {
+                        const esp_err_t result =
+                            logging_service_write_message(
+                                log_file,
+                                &item
+                            );
 
-            logging_service_flush_internal();
+                        if (result != ESP_OK) {
+                            logging_service_record_dropped_message();
+                        }
+                    }
+                    break;
+
+                case LOGGING_QUEUE_ITEM_OPEN:
+                    if (log_file != NULL) {
+                        s_command_result =
+                            ESP_ERR_INVALID_STATE;
+                    } else {
+                        s_command_result =
+                            storage_sd_service_open(
+                                LOGGING_FILE_PATH,
+                                "a",
+                                &log_file
+                            );
+
+                        if (s_command_result == ESP_OK) {
+                            if (setvbuf(
+                                    log_file,
+                                    NULL,
+                                    _IOFBF,
+                                    1024U
+                                ) != 0) {
+
+                                const esp_err_t close_result =
+                                    storage_sd_service_close(
+                                        &log_file
+                                    );
+
+                                if ((close_result != ESP_OK) &&
+                                    (log_file != NULL)) {
+
+                                    /*
+                                     * Keep file-open state accurate so
+                                     * disable_file() can retry closing it.
+                                     */
+                                    s_command_result =
+                                        close_result;
+                                } else {
+                                    s_command_result =
+                                        ESP_FAIL;
+                                }
+                            } else {
+                                last_flush_tick =
+                                    xTaskGetTickCount();
+                            }
+                        }
+                    }
+
+                    atomic_store(
+                        &s_file_open,
+                        log_file != NULL
+                    );
+
+                    (void)xSemaphoreGive(
+                        s_command_done
+                    );
+                    break;
+
+                case LOGGING_QUEUE_ITEM_FLUSH:
+                    if (log_file == NULL) {
+                        s_command_result =
+                            ESP_ERR_INVALID_STATE;
+                    } else {
+                        const esp_err_t notice_result =
+                            logging_service_write_dropped_notice(
+                                log_file
+                            );
+
+                        const esp_err_t flush_result =
+                            storage_sd_service_flush(
+                                log_file
+                            );
+
+                        s_command_result =
+                            (notice_result != ESP_OK)
+                                ? notice_result
+                                : flush_result;
+
+                        last_flush_tick =
+                            xTaskGetTickCount();
+                    }
+
+                    (void)xSemaphoreGive(
+                        s_command_done
+                    );
+                    break;
+
+                case LOGGING_QUEUE_ITEM_CLOSE:
+                    s_command_result =
+                        logging_service_close_file(
+                            &log_file
+                        );
+
+                    atomic_store(
+                        &s_file_open,
+                        log_file != NULL
+                    );
+
+                    last_flush_tick =
+                        xTaskGetTickCount();
+
+                    (void)xSemaphoreGive(
+                        s_command_done
+                    );
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        /*
+         * A queue timeout alone is insufficient because a continuous
+         * stream of messages continually restarts the timeout.
+         */
+        const TickType_t current_tick =
+            xTaskGetTickCount();
+
+        if ((log_file != NULL) &&
+            ((current_tick - last_flush_tick) >=
+             flush_interval_ticks)) {
+
+            (void)logging_service_write_dropped_notice(
+                log_file
+            );
+
+            (void)storage_sd_service_flush(
+                log_file
+            );
+
+            last_flush_tick = current_tick;
         }
     }
 }
 
+static void logging_service_record_dropped_message(void)
+{
+    atomic_fetch_add(
+        &s_dropped_messages,
+        1U
+    );
+
+    atomic_fetch_add(
+        &s_pending_dropped_messages,
+        1U
+    );
+}
+
 static esp_err_t logging_service_write_message(
-    const logging_message_t *message
+    FILE *file,
+    const logging_queue_item_t *item
 )
 {
-    if (message == NULL ||
-        message->length == 0) {
+    if ((file == NULL) ||
+        (item == NULL) ||
+        (item->length == 0U)) {
 
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_file_logging_enabled ||
-        s_log_file == NULL) {
+    size_t written = 0U;
 
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    if (xSemaphoreTake(
-            s_file_mutex,
-            portMAX_DELAY
-        ) != pdTRUE) {
-
-        return ESP_FAIL;
-    }
-
-    esp_err_t result =
-        ESP_ERR_INVALID_STATE;
-
-    /*
-     * Check the state again after taking the mutex because file logging
-     * could have been disabled while the task was waiting.
-     */
-    if (s_file_logging_enabled &&
-        s_log_file != NULL) {
-
-        size_t written = 0;
-
+    const esp_err_t result =
         storage_sd_service_write(
-                s_log_file,
-                message->data,
-                message->length,
-                &written
-            );
+            file,
+            item->data,
+            item->length,
+            &written
+        );
 
-        result =
-            written == message->length
-                ? ESP_OK
-                : ESP_FAIL;
+    if (result != ESP_OK) {
+        return result;
     }
 
-    xSemaphoreGive(
-        s_file_mutex
-    );
-
-    return result;
-}
-
-static esp_err_t logging_service_flush_internal(void)
-{
-    if (!s_file_logging_enabled ||
-        s_log_file == NULL ||
-        s_file_mutex == NULL) {
-
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    if (xSemaphoreTake(
-            s_file_mutex,
-            portMAX_DELAY
-        ) != pdTRUE) {
-
+    if (written != item->length) {
         return ESP_FAIL;
     }
 
-    esp_err_t result =
-        ESP_ERR_INVALID_STATE;
-
-    if (s_file_logging_enabled &&
-        s_log_file != NULL) {
-
-        const int flush_result =
-            storage_sd_service_flush(
-                s_log_file
-            );
-
-        result =
-            flush_result == 0
-                ? ESP_OK
-                : ESP_FAIL;
-    }
-
-    xSemaphoreGive(
-        s_file_mutex
-    );
-
-    return result;
+    return ESP_OK;
 }
 
-static void logging_service_write_dropped_notice(void)
+static esp_err_t logging_service_write_dropped_notice(
+    FILE *file
+)
 {
+    if (file == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     const uint32_t dropped =
         (uint32_t)atomic_exchange(
-            &s_dropped_messages,
-            0
+            &s_pending_dropped_messages,
+            0U
         );
 
-    if (dropped == 0 ||
-        !s_file_logging_enabled) {
-
-        return;
+    if (dropped == 0U) {
+        return ESP_OK;
     }
 
-    logging_message_t message = {0};
+    char notice[LOGGING_MESSAGE_MAX_LENGTH];
 
-    const int length =
-        snprintf(
-            message.data,
-            sizeof(message.data),
-            "\n[logging] %lu log message(s) were dropped\n",
-            (unsigned long)dropped
-        );
+    const int length = snprintf(
+        notice,
+        sizeof(notice),
+        "\n[logging] %lu log message(s) were dropped\n",
+        (unsigned long)dropped
+    );
 
     if (length <= 0) {
-        return;
+        /*
+         * Preserve the count so a later flush can report it.
+         */
+        atomic_fetch_add(
+            &s_pending_dropped_messages,
+            dropped
+        );
+
+        return ESP_FAIL;
     }
 
-    message.length =
-        (size_t)length < sizeof(message.data)
+    const size_t notice_length =
+        ((size_t)length < sizeof(notice))
             ? (size_t)length
-            : sizeof(message.data) - 1;
+            : sizeof(notice) - 1U;
 
-    logging_service_write_message(
-        &message
-    );
+    size_t written = 0U;
+
+    const esp_err_t result =
+        storage_sd_service_write(
+            file,
+            notice,
+            notice_length,
+            &written
+        );
+
+    if ((result != ESP_OK) ||
+        (written != notice_length)) {
+
+        /*
+         * Preserve the count so a later flush can report it.
+         */
+        atomic_fetch_add(
+            &s_pending_dropped_messages,
+            dropped
+        );
+
+        return (result != ESP_OK)
+            ? result
+            : ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t logging_service_close_file(
+    FILE **file
+)
+{
+    if (file == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (*file == NULL) {
+        return ESP_OK;
+    }
+
+    esp_err_t result =
+        logging_service_write_dropped_notice(
+            *file
+        );
+
+    const esp_err_t flush_result =
+        storage_sd_service_flush(
+            *file
+        );
+
+    if ((result == ESP_OK) &&
+        (flush_result != ESP_OK)) {
+
+        result = flush_result;
+    }
+
+    /*
+     * Always attempt to close the file, even when flushing failed.
+     */
+    const esp_err_t close_result =
+        storage_sd_service_close(
+            file
+        );
+
+    if ((result == ESP_OK) &&
+        (close_result != ESP_OK)) {
+
+        result = close_result;
+    }
+
+    return result;
 }

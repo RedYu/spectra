@@ -4,8 +4,29 @@
 
 #include "lvgl.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @file toolbar.h
+ * @brief Create and manage application toolbars.
+ *
+ * All functions must be called from the GUI task because they access
+ * LVGL objects directly.
+ */
+
+/**
+ * @brief Toolbar action callback.
+ */
 typedef void (*toolbar_action_cb_t)(void);
 
+/**
+ * @brief Toolbar configuration.
+ *
+ * Text is copied by the corresponding LVGL label. The configuration
+ * structure only needs to remain valid during toolbar_create().
+ */
 typedef struct
 {
     const char *title;
@@ -24,6 +45,12 @@ typedef struct
 
 } toolbar_config_t;
 
+/**
+ * @brief Toolbar instance.
+ *
+ * The instance contains non-owning pointers to LVGL objects. These
+ * pointers become invalid when the parent screen is deleted.
+ */
 typedef struct
 {
     lv_obj_t *root;
@@ -32,17 +59,42 @@ typedef struct
 
 } toolbar_t;
 
+/**
+ * @brief Create a toolbar.
+ *
+ * @param[in] parent Parent LVGL object.
+ * @param[in] config Toolbar configuration.
+ *
+ * @return Created toolbar instance. The root field is NULL if creation
+ * fails or an argument is invalid.
+ */
 toolbar_t toolbar_create(
     lv_obj_t *parent,
     const toolbar_config_t *config
 );
 
+/**
+ * @brief Update the SD-card status indicator.
+ *
+ * @param[in,out] toolbar Toolbar instance.
+ * @param[in] mounted true when the SD card is mounted.
+ */
 void toolbar_set_sd_mounted(
     toolbar_t *toolbar,
     bool mounted
 );
 
+/**
+ * @brief Update the OTA-update status indicator.
+ *
+ * @param[in,out] toolbar Toolbar instance.
+ * @param[in] available true when an OTA update is available.
+ */
 void toolbar_set_ota_available(
     toolbar_t *toolbar,
     bool available
 );
+
+#ifdef __cplusplus
+}
+#endif

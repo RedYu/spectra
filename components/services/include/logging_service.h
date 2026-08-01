@@ -13,14 +13,11 @@ extern "C" {
  * @brief Initialize the logging service.
  *
  * Creates the logging queue, starts the file logging task and installs
- * a custom ESP-IDF vprintf callback.
+ * a custom ESP-IDF vprintf callback. UART logging remains enabled.
  *
- * UART logging remains enabled after initialization.
- *
- * @return
- *      - ESP_OK on success.
- *      - ESP_ERR_INVALID_STATE if already initialized.
- *      - ESP_ERR_NO_MEM if required FreeRTOS objects cannot be created.
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if already
+ * initialized, ESP_ERR_NO_MEM if required resources cannot be created,
+ * otherwise an ESP-IDF error code.
  */
 esp_err_t logging_service_init(void);
 
@@ -28,58 +25,69 @@ esp_err_t logging_service_init(void);
  * @brief Enable log recording to the SD card.
  *
  * The SD card must already be mounted. The log file is opened in append
- * mode, so existing log contents are preserved.
+ * mode, preserving existing contents.
  *
- * @return
- *      - ESP_OK on success.
- *      - ESP_ERR_INVALID_STATE if the service is not initialized,
- *        file logging is already enabled or the SD card is not mounted.
- *      - ESP_FAIL if the log file cannot be opened.
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not initialized, file logging is already enabled, or the SD card is
+ * not mounted, otherwise an ESP-IDF error code.
  */
 esp_err_t logging_service_enable_file(void);
 
 /**
  * @brief Disable log recording to the SD card.
  *
- * Flushes all buffered file data and closes the log file. UART logging
- * remains enabled.
+ * Flushes pending log messages, flushes buffered file data and closes
+ * the log file. UART logging remains enabled. This function must
+ * complete successfully before the SD card is unmounted.
  *
- * This function must be called before unmounting the SD card.
- *
- * @return
- *      - ESP_OK on success.
- *      - ESP_ERR_INVALID_STATE if the service is not initialized.
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not initialized, otherwise an ESP-IDF error code.
  */
 esp_err_t logging_service_disable_file(void);
 
 /**
- * @brief Flush buffered log data to the SD card.
+ * @brief Flush pending log messages and buffered file data.
  *
- * @return
- *      - ESP_OK on success.
- *      - ESP_ERR_INVALID_STATE if file logging is not enabled.
- *      - ESP_FAIL if the file flush operation fails.
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not initialized or file logging is not enabled, otherwise an
+ * ESP-IDF error code.
  */
 esp_err_t logging_service_flush(void);
 
 /**
- * @brief Check whether SD-card file logging is enabled.
+ * @brief Get the current file-logging state.
  *
- * @return true if the log file is currently open.
+ * @param[out] enabled Set to true when the log file is open.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if enabled is NULL,
+ * or ESP_ERR_INVALID_STATE if the service is not initialized.
  */
-bool logging_service_is_file_enabled(void);
+esp_err_t logging_service_get_file_enabled(
+    bool *enabled
+);
 
 /**
- * @brief Get the number of messages dropped because the queue was full.
+ * @brief Get the number of log messages that could not be recorded.
  *
- * @return Number of dropped log messages.
+ * Messages may be dropped because the queue is full or because writing
+ * to the SD card failed.
+ *
+ * @param[out] count Destination for the dropped-message count.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if count is NULL, or
+ * ESP_ERR_INVALID_STATE if the service is not initialized.
  */
-uint32_t logging_service_get_dropped_count(void);
+esp_err_t logging_service_get_dropped_count(
+    uint32_t *count
+);
 
 /**
  * @brief Reset the dropped-message counter.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not initialized, otherwise an ESP-IDF error code.
  */
-void logging_service_reset_dropped_count(void);
+esp_err_t logging_service_reset_dropped_count(void);
 
 #ifdef __cplusplus
 }

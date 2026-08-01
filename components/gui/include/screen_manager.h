@@ -1,5 +1,13 @@
 #pragma once
 
+/**
+ * @file screen_manager.h
+ * @brief Manage application screens and navigation history.
+ *
+ * All screen-manager functions and callbacks must be called from the
+ * GUI task because they access LVGL objects directly.
+ */
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -30,6 +38,8 @@ typedef enum
  * @brief Screen creation callback.
  *
  * The callback must create and return an LVGL screen object.
+ *
+ * @return Created LVGL screen object, or NULL if creation fails.
  */
 typedef lv_obj_t *(*screen_create_cb_t)(void);
 
@@ -42,6 +52,10 @@ typedef void (*screen_lifecycle_cb_t)(
 
 /**
  * @brief Screen descriptor.
+ *
+ * The create callback is required. Lifecycle and destroy callbacks are
+ * optional. When destroy is NULL, the screen manager must delete the
+ * LVGL object using lv_obj_delete().
  */
 typedef struct
 {
@@ -87,6 +101,18 @@ esp_err_t screen_manager_register(
 
 /**
  * @brief Show a screen and add the current screen to history.
+ *
+ * If the requested screen is already active, the function has no
+ * effect. The screen is created when it is not currently cached.
+ *
+ * @param[in] id Screen identifier to show.
+ * @param[in] animation LVGL screen-load animation.
+ * @param[in] animation_time_ms Animation duration in milliseconds.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if id is invalid,
+ * ESP_ERR_INVALID_STATE if the manager is not initialized,
+ * ESP_ERR_NO_MEM if the screen or history entry cannot be created,
+ * otherwise an ESP-IDF error code.
  */
 esp_err_t screen_manager_show(
     screen_id_t id,
@@ -107,7 +133,12 @@ esp_err_t screen_manager_back(
 /**
  * @brief Destroy a cached inactive screen.
  *
- * The screen will be created again the next time it is shown.
+ * The active screen cannot be destroyed. The screen will be created
+ * again when it is next shown.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if id is invalid,
+ * ESP_ERR_INVALID_STATE if the manager is not initialized or the
+ * requested screen is active, otherwise an ESP-IDF error code.
  */
 esp_err_t screen_manager_destroy(
     screen_id_t id

@@ -1,8 +1,8 @@
 #include "widgets/toolbar.h"
 
+#include <stdlib.h>
+
 #include "assets/gui_images.h"
-#include "esp_log.h"
-#include "gui_config.h"
 
 #define TOOLBAR_HEIGHT       56
 #define TOOLBAR_BUTTON_SIZE  44
@@ -16,16 +16,56 @@
 #define TOOLBAR_ICON_COLOR_SD_ERROR     0xE05252
 #define TOOLBAR_ICON_COLOR_OTA_READY    0xF4B400
 
+typedef struct
+{
+    lv_obj_t *image;
+    toolbar_action_cb_t action;
+
+} toolbar_button_context_t;
+
 static void toolbar_button_event_cb(
     lv_event_t *event
 )
 {
-    toolbar_action_cb_t callback =
-        lv_event_get_user_data(event);
+    lv_obj_t *button =
+        lv_event_get_current_target_obj(event);
 
-    if (callback != NULL) {
-        callback();
+    if (button == NULL) {
+        return;
     }
+
+    toolbar_button_context_t *context =
+        lv_obj_get_user_data(button);
+
+    if ((context != NULL) &&
+        (context->action != NULL)) {
+
+        context->action();
+    }
+}
+
+static void toolbar_button_delete_event_cb(
+    lv_event_t *event
+)
+{
+    lv_obj_t *button =
+        lv_event_get_current_target_obj(event);
+
+    if (button == NULL) {
+        return;
+    }
+
+    toolbar_button_context_t *context =
+        lv_obj_get_user_data(button);
+
+    lv_obj_set_user_data(
+        button,
+        NULL
+    );
+
+    free(
+        context
+    );
 }
 
 static lv_obj_t *toolbar_button_create(
@@ -37,9 +77,37 @@ static lv_obj_t *toolbar_button_create(
     if (parent == NULL || image_source == NULL) {
         return NULL;
     }
+    toolbar_button_context_t *context =
+        calloc(
+            1U,
+            sizeof(*context)
+        );
+
+    if (context == NULL) {
+        return NULL;
+    }
+
+    context->action = callback;
 
     lv_obj_t *button =
         lv_button_create(parent);
+
+    if (button == NULL) {
+        free(context);
+        return NULL;
+    }
+
+    lv_obj_set_user_data(
+        button,
+        context
+    );
+
+    lv_obj_add_event_cb(
+        button,
+        toolbar_button_delete_event_cb,
+        LV_EVENT_DELETE,
+        NULL
+    );
 
     lv_obj_set_size(
         button,
@@ -92,13 +160,9 @@ static lv_obj_t *toolbar_button_create(
             button,
             toolbar_button_event_cb,
             LV_EVENT_CLICKED,
-            callback
+            NULL
         );
     } else {
-        /*
-         * The button remains visible but cannot be pressed
-         * when no action is assigned.
-         */
         lv_obj_remove_flag(
             button,
             LV_OBJ_FLAG_CLICKABLE
@@ -107,6 +171,13 @@ static lv_obj_t *toolbar_button_create(
 
     lv_obj_t *image =
         lv_image_create(button);
+
+    if (image == NULL) {
+        lv_obj_delete(button);
+        return NULL;
+    }
+
+    context->image = image;
 
     lv_image_set_src(
         image,
@@ -129,15 +200,6 @@ static lv_obj_t *toolbar_button_create(
         LV_PART_MAIN
     );
 
-    /*
-     * Store the image pointer inside the button so its color
-     * can be changed later.
-     */
-    lv_obj_set_user_data(
-        button,
-        image
-    );
-
     return button;
 }
 
@@ -154,6 +216,10 @@ toolbar_t toolbar_create(
 
     lv_obj_t *toolbar =
         lv_obj_create(parent);
+
+    if (toolbar == NULL) {
+        return result;
+    }
 
     result.root = toolbar;
 
@@ -267,10 +333,8 @@ toolbar_t toolbar_create(
         LV_PART_MAIN
     );
 
-    if (config->left_icon != NULL &&
-        config->left_action != NULL) {
-
-        toolbar_button_create(
+    if (config->left_icon != NULL) {
+        (void)toolbar_button_create(
             left_container,
             config->left_icon,
             config->left_action
@@ -390,13 +454,11 @@ toolbar_t toolbar_create(
     /*
      * Settings button.
      */
-    if (config->right_icon != NULL &&
-        config->right_action != NULL) {
-
-            toolbar_button_create(
-                status_container,
-                config->right_icon,
-                config->right_action
+    if (config->right_icon != NULL) {
+        (void)toolbar_button_create(
+            status_container,
+            config->right_icon,
+            config->right_action
         );
     }
 
@@ -412,26 +474,30 @@ static void toolbar_set_button_icon_color(
         return;
     }
 
-    lv_obj_t *image =
+    toolbar_button_context_t *context =
         lv_obj_get_user_data(button);
 
-    if (image == NULL) {
+    if ((context == NULL) ||
+        (context->image == NULL)) {
+
         return;
     }
 
     lv_obj_set_style_image_recolor(
-        image,
+        context->image,
         color,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_image_recolor_opa(
-        image,
+        context->image,
         LV_OPA_COVER,
         LV_PART_MAIN
     );
 
-    lv_obj_invalidate(image);
+    lv_obj_invalidate(
+        context->image
+    );
 }
 
 void toolbar_set_sd_mounted(

@@ -1,27 +1,31 @@
 #include "sd_card_driver.h"
 
-#include "driver/sdspi_host.h"
-#include "esp_vfs_fat.h"
-#include "sdmmc_cmd.h"
+#include <stdint.h>
+#include <stdio.h>
 
+#include "driver/sdspi_host.h"
+#include "esp_attr.h"
+#include "esp_log.h"
+#include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "sdmmc_cmd.h"
 
-#include "esp_log.h"
-
-#include "board_config.h"
 #include "board.h"
+#include "board_config.h"
+
+#define SD_CARD_PROBE_SECTOR  (0U)
+#define SD_CARD_PROBE_SIZE    (512U)
 
 static const char *TAG = "sd_card_driver";
 
 static sdmmc_card_t *s_card = NULL;
+static SemaphoreHandle_t s_mutex = NULL;
 static bool s_mounted = false;
 
-static SemaphoreHandle_t s_mutex = NULL;
-
-#define SD_CARD_PROBE_SECTOR 0
-
-DMA_ATTR static uint8_t s_probe_buffer[512];
+DMA_ATTR static uint8_t s_probe_buffer[
+    SD_CARD_PROBE_SIZE
+];
 
 esp_err_t sd_card_driver_init(void)
 {
@@ -42,17 +46,26 @@ esp_err_t sd_card_driver_mount(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (!board_spi_is_initialized()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(
             s_mutex,
-            pdMS_TO_TICKS(1000)
+            pdMS_TO_TICKS(1000U)
         ) != pdTRUE) {
 
         return ESP_ERR_TIMEOUT;
     }
 
-    if (s_mounted) {
-        xSemaphoreGive(s_mutex);
+    if (s_mounted && (s_card != NULL)) {
+        (void)xSemaphoreGive(s_mutex);
         return ESP_OK;
+    }
+
+    if (s_mounted || (s_card != NULL)) {
+        (void)xSemaphoreGive(s_mutex);
+        return ESP_ERR_INVALID_STATE;
     }
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -69,14 +82,14 @@ esp_err_t sd_card_driver_mount(void)
 
     const esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
-        .max_files = 8,
-        .allocation_unit_size = 16 * 1024,
+        .max_files = 8U,
+        .allocation_unit_size = 16U * 1024U,
     };
 
     if (!board_spi_lock(
-            pdMS_TO_TICKS(3000)
+            pdMS_TO_TICKS(3000U)
         )) {
-        xSemaphoreGive(s_mutex);
+        (void)xSemaphoreGive(s_mutex);
         return ESP_ERR_TIMEOUT;
     }
 
@@ -88,6 +101,8 @@ esp_err_t sd_card_driver_mount(void)
             &mount_config,
             &s_card
         );
+
+    board_spi_unlock();
 
     if (result == ESP_OK) {
         s_mounted = true;
@@ -101,8 +116,7 @@ esp_err_t sd_card_driver_mount(void)
             stdout,
             s_card
         );
-    } 
-    else {
+    } else {
         s_card = NULL;
         s_mounted = false;
 
@@ -113,9 +127,7 @@ esp_err_t sd_card_driver_mount(void)
         );
     }
 
-    board_spi_unlock();
-
-    xSemaphoreGive(s_mutex);
+    (void)xSemaphoreGive(s_mutex);
 
     return result;
 }
@@ -128,21 +140,21 @@ esp_err_t sd_card_driver_check(void)
 
     if (xSemaphoreTake(
             s_mutex,
-            pdMS_TO_TICKS(500)
+            pdMS_TO_TICKS(500U)
         ) != pdTRUE) {
 
         return ESP_ERR_TIMEOUT;
     }
 
-    if (!s_mounted || s_card == NULL) {
-        xSemaphoreGive(s_mutex);
+    if (!s_mounted || (s_card == NULL)) {
+        (void)xSemaphoreGive(s_mutex);
         return ESP_ERR_INVALID_STATE;
     }
 
     if (!board_spi_lock(
-            pdMS_TO_TICKS(2000)
+            pdMS_TO_TICKS(2000U)
         )) {
-        xSemaphoreGive(s_mutex);
+        (void)xSemaphoreGive(s_mutex);
         return ESP_ERR_TIMEOUT;
     }
 
@@ -151,12 +163,12 @@ esp_err_t sd_card_driver_check(void)
             s_card,
             s_probe_buffer,
             SD_CARD_PROBE_SECTOR,
-            1
+            1U
         );
 
     board_spi_unlock();
 
-    xSemaphoreGive(s_mutex);
+    (void)xSemaphoreGive(s_mutex);
 
     return result;
 }
@@ -169,21 +181,26 @@ esp_err_t sd_card_driver_unmount(void)
 
     if (xSemaphoreTake(
             s_mutex,
-            pdMS_TO_TICKS(1000)
+            pdMS_TO_TICKS(1000U)
         ) != pdTRUE) {
 
         return ESP_ERR_TIMEOUT;
     }
 
-    if (!s_mounted) {
-        xSemaphoreGive(s_mutex);
+    if (!s_mounted && (s_card == NULL)) {
+        (void)xSemaphoreGive(s_mutex);
         return ESP_OK;
     }
 
+    if (!s_mounted || (s_card == NULL)) {
+        (void)xSemaphoreGive(s_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (!board_spi_lock(
-            pdMS_TO_TICKS(3000)
+            pdMS_TO_TICKS(3000U)
         )) {
-        xSemaphoreGive(s_mutex);
+        (void)xSemaphoreGive(s_mutex);
         return ESP_ERR_TIMEOUT;
     }
 
@@ -195,82 +212,114 @@ esp_err_t sd_card_driver_unmount(void)
 
     board_spi_unlock();
 
-    s_card = NULL;
-    s_mounted = false;
+    if (result == ESP_OK) {
+        s_card = NULL;
+        s_mounted = false;
 
-    ESP_LOGI(
-        TAG,
-        "SD card unmounted"
-    );
+        ESP_LOGI(
+            TAG,
+            "SD card unmounted"
+        );
+    } else {
+        ESP_LOGE(
+            TAG,
+            "Failed to unmount SD card: %s",
+            esp_err_to_name(result)
+        );
+    }
 
-    xSemaphoreGive(s_mutex);
+    (void)xSemaphoreGive(s_mutex);
 
     return result;
 }
 
-bool sd_card_driver_is_mounted(void)
-{
-    return s_mounted;
-}
-
-bool sd_card_get_info_text(
-    char *buffer,
-    size_t buffer_size
+esp_err_t sd_card_driver_get_mounted(
+    bool *mounted
 )
 {
+    if (mounted == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *mounted = false;
+
     if (s_mutex == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
     if (xSemaphoreTake(
             s_mutex,
-            pdMS_TO_TICKS(1000)
+            pdMS_TO_TICKS(100U)
         ) != pdTRUE) {
 
         return ESP_ERR_TIMEOUT;
     }
 
-    if (!s_mounted) {
-        xSemaphoreGive(s_mutex);
-        return ESP_OK;
+    *mounted =
+        s_mounted && (s_card != NULL);
+
+    (void)xSemaphoreGive(s_mutex);
+
+    return ESP_OK;
+}
+
+esp_err_t sd_card_driver_get_info_text(
+    char *buffer,
+    size_t buffer_size
+)
+{
+    if ((buffer == NULL) ||
+        (buffer_size < 2U)) {
+
+        return ESP_ERR_INVALID_ARG;
     }
 
-    if (s_card == NULL ||
-        buffer == NULL ||
-        buffer_size == 0) {
+    buffer[0] = '\0';
 
-        xSemaphoreGive(s_mutex);
-        return false;
+    if (s_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
     }
 
-    memset(
-        buffer,
-        0,
-        buffer_size
-    );
+    if (xSemaphoreTake(
+            s_mutex,
+            pdMS_TO_TICKS(1000U)
+        ) != pdTRUE) {
 
-    FILE *stream =
-        fmemopen(
+        return ESP_ERR_TIMEOUT;
+    }
+
+    esp_err_t result = ESP_OK;
+
+    if (!s_mounted || (s_card == NULL)) {
+        result = ESP_ERR_INVALID_STATE;
+    } else {
+        FILE *stream = fmemopen(
             buffer,
-            buffer_size - 1,
+            buffer_size,
             "w"
         );
 
-    if (stream == NULL) {
-        return false;
+        if (stream == NULL) {
+            result = ESP_FAIL;
+        } else {
+            sdmmc_card_print_info(
+                stream,
+                s_card
+            );
+
+            if (fflush(stream) != 0) {
+                result = ESP_FAIL;
+            }
+
+            if (fclose(stream) != 0) {
+                result = ESP_FAIL;
+            }
+
+            buffer[buffer_size - 1U] = '\0';
+        }
     }
 
-    sdmmc_card_print_info(
-        stream,
-        s_card
-    );
+    (void)xSemaphoreGive(s_mutex);
 
-    fflush(stream);
-    fclose(stream);
-
-    buffer[buffer_size - 1] = '\0';
-
-    xSemaphoreGive(s_mutex);
-
-    return true;
+    return result;
 }
