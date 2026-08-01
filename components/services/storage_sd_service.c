@@ -1,5 +1,6 @@
 #include "storage_sd_service.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -39,10 +40,9 @@ static size_t s_open_file_count = 0U;
  *
  * - Use STORAGE_SD_STATE_ERROR for unrecoverable filesystem, SPI,
  *   or unexpected card-removal errors.
- *
- * - Reject ".." path components in storage_sd_service_build_path()
- *   before accepting paths from untrusted external sources.
  */
+
+static esp_err_t storage_sd_service_spi_lock(void);
 
 static esp_err_t storage_sd_service_mutex_lock(void)
 {
@@ -95,6 +95,93 @@ static esp_err_t storage_sd_service_errno_to_error(
     }
 }
 
+static esp_err_t storage_sd_service_read_directory_entry(
+    DIR *directory,
+    struct dirent *out_entry,
+    bool *out_end
+)
+{
+    if ((directory == NULL) ||
+        (out_entry == NULL) ||
+        (out_end == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *out_end = false;
+
+    esp_err_t result =
+        storage_sd_service_spi_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    errno = 0;
+
+    const struct dirent *entry =
+        readdir(directory);
+
+    const int saved_errno = errno;
+
+    if (entry != NULL) {
+        *out_entry = *entry;
+    }
+
+    board_spi_unlock();
+
+    if (entry == NULL) {
+        if (saved_errno != 0) {
+            return storage_sd_service_errno_to_error(
+                saved_errno
+            );
+        }
+
+        *out_end = true;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t storage_sd_service_stat_path(
+    const char *path,
+    struct stat *out_stat
+)
+{
+    if ((path == NULL) ||
+        (out_stat == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t result =
+        storage_sd_service_spi_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    errno = 0;
+
+    const int stat_result =
+        stat(
+            path,
+            out_stat
+        );
+
+    const int saved_errno = errno;
+
+    board_spi_unlock();
+
+    if (stat_result != 0) {
+        return storage_sd_service_errno_to_error(
+            saved_errno
+        );
+    }
+
+    return ESP_OK;
+}
+
 static esp_err_t storage_sd_service_validate_state_locked(void)
 {
     if (!s_started) {
@@ -111,6 +198,54 @@ static esp_err_t storage_sd_service_validate_state_locked(void)
     }
 
     return ESP_OK;
+}
+
+static bool storage_sd_service_has_parent_component(
+    const char *path
+)
+{
+    if (path == NULL) {
+        return false;
+    }
+
+    const char *component = path;
+
+    while (*component != '\0') {
+        while (*component == '/') {
+            component++;
+        }
+
+        if (*component == '\0') {
+            break;
+        }
+
+        const char *component_end =
+            strchr(
+                component,
+                '/'
+            );
+
+        const size_t component_length =
+            component_end != NULL
+                ? (size_t)(component_end - component)
+                : strlen(component);
+
+        if ((component_length == 2U) &&
+            (component[0] == '.') &&
+            (component[1] == '.')) {
+
+            return true;
+        }
+
+        if (component_end == NULL) {
+            break;
+        }
+
+        component =
+            component_end + 1;
+    }
+
+    return false;
 }
 
 /**
@@ -130,6 +265,16 @@ static esp_err_t storage_sd_service_build_path(
     }
 
     if (path[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /*
+     * Reject paths that could escape the SD-card mount point.
+     */
+    if (storage_sd_service_has_parent_component(path) ||
+        (strchr(path, '\\') != NULL) ||
+        (strstr(path, "//") != NULL)) {
+
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -913,6 +1058,296 @@ esp_err_t storage_sd_service_stat(
 
         return storage_sd_service_errno_to_error(
             saved_errno
+        );
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t storage_sd_service_list(
+    const char *path,
+    size_t offset,
+    storage_file_entry_t *entries,
+    size_t capacity,
+    size_t *out_count,
+    bool *out_has_more
+)
+{
+    if ((path == NULL) ||
+        (entries == NULL) ||
+        (capacity == 0U) ||
+        (out_count == NULL) ||
+        (out_has_more == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *out_count = 0U;
+    *out_has_more = false;
+
+    esp_err_t result =
+        storage_sd_service_mutex_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        storage_sd_service_validate_state_locked();
+
+    if (result != ESP_OK) {
+        storage_sd_service_mutex_unlock();
+
+        return result;
+    }
+
+    char full_path[
+        STORAGE_SD_MAX_PATH_LENGTH
+    ];
+
+    result = storage_sd_service_build_path(
+        path,
+        full_path,
+        sizeof(full_path)
+    );
+
+    if (result != ESP_OK) {
+        storage_sd_service_mutex_unlock();
+
+        return result;
+    }
+
+    /*
+     * Lock the SPI bus only while opening the directory.
+     */
+    result =
+        storage_sd_service_spi_lock();
+
+    if (result != ESP_OK) {
+        storage_sd_service_mutex_unlock();
+
+        return result;
+    }
+
+    errno = 0;
+
+    DIR *directory =
+        opendir(
+            full_path
+        );
+
+    const int open_errno = errno;
+
+    board_spi_unlock();
+
+    if (directory == NULL) {
+        storage_sd_service_mutex_unlock();
+
+        ESP_LOGE(
+            TAG,
+            "Failed to open directory '%s': errno=%d (%s)",
+            full_path,
+            open_errno,
+            strerror(open_errno)
+        );
+
+        return storage_sd_service_errno_to_error(
+            open_errno
+        );
+    }
+
+    size_t visible_index = 0U;
+
+    for (;;) {
+        struct dirent directory_entry;
+        bool end_reached = false;
+
+        result =
+            storage_sd_service_read_directory_entry(
+                directory,
+                &directory_entry,
+                &end_reached
+            );
+
+        if (result != ESP_OK) {
+            break;
+        }
+
+        if (end_reached) {
+            break;
+        }
+
+        if ((strcmp(
+                directory_entry.d_name,
+                "."
+            ) == 0) ||
+            (strcmp(
+                directory_entry.d_name,
+                ".."
+            ) == 0)) {
+
+            continue;
+        }
+
+        if (visible_index < offset) {
+            visible_index++;
+            continue;
+        }
+
+        /*
+         * Reading one additional entry allows the service to report
+         * whether another page is available.
+         */
+        if (*out_count >= capacity) {
+            *out_has_more = true;
+            break;
+        }
+
+        char entry_path[
+            STORAGE_SD_MAX_PATH_LENGTH
+        ];
+
+        const size_t directory_length =
+            strlen(full_path);
+
+        const bool needs_separator =
+            (directory_length > 0U) &&
+            (full_path[directory_length - 1U] != '/');
+
+        const int written =
+            snprintf(
+                entry_path,
+                sizeof(entry_path),
+                "%s%s%s",
+                full_path,
+                needs_separator ? "/" : "",
+                directory_entry.d_name
+            );
+
+        if ((written < 0) ||
+            ((size_t)written >=
+             sizeof(entry_path))) {
+
+            result = ESP_ERR_INVALID_SIZE;
+            break;
+        }
+
+        struct stat entry_stat;
+
+        memset(
+            &entry_stat,
+            0,
+            sizeof(entry_stat)
+        );
+
+        result =
+            storage_sd_service_stat_path(
+                entry_path,
+                &entry_stat
+            );
+
+        if (result != ESP_OK) {
+            break;
+        }
+
+        if (entry_stat.st_size < 0) {
+            result = ESP_FAIL;
+            break;
+        }
+
+        storage_file_entry_t *destination =
+            &entries[*out_count];
+
+        memset(
+            destination,
+            0,
+            sizeof(*destination)
+        );
+
+        (void)strlcpy(
+            destination->name,
+            directory_entry.d_name,
+            sizeof(destination->name)
+        );
+
+        destination->is_directory =
+            S_ISDIR(entry_stat.st_mode);
+
+        destination->size =
+            destination->is_directory
+                ? 0U
+                : (size_t)entry_stat.st_size;
+
+        (*out_count)++;
+        visible_index++;
+    }
+
+    /*
+     * Closing the directory may also access the FAT filesystem,
+     * so it must be performed while the SPI bus is locked.
+     */
+    int close_result = -1;
+    int close_errno = 0;
+
+    const esp_err_t close_lock_result =
+        storage_sd_service_spi_lock();
+
+    if (close_lock_result == ESP_OK) {
+        errno = 0;
+
+        close_result =
+            closedir(
+                directory
+            );
+
+        close_errno = errno;
+
+        board_spi_unlock();
+    }
+
+    storage_sd_service_mutex_unlock();
+
+    if (result != ESP_OK) {
+        *out_count = 0U;
+        *out_has_more = false;
+
+        ESP_LOGE(
+            TAG,
+            "Failed to list directory '%s': %s",
+            full_path,
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    if (close_lock_result != ESP_OK) {
+        *out_count = 0U;
+        *out_has_more = false;
+
+        ESP_LOGE(
+            TAG,
+            "Failed to lock SPI bus while closing directory '%s'",
+            full_path
+        );
+
+        return close_lock_result;
+    }
+
+    if (close_result != 0) {
+        *out_count = 0U;
+        *out_has_more = false;
+
+        ESP_LOGE(
+            TAG,
+            "Failed to close directory '%s': errno=%d (%s)",
+            full_path,
+            close_errno,
+            strerror(close_errno)
+        );
+
+        return storage_sd_service_errno_to_error(
+            close_errno
         );
     }
 

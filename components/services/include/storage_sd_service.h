@@ -1,10 +1,13 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <sys/stat.h>
 
 #include "esp_err.h"
+
+#include "storage_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -141,6 +144,41 @@ esp_err_t storage_sd_service_rename(
 esp_err_t storage_sd_service_stat(
     const char *path,
     struct stat *out_stat
+);
+
+/**
+ * @brief List entries in an SD-card directory.
+ *
+ * Relative paths are automatically prefixed with the SD-card mount
+ * point. The paths "/", "/logs" and "/sdcard/logs" are accepted.
+ *
+ * The special directory entries "." and ".." are not returned.
+ * At most capacity entries are written. If more entries are available,
+ * out_has_more is set to true. The offset parameter can be used to
+ * request the next page.
+ *
+ * Unlike SPIFFS, the SD-card filesystem provides real directories.
+ *
+ * @param[in] path Directory path inside the SD-card filesystem.
+ * @param[in] offset Number of matching entries to skip.
+ * @param[out] entries Destination array for directory entries.
+ * @param[in] capacity Number of elements available in entries.
+ * @param[out] out_count Number of entries written.
+ * @param[out] out_has_more True when additional entries are available.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if an argument or path
+ * is invalid, ESP_ERR_INVALID_STATE if the service is not started or
+ * the SD card is not mounted, ESP_ERR_NOT_FOUND if the directory does
+ * not exist, ESP_ERR_TIMEOUT if a required lock cannot be acquired,
+ * otherwise an ESP-IDF error code.
+ */
+esp_err_t storage_sd_service_list(
+    const char *path,
+    size_t offset,
+    storage_file_entry_t *entries,
+    size_t capacity,
+    size_t *out_count,
+    bool *out_has_more
 );
 
 /**

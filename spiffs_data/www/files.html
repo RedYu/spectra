@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <title>Spectra Files</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            background: #f3f5f7;
+            color: #20252b;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 18px 24px;
+            background: #151a20;
+            color: #ffffff;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 22px;
+        }
+
+        .header select {
+            min-width: 160px;
+            padding: 9px 12px;
+            border: 1px solid #404851;
+            border-radius: 8px;
+            background: #252c34;
+            color: #ffffff;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 960px;
+            margin: 28px auto;
+            padding: 0 16px;
+        }
+
+        .card {
+            overflow: hidden;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        }
+
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            border-bottom: 1px solid #e3e7eb;
+        }
+
+        .path {
+            overflow: hidden;
+            flex: 1;
+            color: #58636e;
+            font-family: monospace;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .button {
+            min-width: 76px;
+            padding: 9px 14px;
+            border: 0;
+            border-radius: 8px;
+            background: #2476ff;
+            color: #ffffff;
+            cursor: pointer;
+        }
+
+        .button:hover:not(:disabled) {
+            background: #145fd8;
+        }
+
+        .button:disabled {
+            background: #aeb7c1;
+            cursor: default;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 13px 16px;
+            border-bottom: 1px solid #edf0f2;
+            text-align: left;
+        }
+
+        th {
+            background: #fafbfc;
+            color: #65717d;
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+
+        tbody tr:hover {
+            background: #f8faff;
+        }
+
+        th:nth-child(3),
+        td:nth-child(3) {
+            text-align: right;
+        }
+
+        th:last-child,
+        td:last-child {
+            width: 120px;
+            text-align: right;
+        }
+
+        td:last-child button {
+            padding: 7px 12px;
+            border: 0;
+            border-radius: 7px;
+            background: #e8efff;
+            color: #145fd8;
+            cursor: pointer;
+        }
+
+        td:last-child button:hover:not(:disabled) {
+            background: #d8e5ff;
+        }
+
+        td:last-child button:disabled {
+            color: #8b949e;
+            cursor: default;
+        }
+
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            padding: 16px;
+        }
+
+        .page-status {
+            min-width: 100px;
+            color: #65717d;
+            text-align: center;
+        }
+
+        .status {
+            min-height: 20px;
+            margin: 14px 4px;
+            color: #65717d;
+            font-size: 14px;
+        }
+
+        .navigation {
+            margin-top: 20px;
+        }
+
+        .navigation a {
+            color: #2476ff;
+            text-decoration: none;
+        }
+
+        .navigation a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 600px) {
+            .header {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .header select {
+                width: 100%;
+            }
+
+            th,
+            td {
+                padding: 11px 10px;
+            }
+
+            th:nth-child(2),
+            td:nth-child(2) {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <h1 id="device-title">
+            Spectra file browser
+        </h1>
+
+        <select
+            id="volume"
+            aria-label="Storage volume"
+        >
+            <option value="internal">
+                Internal storage
+            </option>
+
+            <option value="sd">
+                SD card
+            </option>
+        </select>
+    </header>
+
+    <main class="container">
+        <section class="card">
+            <nav
+                class="toolbar"
+                aria-label="Directory navigation"
+            >
+                <button
+                    id="back"
+                    class="button"
+                    type="button"
+                    disabled
+                >
+                    Back
+                </button>
+
+                <span
+                    id="current-path"
+                    class="path"
+                    title="/"
+                >
+                    /
+                </span>
+            </nav>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Size</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="file-list"></tbody>
+                </table>
+            </div>
+
+            <nav
+                class="pagination"
+                aria-label="File-list pages"
+            >
+                <button
+                    id="previous-page"
+                    class="button"
+                    type="button"
+                    disabled
+                >
+                    Previous
+                </button>
+
+                <span
+                    id="page-status"
+                    class="page-status"
+                >
+                    No entries
+                </span>
+
+                <button
+                    id="next-page"
+                    class="button"
+                    type="button"
+                    disabled
+                >
+                    Next
+                </button>
+            </nav>
+        </section>
+
+        <p
+            id="status"
+            class="status"
+            role="status"
+            aria-live="polite"
+        ></p>
+
+        <nav class="navigation">
+            <a href="/">
+                Return to settings
+            </a>
+        </nav>
+    </main>
+
+    <script src="/files.js"></script>
+</body>
+</html>

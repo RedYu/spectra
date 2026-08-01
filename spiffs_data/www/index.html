@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+
+        <title>Spectra Settings</title>
+
+        <style>
+            *{box-sizing:border-box}
+
+            body{
+                margin:0;
+                min-height:100vh;
+                font-family:Arial,sans-serif;
+                background:#f3f5f7;
+                color:#20252b;
+            }
+
+            .header{
+                background:#151a20;
+                color:#fff;
+                padding:18px 24px;
+                font-size:22px;
+                font-weight:600;
+            }
+
+            .container{
+                max-width:720px;
+                margin:32px auto;
+                padding:0 16px;
+            }
+
+            .card{
+                background:#fff;
+                border-radius:12px;
+                padding:24px;
+                box-shadow:0 4px 16px rgba(0,0,0,.08);
+                margin-bottom:20px;
+            }
+
+            .card h2{
+                margin:0 0 20px;
+                font-size:20px;
+            }
+
+            .field{
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                gap:20px;
+                margin:18px 0;
+            }
+
+            .field label{
+                font-weight:500;
+            }
+
+            input[type=range]{
+                width:240px;
+            }
+
+            .value{
+                display:inline-block;
+                min-width:48px;
+                text-align:right;
+            }
+
+            .status{
+                color:#66717c;
+                font-size:14px;
+            }
+
+            .button{
+                border:0;
+                border-radius:8px;
+                padding:11px 18px;
+                background:#2476ff;
+                color:#fff;
+                font-size:15px;
+                cursor:pointer;
+            }
+
+            .button:hover{
+                background:#145fd8;
+            }
+
+            @media(max-width:560px){
+                .field{
+                    align-items:flex-start;
+                    flex-direction:column;
+                }
+
+                input[type=range]{
+                    width:100%;
+                }
+            }
+        </style>
+    </head>
+
+    <body>
+        <header id="device-title" class="header">Loading device...</header>
+
+        <main class="container">
+            <section class="card">
+                <h2>Device settings</h2>
+
+                <div class="field">
+                    <label>Device address</label>
+                    <span>172.16.10.1</span>
+                </div>
+
+                <div class="field">
+                    <label>Device name</label>
+                    <span>spectra.device</span>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Display</h2>
+
+                <div class="field">
+                    <label for="brightness">Brightness</label>
+
+                    <div>
+                        <input id="brightness" type="range" min="10" max="100" value="80">
+
+                        <span id="brightness-value" class="value">
+                            80%
+                        </span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Application</h2>
+
+                <div class="field">
+                    <label for="animations">GUI animations</label>
+                    <input id="animations" type="checkbox">
+                </div>
+
+                <div class="field">
+                    <label for="sd-logging">SD-card logging</label>
+                    <input id="sd-logging" type="checkbox">
+                </div>
+
+                <button id="save" class="button" type="button">
+                    Save settings
+                </button>
+
+                <p id="status" class="status"></p>
+            </section>
+        </main>
+
+        <script>
+			const brightness =
+				document.getElementById("brightness");
+
+			const brightnessValue =
+				document.getElementById("brightness-value");
+
+			const animations =
+				document.getElementById("animations");
+
+			const sdLogging =
+				document.getElementById("sd-logging");
+
+			const status =
+				document.getElementById("status");
+
+			brightness.addEventListener("input", () => {
+				brightnessValue.textContent =
+					`${brightness.value}%`;
+			});
+
+			async function loadSettings() {
+				try {
+					const response =
+						await fetch("/api/settings", {
+							cache: "no-store"
+						});
+
+					if (!response.ok) {
+						throw new Error(
+							`HTTP ${response.status}`
+						);
+					}
+
+					const settings =
+						await response.json();
+
+					brightness.value =
+						settings.display.brightness;
+
+					brightnessValue.textContent =
+						`${settings.display.brightness}%`;
+
+					animations.checked =
+						settings.ui.animations_enabled;
+
+					sdLogging.checked =
+						settings.logging.sd_enabled;
+
+					status.textContent =
+						"Settings loaded";
+				} catch (error) {
+					status.textContent =
+						`Failed to load settings: ${error.message}`;
+				}
+			}
+
+			async function applySettings() {
+				status.textContent =
+					"Applying settings...";
+
+				const response =
+					await fetch("/api/settings", {
+						method: "PUT",
+
+						headers: {
+							"Content-Type": "application/json"
+						},
+
+						body: JSON.stringify({
+							display: {
+								brightness:
+									Number(brightness.value)
+							},
+
+							logging: {
+								sd_enabled:
+									sdLogging.checked
+							},
+
+							ui: {
+								animations_enabled:
+									animations.checked
+							}
+						})
+					});
+
+				const result =
+					await response.json();
+
+				if (!response.ok) {
+					throw new Error(result.message);
+				}
+			}
+
+			async function saveSettings() {
+				try {
+					await applySettings();
+
+					const response =
+						await fetch("/api/settings/save", {
+							method: "POST"
+						});
+
+					const result =
+						await response.json();
+
+					if (!response.ok) {
+						throw new Error(result.message);
+					}
+
+					status.textContent =
+						"Settings saved";
+				} catch (error) {
+					status.textContent =
+						`Failed to save settings: ${error.message}`;
+				}
+			}
+
+			document
+				.getElementById("save")
+				.addEventListener(
+					"click",
+					saveSettings
+				);
+
+			loadSettings();
+		</script>
+		<script>
+			async function loadSystemInformation() {
+				const title =
+					document.getElementById("device-title");
+
+				try {
+					const response =
+						await fetch("/api/system", {
+							cache: "no-store"
+						});
+
+					if (!response.ok) {
+						throw new Error(
+							`HTTP ${response.status}`
+						);
+					}
+
+					const system =
+						await response.json();
+
+					if (system.device_name) {
+						title.textContent =
+							`${system.device_id} (${system.device_name})`;
+					} else {
+						title.textContent =
+							system.device_id;
+					}
+				} catch (error) {
+					title.textContent =
+						"Spectra";
+
+					console.error(
+						"Failed to load system information:",
+						error
+					);
+				}
+			}
+
+			loadSystemInformation();
+		</script>
+    </body>
+    </html>
