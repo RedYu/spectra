@@ -7,6 +7,7 @@ idf_component_register(
         "settings_service.c"
         "system_service.c"
         "usb_network_service.c"
+        "web_service.c"
 
     INCLUDE_DIRS
         "include"
@@ -29,6 +30,8 @@ idf_component_register(
         esp_hw_support
         esp_netif
         lwip
+        dns_server
+        esp_http_server
 )
 
 spiffs_create_partition_image(

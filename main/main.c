@@ -16,6 +16,7 @@
 #include "gui_service.h"
 #include "logging_service.h"
 #include "usb_network_service.h"
+#include "web_service.h"
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
@@ -239,6 +240,19 @@ static void startup_task(
         (void)gui_service_set_boot_progress(
             90U,
             "Settings application failed"
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    result = web_service_start();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to start web service: %s",
+            esp_err_to_name(result)
         );
 
         vTaskDelete(NULL);
