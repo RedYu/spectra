@@ -1,0 +1,7 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/RedYu/spectra/discussions
+    about: Ask questions and discuss ideas before opening an issue
+    
