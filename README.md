@@ -8,8 +8,8 @@
 ![Platform](https://img.shields.io/badge/Platform-ESP32--S3-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-**Modern Automotive CAN Analyzer** <br />
-Modular ESP32-S3 diagnostic platform built with ESP-IDF, FreeRTOS and LVGL 9.
+**Modern Automotive CAN Analyzer**  
+A modular ESP32-S3 diagnostic platform built with ESP-IDF, FreeRTOS, and LVGL 9.
 
 </div>
 
@@ -17,57 +17,58 @@ Modular ESP32-S3 diagnostic platform built with ESP-IDF, FreeRTOS and LVGL 9.
 
 ## Overview
 
-Spectra is an embedded automotive diagnostic platform based on the **ESP32-S3**.
+Spectra is an embedded automotive diagnostic platform based on the ESP32-S3. It combines a touch interface, removable and internal storage, USB networking, and a layered firmware architecture.
 
-The project combines a modern touch GUI (LVGL 9), modular software architecture and CAN communication capabilities. 
-The long-term goal is to create a professional handheld device for real-time monitoring, logging and analysis of vehicle networks.
-
----
+The long-term goal is to provide a handheld device for real-time monitoring, recording, and analysis of automotive networks.
 
 ## Features
 
 ### Implemented
-- ESP-IDF 6.x + FreeRTOS
+
+- ESP-IDF 6.x and FreeRTOS
 - LVGL 9 graphical interface
-- Layered software architecture (Drivers → Services → Models → GUI)
-- ILI9488 480×320 display driver (SPI + DMA)
-- GT911 capacitive touch driver
-- SPIFFS storage service
-- Settings service with JSON configuration
-- System model (uptime, heap, firmware info)
-- Splash screen + Main screen + Settings screen
-- GitHub Actions CI
+- ILI9488 480×320 display over SPI with DMA
+- GT911 capacitive touch controller over I²C
+- Centralized screen manager with lazy creation and navigation history
+- Splash, main, and settings screens
+- Internal SPIFFS storage
+- SD-card storage with shared SPI-bus synchronization
+- JSON-based settings model and service
+- Thread-safe system model and runtime metrics
+- UART and optional SD-card file logging
+- USB RNDIS networking
+- DHCP server for the `172.16.10.x` subnet
+- Local DNS resolution for `spectra.device`
+- Embedded HTTP server and settings API
+- Browser-based internal-storage and SD-card file listing
+- File downloads through the web interface
+- GitHub Actions build workflow
 
 ### Planned
-- Screen Manager with navigation history
-- CAN / TWAI interface
-- CAN Monitor & Logger
-- DBC Parser
-- UDS / OBD-II support
-- XCP Protocol
-- Live Dashboard
-- SD Card support
-- Wi-Fi / USB networking
-- OTA updates
-- Data Recording
-- SD Card Support
-- Firmware Manager
 
----
+- CAN/TWAI interfaces
+- Live CAN monitor and logger
+- DBC parsing
+- UDS and OBD-II support
+- XCP support
+- Live dashboards
+- Wi-Fi and Bluetooth connectivity
+- OTA firmware updates
+- Device registration and authentication
+- Remote backend integration
 
 ## Hardware
 
-| Component     | Description            |
-| ------------- | ---------------------- |
-| MCU           | ESP32-S3               |
-| Display       | ILI9488 480×320 SPI    |
-| Touch         | GT911                  |
-| Communication | CAN / TWAI             |
-| Storage       | SD Card (planned)      |
-| Networking    | USB / Wi-Fi / Ethernet |
-| Flash         | 16 MB                  |
-
----
+| Component | Description |
+| --- | --- |
+| MCU | ESP32-S3 |
+| Display | ILI9488, 480×320, SPI |
+| Touch | GT911, I²C |
+| Automotive communication | CAN/TWAI planned |
+| Internal storage | SPIFFS |
+| Removable storage | SD card over SPI |
+| USB connectivity | USB RNDIS network interface |
+| Flash | 16 MB |
 
 ## Project Architecture
 
@@ -76,141 +77,185 @@ spectra/
 ├── main/
 │   └── main.c
 ├── components/
-│   ├── board/           # Board configuration & pins
-│   ├── drivers/         # Display, Touch, (CAN)
-│   ├── services/        # Storage, Settings, System, GUI
-│   ├── models/          # Shared application state
-│   ├── gui/             # Screens, widgets, assets
-│   └── lvgl_port/       # LVGL porting layer
+│   ├── board/                 # Board initialization and shared buses
+│   ├── drivers/               # Display, touch, backlight, and SD drivers
+│   ├── services/              # System, storage, settings, logging, USB, and web services
+│   ├── models/                # Thread-safe application state
+│   ├── gui/                   # Screens, widgets, configuration, and assets
+│   └── lvgl_port/             # LVGL display and input integration
 ├── partitions.csv
 └── sdkconfig.defaults
 ```
 
+The application follows a layered architecture:
 
-
-## Software Architecture
-
-The application follows a layered architecture.
-
-```
-Application
-      │
-      ▼
- GUI (LVGL)
-      │
-      ▼
- Services
-      │
-      ▼
- Models
-      │
-      ▼
- Drivers
-      │
-      ▼
- Hardware
+```text
+Application startup
+        │
+        ▼
+GUI and web interfaces
+        │
+        ▼
+Application services
+        │
+        ▼
+Shared models
+        │
+        ▼
+Hardware drivers
+        │
+        ▼
+Hardware
 ```
 
-Responsibilities:
-
-- **Drivers** provide hardware abstraction.
-- **Services** implement application logic.
-- **Models** store shared application state.
-- **GUI** only reads data from models.
-- **Screen Manager** handles screen creation, navigation history and lifecycle
+- **Drivers** provide hardware-specific operations.
+- **Services** coordinate application logic and resource ownership.
+- **Models** hold synchronized application state.
+- **GUI** presents model data and sends user actions to services.
+- **Screen Manager** controls screen creation, navigation, and lifecycle.
 
 ## Screen Manager
-The GUI uses a centralized Screen Manager with the following features:
 
-* Screen registration via descriptors
-* Lazy screen creation
-* Navigation history stack
-* Animated transitions
+The centralized screen manager provides:
 
-Example usage:
-
-```c
-// Show a screen
-screen_manager_show(SCREEN_ID_SETTINGS, LV_SCR_LOAD_ANIM_MOVE_LEFT, 250);
-
-// Go back
-screen_manager_back(LV_SCR_LOAD_ANIM_MOVE_RIGHT, 250);
-```
-
-## Software Stack
-
-* ESP-IDF
-* FreeRTOS
-* LVGL 9
-* esp_lcd
-* SPI DMA
-* CMake
-
----
-
-## Storage
-
-The project uses two independent storage layers.
-
-| Storage | Purpose |
-|----------|---------|
-| NVS | Persistent system settings |
-| SPIFFS | Configuration files and application resources |
-
-Configuration is loaded from:
-
-```
-/storage/device_config.json
-```
-
-## Configuration
-
-Application settings are stored in JSON format.
+- descriptor-based screen registration;
+- lazy screen creation;
+- cached screen instances;
+- navigation history;
+- optional animated transitions;
+- screen lifecycle callbacks.
 
 Example:
 
+```c
+screen_manager_show(
+    SCREEN_ID_SETTINGS,
+    LV_SCR_LOAD_ANIM_MOVE_LEFT,
+    250U
+);
+
+screen_manager_back(
+    LV_SCR_LOAD_ANIM_MOVE_RIGHT,
+    250U
+);
+```
+
+## Storage
+
+Spectra uses separate internal and removable storage services.
+
+| Storage | Mount point | Purpose |
+| --- | --- | --- |
+| SPIFFS | `/storage` | Web resources, settings, and internal application data |
+| SD card | `/sdcard` | Logs, recordings, and user files |
+
+Storage operations validate paths and serialize access. SD-card operations also coordinate access to the shared SPI bus.
+
+The current settings file is stored at:
+
+```text
+/storage/device_config.json
+```
+
+Example configuration:
+
 ```json
 {
-    "schema_version": 1,
-
-    "device": {
-        "target": "spectra",
-		"name": "Modern Automotive CAN Analyzer"
-    },
-	
-	"display": {
-		"brightness": 80
-	}
+  "schema_version": 1,
+  "device": {
+    "target": "spectra",
+    "name": "Modern Automotive CAN Analyzer"
+  },
+  "display": {
+    "brightness": 80
+  },
+  "logging": {
+    "sd_enabled": false
+  },
+  "ui": {
+    "animations_enabled": false
+  }
 }
 ```
 
+## USB Network and Web Interface
+
+Spectra exposes a USB RNDIS network interface. The device provides network configuration to the connected computer through DHCP.
+
+| Setting | Value |
+| --- | --- |
+| Device address | `172.16.10.1` |
+| Client subnet | `172.16.10.x` |
+| Local hostname | `spectra.device` |
+
+After connecting the device, open either address:
+
+```text
+http://spectra.device/
+http://172.16.10.1/
+```
+
+The file browser is available at:
+
+```text
+http://spectra.device/files
+```
+
+Current HTTP endpoints include:
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/api/system` | Read system information |
+| `GET` | `/api/settings` | Read current settings |
+| `PUT` | `/api/settings` | Update settings |
+| `POST` | `/api/settings/save` | Save settings to internal storage |
+| `GET` | `/api/files` | List internal-storage or SD-card entries |
+| `GET` | `/api/files/download` | Download a file |
+
+## Software Stack
+
+- ESP-IDF 6.x
+- FreeRTOS
+- LVGL 9
+- `esp_lcd`
+- TinyUSB
+- ESP-IDF HTTP server
+- cJSON
+- SPIFFS
+- FAT filesystem and SDSPI
+- CMake
+
 ## Getting Started
+
 ### Requirements
 
-* ESP-IDF v5.3+ / v6.x
-* ESP32-S3 board with ILI9488 + GT911
+- ESP-IDF 6.x
+- Python and tools installed by ESP-IDF
+- ESP32-S3 target hardware
+- ILI9488 display and GT911 touch controller for the complete GUI
 
-## Development
+### Configure
 
-Build
+```bash
+idf.py set-target esp32s3
+idf.py menuconfig
+```
+
+### Build
 
 ```bash
 idf.py build
 ```
 
-Flash
+### Flash and monitor
 
 ```bash
-idf.py flash
+idf.py flash monitor
 ```
 
-Monitor
+To exit the serial monitor, press `Ctrl+]`.
 
-```bash
-idf.py monitor
-```
-
-Clean
+### Clean
 
 ```bash
 idf.py fullclean
@@ -218,42 +263,47 @@ idf.py fullclean
 
 ## Roadmap
 
-### Core
+### Platform
 
-- [x] Modular architecture
-- [x] Display & Touch drivers
+- [x] Layered firmware architecture
+- [x] Display and touch drivers
 - [x] LVGL 9 integration
-- [x] Storage & Settings services
-- [x] System model
-- [x] Screen Manager
-- [ ] Theme / Style system
+- [x] Internal and SD-card storage
+- [x] Settings and system services
+- [x] Logging service
+- [x] Screen manager
+- [ ] Shared GUI theme and style system
 
-### GUI
+### User Interface
 
 - [x] Splash screen
 - [x] Main screen
-- [ ] Settings application
-- [ ] Vehicle information
-- [ ] Dashboard
-- [ ] CAN Monitor
+- [x] Settings screen
+- [x] SD-card management dialog
+- [x] Browser-based file manager
+- [ ] Vehicle information screen
+- [ ] Live dashboard
+- [ ] CAN monitor
 
-### Communication
+### Automotive Communication
 
-- [ ] CAN / TWAI driver
-- [ ] CAN Logger
-- [ ] DBC Parser
+- [ ] CAN/TWAI drivers
+- [ ] CAN logger
+- [ ] DBC parser
+- [ ] UDS and OBD-II
 - [ ] XCP
-- [ ] UDS / OBD-II
 
 ### Connectivity
 
-- [ ] USB Networking
-- [ ] Web UI
-- [ ] OTA
+- [x] USB RNDIS networking
+- [x] DHCP and local DNS services
+- [x] Embedded Web UI
 - [ ] Wi-Fi
+- [ ] Bluetooth
+- [ ] OTA updates
+- [ ] Device registration
+- [ ] Remote backend
 
 ## License
 
-This project is licensed under the MIT License.
-
-See the LICENSE file for details.
+This project is licensed under the MIT License. See the [`LICENSE`](LICENSE) file for details.
