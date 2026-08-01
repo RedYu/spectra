@@ -14,6 +14,7 @@
 #include "settings_service.h"
 #include "gui_service.h"
 #include "logging_service.h"
+#include "usb_network_service.h"
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
@@ -258,6 +259,10 @@ void app_main(void)
     ESP_ERROR_CHECK(board_init());
 
     ESP_ERROR_CHECK(system_model_init());
+
+    ESP_ERROR_CHECK(
+        usb_network_service_init()
+    );
 
     ESP_LOGI(TAG, "Application starting");
 

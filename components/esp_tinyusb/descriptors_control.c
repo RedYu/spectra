@@ -31,6 +31,32 @@
 
 static const char *TAG = "tusb_desc";
 
+#define MICROSOFT_OS_10_STRING_INDEX  (0xEEU)
+#define MICROSOFT_OS_10_VENDOR_CODE   (0x20U)
+
+/*
+ * Microsoft OS 1.0 string descriptor:
+ *
+ * bLength       = 18 bytes
+ * bDescriptor   = USB string descriptor
+ * qwSignature   = UTF-16LE "MSFT100"
+ * bMS_VendorCode = 0x20
+ * bPad           = 0
+ */
+static const uint16_t s_ms_os_10_string_descriptor[] = {
+    0x0312U,
+
+    (uint16_t)'M',
+    (uint16_t)'S',
+    (uint16_t)'F',
+    (uint16_t)'T',
+    (uint16_t)'1',
+    (uint16_t)'0',
+    (uint16_t)'0',
+
+    MICROSOFT_OS_10_VENDOR_CODE,
+};
+
 // =============================================================================
 // STRUCTS
 // =============================================================================
@@ -133,6 +159,11 @@ uint8_t const *tud_descriptor_other_speed_configuration_cb(uint8_t index)
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 {
     (void) langid; // Unused, this driver supports only one language in string descriptors
+
+    if (index == MICROSOFT_OS_10_STRING_INDEX) {
+        return s_ms_os_10_string_descriptor;
+    }
+
     assert(s_desc_cfg.str);
     uint8_t chr_count;
     static uint16_t _desc_str[MAX_DESC_BUF_SIZE];

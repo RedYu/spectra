@@ -6,6 +6,7 @@ idf_component_register(
         "storage_sd_service.c"
         "settings_service.c"
         "system_service.c"
+        "usb_network_service.c"
 
     INCLUDE_DIRS
         "include"
@@ -24,6 +25,7 @@ idf_component_register(
         fatfs
         spiffs
         cjson
+        esp_tinyusb
 )
 
 spiffs_create_partition_image(
