@@ -20,6 +20,8 @@
 #define SPLASH_PROGRESS_WIDTH        (280)
 #define SPLASH_PROGRESS_HEIGHT       (8)
 
+#define SPLASH_COMPLETION_HOLD_TIME_MS  (2000U)
+
 static const char *TAG = "splash_screen";
 
 typedef struct
@@ -116,10 +118,28 @@ static void splash_screen_start_transition_timer(void)
         return;
     }
 
+    /*
+     * Loading is complete. Leave only the logo visible while
+     * waiting before transitioning to the main screen.
+     */
+    if (s_context.status_label != NULL) {
+        lv_obj_add_flag(
+            s_context.status_label,
+            LV_OBJ_FLAG_HIDDEN
+        );
+    }
+
+    if (s_context.progress_bar != NULL) {
+        lv_obj_add_flag(
+            s_context.progress_bar,
+            LV_OBJ_FLAG_HIDDEN
+        );
+    }
+
     s_context.timer =
         lv_timer_create(
             splash_screen_timer_cb,
-            SPLASH_SHOW_TIME_MS,
+            SPLASH_COMPLETION_HOLD_TIME_MS,
             NULL
         );
 

@@ -26,6 +26,9 @@ idf_component_register(
         spiffs
         cjson
         esp_tinyusb
+        esp_hw_support
+        esp_netif
+        lwip
 )
 
 spiffs_create_partition_image(

@@ -3,14 +3,19 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_netif.h"
+#include "esp_netif_defaults.h"
+#include "freertos/FreeRTOS.h"
 
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
+#include "dhcpserver/dhcpserver.h"
 #include "tinyusb_net.h"
 
 #define USB_RNDIS_VENDOR_ID            (TINYUSB_ESPRESSIF_VID)
@@ -38,6 +43,24 @@
 #define USB_MS_OS_EXT_COMPAT_ID_INDEX    (0x0004U)
 
 #define USB_RNDIS_CONTROL_INTERFACE      (0U)
+
+#define USB_NETWORK_IP_A                  (172U)
+#define USB_NETWORK_IP_B                  (16U)
+#define USB_NETWORK_IP_C                  (10U)
+#define USB_NETWORK_IP_D                  (1U)
+
+#define USB_NETWORK_DHCP_START_D          (2U)
+#define USB_NETWORK_DHCP_END_D            (10U)
+
+#define USB_NETWORK_TX_TIMEOUT_MS         (1000U)
+
+static esp_netif_t *s_usb_netif = NULL;
+
+/*
+ * esp_netif requires a non-null driver handle.
+ * The current USB driver callbacks do not need additional context.
+ */
+static uint8_t s_netif_driver_context = 0U;
 
 static const char *TAG = "usb_network_service";
 
@@ -216,21 +239,300 @@ static esp_err_t usb_network_initialize_mac(void)
     return ESP_OK;
 }
 
+static esp_err_t usb_network_transmit(
+    void *handle,
+    void *buffer,
+    size_t length
+)
+{
+    (void)handle;
+
+    if ((buffer == NULL) ||
+        (length == 0U) ||
+        (length > UINT16_MAX)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return tinyusb_net_send_sync(
+        buffer,
+        (uint16_t)length,
+        NULL,
+        pdMS_TO_TICKS(
+            USB_NETWORK_TX_TIMEOUT_MS
+        )
+    );
+}
+
+static void usb_network_free_rx_buffer(
+    void *handle,
+    void *buffer
+)
+{
+    (void)handle;
+
+    free(buffer);
+}
+
 static esp_err_t usb_network_receive_callback(
     void *buffer,
     uint16_t length,
     void *context
 )
 {
-    /*
-     * At the enumeration stage Ethernet frames are intentionally
-     * discarded. Later this callback will pass them to esp_netif/lwIP.
-     */
-    (void)buffer;
-    (void)length;
     (void)context;
 
+    if ((buffer == NULL) ||
+        (length == 0U)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_usb_netif == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /*
+     * TinyUSB reuses its receive buffer after this callback returns.
+     * Copy the Ethernet frame before passing it to esp_netif.
+     */
+    void *packet = malloc(length);
+
+    if (packet == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    memcpy(
+        packet,
+        buffer,
+        length
+    );
+
+    /*
+     * esp_netif takes ownership of packet after this call and releases
+     * it through usb_network_free_rx_buffer(), including error paths.
+     */
+    return esp_netif_receive(
+        s_usb_netif,
+        packet,
+        length,
+        NULL
+    );
+}
+
+static esp_err_t usb_network_netif_init(void)
+{
+    if (s_usb_netif != NULL) {
+        return ESP_OK;
+    }
+
+    static const esp_netif_ip_info_t ip_info = {
+        .ip = {
+            .addr = ESP_IP4TOADDR(
+                USB_NETWORK_IP_A,
+                USB_NETWORK_IP_B,
+                USB_NETWORK_IP_C,
+                USB_NETWORK_IP_D
+            ),
+        },
+
+        .netmask = {
+            .addr = ESP_IP4TOADDR(
+                255U,
+                255U,
+                255U,
+                0U
+            ),
+        },
+
+        .gw = {
+            .addr = ESP_IP4TOADDR(
+                USB_NETWORK_IP_A,
+                USB_NETWORK_IP_B,
+                USB_NETWORK_IP_C,
+                USB_NETWORK_IP_D
+            ),
+        },
+    };
+
+    static const esp_netif_inherent_config_t base_config = {
+        .flags =
+            ESP_NETIF_DHCP_SERVER |
+            ESP_NETIF_FLAG_AUTOUP,
+
+        .mac = {0},
+        .ip_info = &ip_info,
+
+        .get_ip_event = 0,
+        .lost_ip_event = 0,
+
+        .if_key = "USB_RNDIS",
+        .if_desc = "usb_rndis",
+
+        .route_prio = 5,
+        .bridge_info = NULL,
+        .mtu = 1500U,
+    };
+
+    static const esp_netif_driver_ifconfig_t driver_config = {
+        .handle = &s_netif_driver_context,
+        .transmit = usb_network_transmit,
+        .transmit_wrap = NULL,
+        .driver_free_rx_buffer =
+            usb_network_free_rx_buffer,
+        .driver_set_mac_filter = NULL,
+    };
+
+    const esp_netif_config_t netif_config = {
+        .base = &base_config,
+        .driver = &driver_config,
+        .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH,
+    };
+
+    s_usb_netif =
+        esp_netif_new(
+            &netif_config
+        );
+
+    if (s_usb_netif == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t result =
+        esp_netif_set_mac(
+            s_usb_netif,
+            tud_network_mac_address
+        );
+
+    if (result != ESP_OK) {
+        goto fail;
+    }
+
+    const dhcps_lease_t lease = {
+        .enable = true,
+
+        .start_ip = {
+            .addr = ESP_IP4TOADDR(
+                USB_NETWORK_IP_A,
+                USB_NETWORK_IP_B,
+                USB_NETWORK_IP_C,
+                USB_NETWORK_DHCP_START_D
+            ),
+        },
+
+        .end_ip = {
+            .addr = ESP_IP4TOADDR(
+                USB_NETWORK_IP_A,
+                USB_NETWORK_IP_B,
+                USB_NETWORK_IP_C,
+                USB_NETWORK_DHCP_END_D
+            ),
+        },
+    };
+
+    /*
+     * Configure the DHCP address pool before starting the interface.
+     */
+    result = esp_netif_dhcps_option(
+        s_usb_netif,
+        ESP_NETIF_OP_SET,
+        ESP_NETIF_REQUESTED_IP_ADDRESS,
+        (void *)&lease,
+        sizeof(lease)
+    );
+
+    if (result != ESP_OK) {
+        goto fail;
+    }
+
+    esp_netif_dns_info_t dns_info = {
+        .ip = ESP_IP4ADDR_INIT(
+            USB_NETWORK_IP_A,
+            USB_NETWORK_IP_B,
+            USB_NETWORK_IP_C,
+            USB_NETWORK_IP_D
+        ),
+    };
+
+    /*
+     * Advertise the device address as the DNS server.
+     */
+    result = esp_netif_set_dns_info(
+        s_usb_netif,
+        ESP_NETIF_DNS_MAIN,
+        &dns_info
+    );
+
+    if (result != ESP_OK) {
+        goto fail;
+    }
+
+    uint8_t offer_dns = 1U;
+
+    /*
+     * Include the configured DNS server in DHCP responses.
+     */
+    result = esp_netif_dhcps_option(
+        s_usb_netif,
+        ESP_NETIF_OP_SET,
+        ESP_NETIF_DOMAIN_NAME_SERVER,
+        &offer_dns,
+        sizeof(offer_dns)
+    );
+
+    if (result != ESP_OK) {
+        goto fail;
+    }
+
+    /*
+     * Bring the network interface up and start its DHCP server.
+     * esp_netif_action_start() is the public interface provided by ESP-IDF.
+     */
+    esp_netif_action_start(
+        s_usb_netif,
+        NULL,
+        0,
+        NULL
+    );
+
+    esp_netif_dhcp_status_t dhcp_status =
+        ESP_NETIF_DHCP_INIT;
+
+    result = esp_netif_dhcps_get_status(
+        s_usb_netif,
+        &dhcp_status
+    );
+
+    if (result != ESP_OK) {
+        goto fail;
+    }
+
+    if (dhcp_status != ESP_NETIF_DHCP_STARTED) {
+        ESP_LOGE(
+            TAG,
+            "USB DHCP server did not start"
+        );
+
+        result = ESP_FAIL;
+        goto fail;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "USB network ready: "
+        "IP 172.16.10.1, DHCP 172.16.10.2-172.16.10.10"
+    );
+
     return ESP_OK;
+
+fail:
+    esp_netif_destroy(
+        s_usb_netif
+    );
+
+    s_usb_netif = NULL;
+
+    return result;
 }
 
 static void usb_network_event_callback(
@@ -262,6 +564,60 @@ static void usb_network_event_callback(
         default:
             break;
     }
+}
+
+bool tud_vendor_control_xfer_cb(
+    uint8_t rhport,
+    uint8_t stage,
+    const tusb_control_request_t *request
+)
+{
+    if (request == NULL) {
+        return false;
+    }
+
+    /*
+     * Data and ACK stages require no additional processing.
+     */
+    if (stage != CONTROL_STAGE_SETUP) {
+        return true;
+    }
+
+    if (request->bmRequestType_bit.type !=
+        TUSB_REQ_TYPE_VENDOR) {
+
+        return false;
+    }
+
+    if (request->bmRequestType_bit.recipient !=
+        TUSB_REQ_RCPT_DEVICE) {
+
+        return false;
+    }
+
+    if (request->bmRequestType_bit.direction !=
+        TUSB_DIR_IN) {
+
+        return false;
+    }
+
+    if (request->bRequest != USB_MS_OS_VENDOR_CODE) {
+        return false;
+    }
+
+    if (request->wIndex !=
+        USB_MS_OS_EXT_COMPAT_ID_INDEX) {
+
+        return false;
+    }
+
+    return tud_control_xfer(
+        rhport,
+        request,
+        (void *)(uintptr_t)
+            s_ms_os_compatible_id_descriptor,
+        sizeof(s_ms_os_compatible_id_descriptor)
+    );
 }
 
 esp_err_t usb_network_service_init(void)
@@ -317,7 +673,7 @@ esp_err_t usb_network_service_init(void)
         sizeof(network_config.mac_addr)
     );
 
-    const esp_err_t result =
+    esp_err_t result =
         tinyusb_net_init(
             &network_config
         );
@@ -334,11 +690,27 @@ esp_err_t usb_network_service_init(void)
         return result;
     }
 
+    result = usb_network_netif_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize USB network interface: %s",
+            esp_err_to_name(result)
+        );
+
+        tinyusb_net_deinit();
+
+        (void)tinyusb_driver_uninstall();
+
+        return result;
+    }
+
     s_initialized = true;
 
     ESP_LOGI(
         TAG,
-        "USB RNDIS initialized"
+        "USB RNDIS service initialized"
     );
 
     return ESP_OK;

@@ -1,6 +1,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
-
+#include "esp_event.h"
+#include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -162,6 +163,10 @@ static void startup_task(
         "Storage ready"
     );
 
+    vTaskDelay(
+        pdMS_TO_TICKS(100U)
+    );
+
     /*
      * Load the configuration after the GUI has started so loading
      * progress can be displayed on the splash screen.
@@ -189,6 +194,10 @@ static void startup_task(
         "Configuration loaded"
     );
 
+    vTaskDelay(
+        pdMS_TO_TICKS(100U)
+    );
+
     result = start_service(
         "Storage SD card",
         storage_sd_service_start
@@ -212,6 +221,10 @@ static void startup_task(
     (void)gui_service_set_boot_progress(
         85U,
         "SD card interface ready"
+    );
+
+    vTaskDelay(
+        pdMS_TO_TICKS(100U)
     );
 
     result = settings_service_apply();
@@ -259,6 +272,14 @@ void app_main(void)
     ESP_ERROR_CHECK(board_init());
 
     ESP_ERROR_CHECK(system_model_init());
+
+    ESP_ERROR_CHECK(
+        esp_netif_init()
+    );
+
+    ESP_ERROR_CHECK(
+        esp_event_loop_create_default()
+    );
 
     ESP_ERROR_CHECK(
         usb_network_service_init()

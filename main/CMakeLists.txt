@@ -14,4 +14,6 @@ idf_component_register(
         gui
         services
         freertos
+        esp_event
+        esp_netif
 )
