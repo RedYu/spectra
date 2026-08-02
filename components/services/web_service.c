@@ -2162,6 +2162,26 @@ static esp_err_t web_service_files_script_handler(
     );
 }
 
+static esp_err_t web_service_favicon_handler(
+    httpd_req_t *request
+)
+{
+    if (request == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    httpd_resp_set_type(
+        request,
+        "image/x-icon"
+    );
+
+    return web_service_send_storage_file(
+        request,
+        "/storage/www/favicon.ico",
+        "image/x-icon"
+    );
+}
+
 esp_err_t web_service_start(void)
 {
     if (s_server != NULL) {
@@ -2199,6 +2219,13 @@ esp_err_t web_service_start(void)
         .method = HTTP_GET,
         .handler =
             web_service_root_handler,
+        .user_ctx = NULL,
+    };
+
+    static const httpd_uri_t favicon_uri = {
+        .uri = "/favicon.ico",
+        .method = HTTP_GET,
+        .handler = web_service_favicon_handler,
         .user_ctx = NULL,
     };
 
@@ -2269,6 +2296,15 @@ esp_err_t web_service_start(void)
     result = httpd_register_uri_handler(
         s_server,
         &root_uri
+    );
+
+    if (result != ESP_OK) {
+        goto registration_failed;
+    }
+
+    result = httpd_register_uri_handler(
+        s_server,
+        &favicon_uri
     );
 
     if (result != ESP_OK) {

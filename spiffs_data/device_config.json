@@ -11,7 +11,7 @@
     },
 
     "logging": {
-        "sd_enabled": false
+        "sd_enabled": true
     },
 
     "ui": {
