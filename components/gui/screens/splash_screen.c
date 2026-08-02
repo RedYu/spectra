@@ -20,7 +20,7 @@
 #define SPLASH_PROGRESS_WIDTH        (280)
 #define SPLASH_PROGRESS_HEIGHT       (8)
 
-#define SPLASH_COMPLETION_HOLD_TIME_MS  (2000U)
+#define SPLASH_COMPLETION_HOLD_TIME_MS  (500U)
 
 static const char *TAG = "splash_screen";
 

@@ -18,7 +18,6 @@
 #include "lvgl.h"
 #include "lvgl_port.h"
 #include "screen_manager.h"
-#include "gui_config.h"
 
 #define GUI_TASK_STACK_SIZE       (8192U)
 #define GUI_TASK_PRIORITY         (5U)
@@ -35,7 +34,6 @@ typedef struct
 static const char *TAG = "gui_service";
 
 static QueueHandle_t s_boot_queue = NULL;
-static bool s_main_screen_opened = false;
 
 static bool s_initialized = false;
 static atomic_bool s_started =
@@ -197,7 +195,6 @@ esp_err_t gui_service_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    s_main_screen_opened = false;
     s_initialized = true;
 
     return ESP_OK;
@@ -219,7 +216,10 @@ static void gui_task(
             esp_err_to_name(result)
         );
 
-        atomic_store(&s_started, false);
+        atomic_store(
+            &s_started,
+            false
+        );
 
         vTaskDelete(NULL);
         return;
@@ -331,46 +331,8 @@ static void gui_service_process_boot_progress(void)
         return;
     }
 
-    /*
-     * The splash screen may already have been destroyed by the screen
-     * manager. Ignore late boot-progress updates after opening main.
-     */
-    if (s_main_screen_opened) {
-        return;
-    }
-
     splash_screen_set_progress(
         message.progress,
         message.status
     );
-
-    if (message.progress < 100U) {
-        return;
-    }
-
-    const bool animations_enabled =
-        gui_config_get_animations_enabled();
-
-    const esp_err_t result =
-        screen_manager_show(
-            SCREEN_ID_MAIN,
-            animations_enabled
-                ? LV_SCR_LOAD_ANIM_FADE_IN
-                : LV_SCR_LOAD_ANIM_NONE,
-            animations_enabled
-                ? 300U
-                : 0U
-        );
-
-    if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to show main screen: %s",
-            esp_err_to_name(result)
-        );
-
-        return;
-    }
-
-    s_main_screen_opened = true;
 }

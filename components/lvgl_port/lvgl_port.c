@@ -201,14 +201,23 @@ static esp_err_t lvgl_display_register(void)
         pixel_count *
         (size_t)bytes_per_pixel;
 
+    /*
+     * The ILI9488 driver converts RGB565 pixels synchronously into its
+     * internal RGB666 DMA buffer before starting the SPI transaction.
+     * Therefore, LVGL draw buffers do not need to be DMA-capable and can
+     * be stored in PSRAM.
+     */
+
     s_draw_buffer_1 = heap_caps_malloc(
         buffer_size,
-        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
     );
 
     s_draw_buffer_2 = heap_caps_malloc(
-        buffer_size, 
-        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL
+        buffer_size,
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
     );
 
     if ((s_draw_buffer_1 == NULL) ||

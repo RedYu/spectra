@@ -9,6 +9,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_heap_caps.h"
 #include "esp_netif.h"
 #include "esp_netif_defaults.h"
 #include "freertos/FreeRTOS.h"
@@ -17,6 +18,7 @@
 #include "tinyusb_default_config.h"
 #include "dhcpserver/dhcpserver.h"
 #include "tinyusb_net.h"
+#include "network_service.h"
 #include "dns_server.h"
 
 #define USB_RNDIS_VENDOR_ID            (TINYUSB_ESPRESSIF_VID)
@@ -348,11 +350,23 @@ static esp_err_t usb_network_receive_callback(
 
     /*
      * TinyUSB reuses its receive buffer after this callback returns.
-     * Copy the Ethernet frame before passing it to esp_netif.
+     * Copy the Ethernet frame into internal memory before passing it
+     * to esp_netif and lwIP.
      */
-    void *packet = malloc(length);
+    void *packet =
+        heap_caps_malloc(
+            length,
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_8BIT
+        );
 
     if (packet == NULL) {
+        ESP_LOGW(
+            TAG,
+            "Failed to allocate %u bytes for USB RX packet",
+            (unsigned int)length
+        );
+
         return ESP_ERR_NO_MEM;
     }
 
@@ -363,8 +377,8 @@ static esp_err_t usb_network_receive_callback(
     );
 
     /*
-     * esp_netif takes ownership of packet after this call and releases
-     * it through usb_network_free_rx_buffer(), including error paths.
+     * esp_netif takes ownership of the packet and releases it through
+     * usb_network_free_rx_buffer(), including receive error paths.
      */
     return esp_netif_receive(
         s_usb_netif,
@@ -379,6 +393,8 @@ static esp_err_t usb_network_netif_init(void)
     if (s_usb_netif != NULL) {
         return ESP_OK;
     }
+
+    bool netif_started = false;
 
     static const esp_netif_ip_info_t ip_info = {
         .ip = {
@@ -549,6 +565,8 @@ static esp_err_t usb_network_netif_init(void)
         NULL
     );
 
+    netif_started = true;
+
     esp_netif_dhcp_status_t dhcp_status =
         ESP_NETIF_DHCP_INIT;
 
@@ -580,6 +598,15 @@ static esp_err_t usb_network_netif_init(void)
     return ESP_OK;
 
 fail:
+    if (netif_started) {
+        esp_netif_action_stop(
+            s_usb_netif,
+            NULL,
+            0,
+            NULL
+        );
+    }
+
     esp_netif_destroy(
         s_usb_netif
     );
@@ -680,6 +707,26 @@ esp_err_t usb_network_service_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    bool network_initialized = false;
+
+    esp_err_t result =
+        network_service_get_initialized(
+            &network_initialized
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!network_initialized) {
+        ESP_LOGE(
+            TAG,
+            "Global network stack is not initialized"
+        );
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
     ESP_RETURN_ON_ERROR(
         usb_network_initialize_mac(),
         TAG,
@@ -727,7 +774,7 @@ esp_err_t usb_network_service_init(void)
         sizeof(network_config.mac_addr)
     );
 
-    esp_err_t result =
+    result =
         tinyusb_net_init(
             &network_config
         );

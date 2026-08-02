@@ -261,6 +261,18 @@ static esp_err_t parse_config(
         goto cleanup;
     }
 
+    if (strlen(device_name->valuestring) >=
+        SETTINGS_DEVICE_NAME_MAX_LENGTH) {
+
+        ESP_LOGE(
+            TAG,
+            "device.name is too long"
+        );
+
+        result = ESP_ERR_INVALID_SIZE;
+        goto cleanup;
+    }
+
     /*
      * Validate display configuration.
      */
@@ -689,7 +701,7 @@ static esp_err_t settings_service_save_internal(void)
         return ESP_FAIL;
     }
 
-    ESP_LOGI(
+    ESP_LOGD(
         TAG,
         "Settings saved successfully"
     );
@@ -1197,7 +1209,7 @@ static esp_err_t settings_service_apply_internal(void)
         TAG,
         "Settings applied: brightness=%u%%, "
         "SD logging=%s, animations=%s",
-        settings.display.brightness,
+        (unsigned int)settings.display.brightness,
         settings.logging.sd_enabled
             ? "enabled"
             : "disabled",

@@ -15,8 +15,8 @@
 
 #define LOGGING_FILE_PATH                  ("spectra.log")
 
-#define LOGGING_QUEUE_LENGTH               (64U)
-#define LOGGING_MESSAGE_MAX_LENGTH         (256U)
+#define LOGGING_QUEUE_LENGTH               (32U)
+#define LOGGING_MESSAGE_MAX_LENGTH         (128U)
 
 #define LOGGING_TASK_NAME                  ("logging_task")
 #define LOGGING_TASK_STACK_SIZE            (4096U)
@@ -51,13 +51,23 @@ static vprintf_like_t s_previous_vprintf = NULL;
 
 static esp_err_t s_command_result = ESP_FAIL;
 
-static atomic_bool s_initialized;
-static atomic_bool s_file_open;
-static atomic_bool s_accept_file_messages;
+static atomic_bool s_initialized =
+    ATOMIC_VAR_INIT(false);
 
-static atomic_uint_fast32_t s_active_callbacks;
-static atomic_uint_fast32_t s_dropped_messages;
-static atomic_uint_fast32_t s_pending_dropped_messages;
+static atomic_bool s_file_open =
+    ATOMIC_VAR_INIT(false);
+
+static atomic_bool s_accept_file_messages =
+    ATOMIC_VAR_INIT(false);
+
+static atomic_uint_fast32_t s_active_callbacks =
+    ATOMIC_VAR_INIT(0U);
+
+static atomic_uint_fast32_t s_dropped_messages =
+    ATOMIC_VAR_INIT(0U);
+
+static atomic_uint_fast32_t s_pending_dropped_messages =
+    ATOMIC_VAR_INIT(0U);
 
 static int logging_service_vprintf(
     const char *format,
@@ -150,6 +160,31 @@ esp_err_t logging_service_init(void)
     atomic_store(
         &s_pending_dropped_messages,
         0U
+    );
+
+    esp_log_level_set(
+        "tusb_desc",
+        ESP_LOG_WARN
+    );
+
+    /*esp_log_level_set(
+        "memory",
+        ESP_LOG_WARN
+    );*/
+
+    esp_log_level_set(
+        "dns_redirect_server",
+        ESP_LOG_WARN
+    );
+
+    esp_log_level_set(
+        "wifi",
+        ESP_LOG_WARN
+    );
+    
+    esp_log_level_set(
+        "wifi_init",
+        ESP_LOG_WARN
     );
 
     const BaseType_t task_result = xTaskCreate(
@@ -619,19 +654,10 @@ static void logging_service_task(
                                         &log_file
                                     );
 
-                                if ((close_result != ESP_OK) &&
-                                    (log_file != NULL)) {
-
-                                    /*
-                                     * Keep file-open state accurate so
-                                     * disable_file() can retry closing it.
-                                     */
-                                    s_command_result =
-                                        close_result;
-                                } else {
-                                    s_command_result =
-                                        ESP_FAIL;
-                                }
+                                s_command_result =
+                                    (close_result != ESP_OK)
+                                        ? close_result
+                                        : ESP_FAIL;
                             } else {
                                 last_flush_tick =
                                     xTaskGetTickCount();

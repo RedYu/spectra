@@ -13,6 +13,7 @@
 
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 #include "settings_model.h"
 #include "settings_service.h"
@@ -36,9 +37,115 @@
 
 #define WEB_FILE_DOWNLOAD_BUFFER_SIZE  (2048U)
 
+#define WEB_FILE_ENCODED_NAME_MAX_LENGTH \
+    (WEB_FILE_PATH_MAX_LENGTH * 3U)
+
+#define WEB_FILE_QUERY_WORKSPACE_SIZE \
+    (WEB_FILE_QUERY_MAX_LENGTH * 2U)
+
 static const char *TAG = "web_service";
 
 static httpd_handle_t s_server = NULL;
+
+typedef struct
+{
+    httpd_req_t *request;
+
+    size_t bytes_sent;
+    bool transfer_started;
+
+} web_service_storage_stream_context_t;
+
+static void *web_service_alloc_psram(
+    size_t size
+)
+{
+    if (size == 0U) {
+        return NULL;
+    }
+
+    return heap_caps_malloc(
+        size,
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+}
+
+static void *web_service_calloc_psram(
+    size_t count,
+    size_t element_size
+)
+{
+    if ((count == 0U) ||
+        (element_size == 0U) ||
+        (count > (SIZE_MAX / element_size))) {
+
+        return NULL;
+    }
+
+    return heap_caps_calloc(
+        count,
+        element_size,
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+}
+
+static esp_err_t web_service_storage_stream_callback(
+    const void *data,
+    size_t size,
+    void *context
+)
+{
+    if ((data == NULL) ||
+        (size == 0U) ||
+        (context == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    web_service_storage_stream_context_t
+        *stream_context = context;
+
+    if (stream_context->request == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    stream_context->transfer_started = true;
+
+    errno = 0;
+
+    const esp_err_t result =
+        httpd_resp_send_chunk(
+            stream_context->request,
+            (const char *)data,
+            size
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to send HTTP chunk: "
+            "socket=%d, size=%u, sent=%u, "
+            "errno=%d (%s), error=%s",
+            httpd_req_to_sockfd(
+                stream_context->request
+            ),
+            (unsigned int)size,
+            (unsigned int)
+                stream_context->bytes_sent,
+            errno,
+            strerror(errno),
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    stream_context->bytes_sent += size;
+
+    return ESP_OK;
+}
 
 static bool web_service_is_filename_attr_char(
     uint8_t character
@@ -153,10 +260,6 @@ static esp_err_t web_service_build_content_disposition(
         return ESP_ERR_INVALID_ARG;
     }
 
-    /*
-     * filename provides an ASCII fallback for older browsers.
-     * filename* preserves the original UTF-8 filename.
-     */
     char fallback[
         WEB_FILE_PATH_MAX_LENGTH
     ];
@@ -186,38 +289,43 @@ static esp_err_t web_service_build_content_disposition(
 
     fallback[fallback_index] = '\0';
 
-    char encoded[
-        (WEB_FILE_PATH_MAX_LENGTH * 3U)
-    ];
+    char *encoded =
+        web_service_alloc_psram(
+            WEB_FILE_ENCODED_NAME_MAX_LENGTH
+        );
 
-    const esp_err_t result =
+    if (encoded == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t result =
         web_service_encode_filename(
             filename,
             encoded,
-            sizeof(encoded)
+            WEB_FILE_ENCODED_NAME_MAX_LENGTH
         );
 
-    if (result != ESP_OK) {
-        return result;
+    if (result == ESP_OK) {
+        const int written =
+            snprintf(
+                header,
+                header_size,
+                "attachment; filename=\"%s\"; "
+                "filename*=UTF-8''%s",
+                fallback,
+                encoded
+            );
+
+        if ((written < 0) ||
+            ((size_t)written >= header_size)) {
+
+            result = ESP_ERR_INVALID_SIZE;
+        }
     }
 
-    const int written =
-        snprintf(
-            header,
-            header_size,
-            "attachment; filename=\"%s\"; "
-            "filename*=UTF-8''%s",
-            fallback,
-            encoded
-        );
+    free(encoded);
 
-    if ((written < 0) ||
-        ((size_t)written >= header_size)) {
-
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    return ESP_OK;
+    return result;
 }
 
 static esp_err_t web_service_send_json_message(
@@ -317,7 +425,7 @@ static esp_err_t web_service_receive_json(
     }
 
     char *json =
-        malloc(
+        web_service_alloc_psram(
             request->content_len + 1U
         );
 
@@ -574,60 +682,71 @@ static esp_err_t web_service_get_file_parameters(
         return ESP_ERR_INVALID_ARG;
     }
 
-    char query[
-        WEB_FILE_QUERY_MAX_LENGTH
-    ];
+    char *workspace =
+        web_service_alloc_psram(
+            WEB_FILE_QUERY_WORKSPACE_SIZE
+        );
+
+    if (workspace == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    char *query = workspace;
+
+    char *encoded_path =
+        workspace +
+        WEB_FILE_QUERY_MAX_LENGTH;
 
     esp_err_t result =
         httpd_req_get_url_query_str(
             request,
             query,
-            sizeof(query)
+            WEB_FILE_QUERY_MAX_LENGTH
         );
 
-    if (result != ESP_OK) {
-        return result;
+    if (result == ESP_OK) {
+        result = httpd_query_key_value(
+            query,
+            "volume",
+            volume,
+            volume_size
+        );
+
+        if (result != ESP_OK) {
+            result = ESP_ERR_INVALID_ARG;
+        }
     }
 
-    result = httpd_query_key_value(
-        query,
-        "volume",
-        volume,
-        volume_size
-    );
+    if (result == ESP_OK) {
+        result = httpd_query_key_value(
+            query,
+            "path",
+            encoded_path,
+            WEB_FILE_QUERY_MAX_LENGTH
+        );
 
-    if (result != ESP_OK) {
-        return ESP_ERR_INVALID_ARG;
+        if (result != ESP_OK) {
+            result = ESP_ERR_INVALID_ARG;
+        }
     }
 
-    char encoded_path[
-        WEB_FILE_QUERY_MAX_LENGTH
-    ];
+    if (result == ESP_OK) {
+        result = web_service_url_decode(
+            encoded_path,
+            path,
+            path_size
+        );
 
-    result = httpd_query_key_value(
-        query,
-        "path",
-        encoded_path,
-        sizeof(encoded_path)
-    );
+        if ((result != ESP_OK) ||
+            (path[0] != '/')) {
 
-    if (result != ESP_OK) {
-        return ESP_ERR_INVALID_ARG;
+            result = ESP_ERR_INVALID_ARG;
+        }
     }
 
-    result = web_service_url_decode(
-        encoded_path,
-        path,
-        path_size
-    );
+    free(workspace);
 
-    if ((result != ESP_OK) ||
-        (path[0] != '/')) {
-
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    return ESP_OK;
+    return result;
 }
 
 static esp_err_t web_service_send_text_error(
@@ -766,6 +885,12 @@ static esp_err_t web_service_download_internal_file(
     const char *path
 )
 {
+    if ((request == NULL) ||
+        (path == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
     char internal_path[
         WEB_FILE_PATH_MAX_LENGTH
     ];
@@ -784,35 +909,27 @@ static esp_err_t web_service_download_internal_file(
         );
     }
 
-    char *data = NULL;
-    size_t data_size = 0U;
+    char *disposition =
+        web_service_alloc_psram(
+            WEB_FILE_DISPOSITION_MAX_LENGTH
+        );
 
-    result = storage_service_read_file(
-        internal_path,
-        &data,
-        &data_size
-    );
-
-    if (result != ESP_OK) {
+    if (disposition == NULL) {
         return web_service_send_download_error(
             request,
-            result
+            ESP_ERR_NO_MEM
         );
     }
-
-    char disposition[
-        WEB_FILE_DISPOSITION_MAX_LENGTH
-    ];
 
     result = web_service_set_download_headers(
         request,
         path,
         disposition,
-        sizeof(disposition)
+        WEB_FILE_DISPOSITION_MAX_LENGTH
     );
 
     if (result != ESP_OK) {
-        free(data);
+        free(disposition);
 
         return web_service_send_download_error(
             request,
@@ -820,16 +937,49 @@ static esp_err_t web_service_download_internal_file(
         );
     }
 
-    const esp_err_t send_result =
-        httpd_resp_send(
-            request,
-            data,
-            data_size
+    web_service_storage_stream_context_t context = {
+        .request = request,
+        .bytes_sent = 0U,
+        .transfer_started = false,
+    };
+
+    result = storage_service_stream_file(
+        internal_path,
+        web_service_storage_stream_callback,
+        &context
+    );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to stream internal file '%s' "
+            "after %u bytes: %s",
+            internal_path,
+            (unsigned int)context.bytes_sent,
+            esp_err_to_name(result)
         );
 
-    free(data);
+        free(disposition);
 
-    return send_result;
+        if (context.transfer_started) {
+            return result;
+        }
+
+        return web_service_send_download_error(
+            request,
+            result
+        );
+    }
+
+    result = httpd_resp_send_chunk(
+        request,
+        NULL,
+        0U
+    );
+
+    free(disposition);
+
+    return result;
 }
 
 static esp_err_t web_service_download_sd_file(
@@ -837,6 +987,12 @@ static esp_err_t web_service_download_sd_file(
     const char *path
 )
 {
+    if ((request == NULL) ||
+        (path == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
     FILE *file = NULL;
 
     esp_err_t result =
@@ -854,7 +1010,7 @@ static esp_err_t web_service_download_sd_file(
     }
 
     uint8_t *buffer =
-        malloc(
+        web_service_alloc_psram(
             WEB_FILE_DOWNLOAD_BUFFER_SIZE
         );
 
@@ -869,18 +1025,33 @@ static esp_err_t web_service_download_sd_file(
         );
     }
 
-    char disposition[
-        WEB_FILE_DISPOSITION_MAX_LENGTH
-    ];
+    char *disposition =
+        web_service_alloc_psram(
+            WEB_FILE_DISPOSITION_MAX_LENGTH
+        );
+
+    if (disposition == NULL) {
+        free(buffer);
+
+        (void)storage_sd_service_close(
+            &file
+        );
+
+        return web_service_send_download_error(
+            request,
+            ESP_ERR_NO_MEM
+        );
+    }
 
     result = web_service_set_download_headers(
         request,
         path,
         disposition,
-        sizeof(disposition)
+        WEB_FILE_DISPOSITION_MAX_LENGTH
     );
 
     if (result != ESP_OK) {
+        free(disposition);
         free(buffer);
 
         (void)storage_sd_service_close(
@@ -893,7 +1064,7 @@ static esp_err_t web_service_download_sd_file(
         );
     }
 
-    while (true) {
+    while (result == ESP_OK) {
         size_t bytes_read = 0U;
 
         result = storage_sd_service_read(
@@ -903,11 +1074,9 @@ static esp_err_t web_service_download_sd_file(
             &bytes_read
         );
 
-        if (result != ESP_OK) {
-            break;
-        }
+        if ((result != ESP_OK) ||
+            (bytes_read == 0U)) {
 
-        if (bytes_read == 0U) {
             break;
         }
 
@@ -916,18 +1085,27 @@ static esp_err_t web_service_download_sd_file(
             (const char *)buffer,
             bytes_read
         );
-
-        if (result != ESP_OK) {
-            break;
-        }
     }
 
-    free(buffer);
+    /*
+     * Finish the chunked response only when all file data was sent
+     * successfully.
+     */
+    if (result == ESP_OK) {
+        result = httpd_resp_send_chunk(
+            request,
+            NULL,
+            0U
+        );
+    }
 
     const esp_err_t close_result =
         storage_sd_service_close(
             &file
         );
+
+    free(disposition);
+    free(buffer);
 
     if (result != ESP_OK) {
         ESP_LOGE(
@@ -937,10 +1115,6 @@ static esp_err_t web_service_download_sd_file(
             esp_err_to_name(result)
         );
 
-        /*
-         * The HTTP response may already be partially transmitted,
-         * so another error response cannot be sent safely.
-         */
         return result;
     }
 
@@ -955,11 +1129,7 @@ static esp_err_t web_service_download_sd_file(
         return close_result;
     }
 
-    return httpd_resp_send_chunk(
-        request,
-        NULL,
-        0U
-    );
+    return ESP_OK;
 }
 
 static esp_err_t web_service_file_download_handler(
@@ -986,6 +1156,14 @@ static esp_err_t web_service_file_download_handler(
             path,
             sizeof(path)
         );
+
+    if (result == ESP_ERR_NO_MEM) {
+        return httpd_resp_send_err(
+            request,
+            HTTPD_500_INTERNAL_SERVER_ERROR,
+            "Insufficient memory"
+        );
+    }
 
     if (result != ESP_OK) {
         return httpd_resp_send_err(
@@ -1041,18 +1219,35 @@ static esp_err_t web_service_files_handler(
         );
     }
 
-    char query[
-        WEB_FILE_QUERY_MAX_LENGTH
-    ];
+    char *workspace =
+        web_service_alloc_psram(
+            WEB_FILE_QUERY_WORKSPACE_SIZE
+        );
+
+    if (workspace == NULL) {
+        return web_service_send_json_message(
+            request,
+            "500 Internal Server Error",
+            false,
+            "Failed to allocate query workspace"
+        );
+    }
+
+    char *query = workspace;
+
+    char *encoded_path =
+        workspace +
+        WEB_FILE_QUERY_MAX_LENGTH;
 
     esp_err_t result =
         httpd_req_get_url_query_str(
             request,
             query,
-            sizeof(query)
+            WEB_FILE_QUERY_MAX_LENGTH
         );
 
     if (result != ESP_OK) {
+        free(workspace);
         return web_service_send_json_message(
             request,
             "400 Bad Request",
@@ -1073,6 +1268,7 @@ static esp_err_t web_service_files_handler(
     );
 
     if (result != ESP_OK) {
+        free(workspace);
         return web_service_send_json_message(
             request,
             "400 Bad Request",
@@ -1081,18 +1277,15 @@ static esp_err_t web_service_files_handler(
         );
     }
 
-    char encoded_path[
-        WEB_FILE_QUERY_MAX_LENGTH
-    ];
-
     result = httpd_query_key_value(
         query,
         "path",
         encoded_path,
-        sizeof(encoded_path)
+        WEB_FILE_QUERY_MAX_LENGTH
     );
 
     if (result != ESP_OK) {
+        free(workspace);
         return web_service_send_json_message(
             request,
             "400 Bad Request",
@@ -1113,6 +1306,8 @@ static esp_err_t web_service_files_handler(
 
     if ((result != ESP_OK) ||
         (path[0] != '/')) {
+
+        free(workspace);
 
         return web_service_send_json_message(
             request,
@@ -1143,6 +1338,7 @@ static esp_err_t web_service_files_handler(
             );
 
         if (result != ESP_OK) {
+            free(workspace);
             return web_service_send_json_message(
                 request,
                 "400 Bad Request",
@@ -1152,6 +1348,7 @@ static esp_err_t web_service_files_handler(
         }
 
     } else if (result != ESP_ERR_NOT_FOUND) {
+        free(workspace);
         return web_service_send_json_message(
             request,
             "400 Bad Request",
@@ -1175,6 +1372,7 @@ static esp_err_t web_service_files_handler(
             );
 
         if (result != ESP_OK) {
+            free(workspace);
             return web_service_send_json_message(
                 request,
                 "400 Bad Request",
@@ -1184,6 +1382,7 @@ static esp_err_t web_service_files_handler(
         }
 
     } else if (result != ESP_ERR_NOT_FOUND) {
+        free(workspace);
         return web_service_send_json_message(
             request,
             "400 Bad Request",
@@ -1195,7 +1394,8 @@ static esp_err_t web_service_files_handler(
     if ((limit == 0U) ||
         (limit >
          WEB_FILE_LIST_MAX_LIMIT)) {
-
+            
+        free(workspace);
         return web_service_send_json_message(
             request,
             "400 Bad Request",
@@ -1204,8 +1404,11 @@ static esp_err_t web_service_files_handler(
         );
     }
 
+    free(workspace);
+    workspace = NULL;
+
     storage_file_entry_t *entries =
-        calloc(
+        web_service_calloc_psram(
             limit,
             sizeof(*entries)
         );
@@ -2060,73 +2263,112 @@ static esp_err_t web_service_send_storage_file(
         return ESP_ERR_INVALID_ARG;
     }
 
-    char *data = NULL;
-    size_t data_size = 0U;
-
-    const esp_err_t result =
-        storage_service_read_file(
-            path,
-            &data,
-            &data_size
+    esp_err_t result =
+        httpd_resp_set_type(
+            request,
+            content_type
         );
 
     if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to read web resource '%s': %s",
-            path,
-            esp_err_to_name(result)
-        );
-
-        const httpd_err_code_t http_error =
-            result == ESP_ERR_NOT_FOUND
-                ? HTTPD_404_NOT_FOUND
-                : HTTPD_500_INTERNAL_SERVER_ERROR;
-
-        return httpd_resp_send_err(
-            request,
-            http_error,
-            result == ESP_ERR_NOT_FOUND
-                ? "Resource not found"
-                : "Failed to read web resource"
-        );
+        return result;
     }
 
-    httpd_resp_set_type(
-        request,
-        content_type
-    );
-
-    httpd_resp_set_hdr(
+    result = httpd_resp_set_hdr(
         request,
         "Cache-Control",
         "no-store"
     );
 
+    if (result != ESP_OK) {
+        return result;
+    }
+
     /*
      * Prevent browsers from interpreting a resource as another
      * content type.
      */
-    httpd_resp_set_hdr(
+    result = httpd_resp_set_hdr(
         request,
         "X-Content-Type-Options",
         "nosniff"
     );
 
-    /*
-     * httpd_resp_send() completes transmission before returning,
-     * so the allocated buffer can be released afterwards.
-     */
-    const esp_err_t send_result =
-        httpd_resp_send(
-            request,
-            data,
-            data_size
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    web_service_storage_stream_context_t context = {
+        .request = request,
+        .bytes_sent = 0U,
+        .transfer_started = false,
+    };
+
+    result = storage_service_stream_file(
+        path,
+        web_service_storage_stream_callback,
+        &context
+    );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to stream web resource '%s' "
+            "after %u bytes: %s",
+            path,
+            (unsigned int)context.bytes_sent,
+            esp_err_to_name(result)
         );
 
-    free(data);
+        /*
+         * A new HTTP error response can only be sent before the first
+         * response chunk has been passed to the HTTP server.
+         */
+        if (context.transfer_started) {
+            return result;
+        }
 
-    return send_result;
+        if (result == ESP_ERR_NOT_FOUND) {
+            return httpd_resp_send_err(
+                request,
+                HTTPD_404_NOT_FOUND,
+                "Resource not found"
+            );
+        }
+
+        if (result == ESP_ERR_TIMEOUT) {
+            return web_service_send_text_error(
+                request,
+                "503 Service Unavailable",
+                "Internal storage is busy"
+            );
+        }
+
+        if ((result == ESP_ERR_INVALID_ARG) ||
+            (result == ESP_ERR_INVALID_SIZE)) {
+
+            return httpd_resp_send_err(
+                request,
+                HTTPD_400_BAD_REQUEST,
+                "Invalid resource path"
+            );
+        }
+
+        return httpd_resp_send_err(
+            request,
+            HTTPD_500_INTERNAL_SERVER_ERROR,
+            "Failed to read web resource"
+        );
+    }
+
+    /*
+     * Complete the chunked HTTP response. This also sends an empty
+     * file correctly when no data callback was invoked.
+     */
+    return httpd_resp_send_chunk(
+        request,
+        NULL,
+        0U
+    );
 }
 
 static esp_err_t web_service_root_handler(
@@ -2194,7 +2436,25 @@ esp_err_t web_service_start(void)
     config.server_port = 80U;
     config.ctrl_port = 32768U;
     config.max_uri_handlers = 12U;
-    config.stack_size = 8192U;
+    config.stack_size = 6144U;
+    config.max_open_sockets = 3U;
+    config.backlog_conn = 2U;
+    config.lru_purge_enable = true;
+    config.send_wait_timeout = 15U;
+    config.recv_wait_timeout = 15U;
+
+    ESP_LOGI(
+        TAG,
+        "HTTP task memory: internal=%u, largest=%u",
+        (unsigned int)heap_caps_get_free_size(
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_8BIT
+        ),
+        (unsigned int)heap_caps_get_largest_free_block(
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_8BIT
+        )
+    );
 
     esp_err_t result =
         httpd_start(
@@ -2207,8 +2467,17 @@ esp_err_t web_service_start(void)
 
         ESP_LOGE(
             TAG,
-            "Failed to start HTTP server: %s",
-            esp_err_to_name(result)
+            "Failed to start HTTP server: %s, "
+            "internal=%u, largest=%u",
+            esp_err_to_name(result),
+            (unsigned int)heap_caps_get_free_size(
+                MALLOC_CAP_INTERNAL |
+                MALLOC_CAP_8BIT
+            ),
+            (unsigned int)heap_caps_get_largest_free_block(
+                MALLOC_CAP_INTERNAL |
+                MALLOC_CAP_8BIT
+            )
         );
 
         return result;

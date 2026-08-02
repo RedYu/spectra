@@ -16,4 +16,5 @@ idf_component_register(
         freertos
         esp_event
         esp_netif
+        nvs_flash
 )

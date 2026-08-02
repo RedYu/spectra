@@ -40,6 +40,12 @@ static size_t s_open_file_count = 0U;
  *
  * - Use STORAGE_SD_STATE_ERROR for unrecoverable filesystem, SPI,
  *   or unexpected card-removal errors.
+ *
+ * SDSPI uses SPI DMA. If a caller-provided buffer does not meet
+ * the DMA-capability or alignment requirements of the underlying SPI
+ * driver, ESP-IDF may allocate an internal temporary buffer and perform
+ * an additional copy. Consider using an internal DMA-capable, properly
+ * aligned buffer for performance-critical SD card transfers.
  */
 
 static esp_err_t storage_sd_service_spi_lock(void);
@@ -586,9 +592,7 @@ esp_err_t storage_sd_service_write(
         *out_bytes_written = bytes_written;
     }
 
-    if (write_error ||
-        (bytes_written != size)) {
-
+    if (write_error) {
         ESP_LOGE(
             TAG,
             "Failed to write file: errno=%d (%s)",
@@ -599,6 +603,17 @@ esp_err_t storage_sd_service_write(
         return storage_sd_service_errno_to_error(
             saved_errno
         );
+    }
+
+    if (bytes_written != size) {
+        ESP_LOGE(
+            TAG,
+            "Short file write: requested=%u, written=%u",
+            (unsigned int)size,
+            (unsigned int)bytes_written
+        );
+
+        return ESP_FAIL;
     }
 
     return ESP_OK;

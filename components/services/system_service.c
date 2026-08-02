@@ -22,12 +22,23 @@
 #define SYSTEM_TASK_STACK_SIZE      (3072U)
 #define SYSTEM_TASK_PRIORITY        (2U)
 #define SYSTEM_UPDATE_INTERVAL_MS   (1000U)
+#define SYSTEM_TASK_STATUS_EXTRA_COUNT  (4U)
 
 /*
  * TODO:
  * system_service_stop() requests asynchronous cooperative shutdown.
  * Add synchronized service state and completion acknowledgement before
  * supporting an immediate stop/start sequence.
+ *
+ * Extend system_model_t with separate PSRAM statistics:
+ *
+ *     uint32_t psram_free;
+ *     uint32_t psram_minimum_free;
+ *
+ * Update these fields in system_service_update_runtime() using
+ * MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT. Internal heap and PSRAM
+ * statistics must remain separate because free PSRAM cannot replace
+ * internal memory required by Wi-Fi, DMA and system services.
  */
 
 static const char *TAG = "system_service";
@@ -126,10 +137,26 @@ static uint8_t system_service_get_cpu_usage(void)
         return 0U;
     }
 
-    TaskStatus_t *task_status = calloc(
-        task_count,
-        sizeof(*task_status)
-    );
+    if (task_count >
+        (UBaseType_t)(
+            SIZE_MAX / sizeof(TaskStatus_t) -
+            SYSTEM_TASK_STATUS_EXTRA_COUNT
+        )) {
+
+        return 0U;
+    }
+
+    const UBaseType_t task_capacity =
+        task_count +
+        SYSTEM_TASK_STATUS_EXTRA_COUNT;
+
+    TaskStatus_t *task_status =
+        heap_caps_calloc(
+            task_capacity,
+            sizeof(*task_status),
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
 
     if (task_status == NULL) {
         return 0U;
@@ -140,7 +167,7 @@ static uint8_t system_service_get_cpu_usage(void)
     const UBaseType_t received_task_count =
         uxTaskGetSystemState(
             task_status,
-            task_count,
+            task_capacity,
             &total_run_time
         );
 
@@ -323,12 +350,14 @@ static esp_err_t system_service_update_runtime(void)
 
     const uint32_t free_heap =
         (uint32_t)heap_caps_get_free_size(
-            MALLOC_CAP_DEFAULT
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_8BIT
         );
 
     const uint32_t minimum_free_heap =
         (uint32_t)heap_caps_get_minimum_free_size(
-            MALLOC_CAP_DEFAULT
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_8BIT
         );
 
     const uint8_t cpu_usage =
@@ -466,12 +495,14 @@ esp_err_t system_service_start(void)
 
     model.free_heap =
         (uint32_t)heap_caps_get_free_size(
-            MALLOC_CAP_DEFAULT
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_8BIT
         );
 
     model.minimum_free_heap =
         (uint32_t)heap_caps_get_minimum_free_size(
-            MALLOC_CAP_DEFAULT
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_8BIT
         );
 
     result = system_model_set(

@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,12 +11,14 @@
 
 #include "esp_log.h"
 #include "esp_spiffs.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
 #include "system_model.h"
 
 #define STORAGE_LOCK_TIMEOUT_MS        (1000U)
+#define STORAGE_STREAM_BUFFER_SIZE     (1024U)
 
 static const char *TAG = "storage_service";
 
@@ -24,6 +27,29 @@ static const char STORAGE_BASE_PATH[] = "/storage";
 
 static SemaphoreHandle_t s_mutex = NULL;
 static bool s_is_mounted = false;
+
+/*
+ * TODO:
+ * storage_service_stream_file() currently holds the storage mutex for
+ * the entire streaming operation, including calls to the user-provided
+ * callback. This prevents storage_service_deinit() from unmounting
+ * SPIFFS while a streamed file is still open.
+ *
+ * The current design has two important restrictions:
+ *
+ * 1. The stream callback must not call another storage_service_*
+ *    function because the service mutex is not recursive.
+ *
+ * 2. A slow callback, such as an HTTP response blocked by a slow
+ *    client, may hold the storage mutex longer than
+ *    STORAGE_LOCK_TIMEOUT_MS. Other storage operations will then
+ *    return ESP_ERR_TIMEOUT.
+ *
+ * Replace the long-held mutex with active-operation tracking before
+ * allowing concurrent file operations. Deinitialization should first
+ * prevent new operations and then wait for the active-operation count
+ * to reach zero before unmounting SPIFFS.
+ */
 
 static esp_err_t storage_service_lock(void)
 {
@@ -366,12 +392,23 @@ static esp_err_t storage_service_read_file_locked(
         return ESP_FAIL;
     }
 
+    if ((uintmax_t)file_size >
+        (uintmax_t)(SIZE_MAX - 1U)) {
+
+        (void)fclose(file);
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     const size_t allocation_size =
         (size_t)file_size + 1U;
 
-    char *data = malloc(
-        allocation_size
-    );
+    char *data =
+        heap_caps_malloc(
+            allocation_size,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
 
     if (data == NULL) {
         (void)fclose(file);
@@ -550,9 +587,11 @@ static esp_err_t storage_service_list_locked(
             : requested_count;
 
     storage_file_entry_t *collected =
-        calloc(
+        heap_caps_calloc(
             collection_capacity,
-            sizeof(*collected)
+            sizeof(*collected),
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
         );
 
     if (collected == NULL) {
@@ -785,6 +824,139 @@ static esp_err_t storage_service_list_locked(
     return ESP_OK;
 }
 
+static esp_err_t storage_service_stream_file_locked(
+    const char *path,
+    storage_service_stream_callback_t callback,
+    void *context
+)
+{
+    if ((path == NULL) ||
+        (callback == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!storage_service_is_valid_path(
+            path,
+            false
+        )) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    errno = 0;
+
+    FILE *file = fopen(
+        path,
+        "rb"
+    );
+
+    if (file == NULL) {
+        const int open_errno = errno;
+
+        if (open_errno == ENOENT) {
+            return ESP_ERR_NOT_FOUND;
+        }
+
+        ESP_LOGE(
+            TAG,
+            "Failed to open file '%s': errno=%d",
+            path,
+            open_errno
+        );
+
+        return ESP_FAIL;
+    }
+
+    uint8_t *stream_buffer =
+        heap_caps_malloc(
+            STORAGE_STREAM_BUFFER_SIZE,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
+
+    if (stream_buffer == NULL) {
+        const int close_result =
+            fclose(file);
+
+        if (close_result != 0) {
+            ESP_LOGW(
+                TAG,
+                "Failed to close file '%s' after "
+                "stream buffer allocation failure",
+                path
+            );
+        }
+
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t result = ESP_OK;
+
+    while (true) {
+        const size_t bytes_read =
+            fread(
+                stream_buffer,
+                1U,
+                STORAGE_STREAM_BUFFER_SIZE,
+                file
+            );
+
+        if (bytes_read > 0U) {
+            result = callback(
+                stream_buffer,
+                bytes_read,
+                context
+            );
+
+            if (result != ESP_OK) {
+                break;
+            }
+        }
+
+        if (bytes_read <
+            STORAGE_STREAM_BUFFER_SIZE) {
+
+            if (ferror(file) != 0) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to read file '%s'",
+                    path
+                );
+
+                result = ESP_FAIL;
+            }
+
+            break;
+        }
+    }
+
+    errno = 0;
+
+    const int close_result =
+        fclose(file);
+
+    const int close_errno =
+        errno;
+
+    free(stream_buffer);
+
+    if ((close_result != 0) &&
+        (result == ESP_OK)) {
+
+        ESP_LOGE(
+            TAG,
+            "Failed to close file '%s': errno=%d",
+            path,
+            close_errno
+        );
+
+        result = ESP_FAIL;
+    }
+
+    return result;
+}
+
 esp_err_t storage_service_read_file(
     const char *path,
     char **out_data,
@@ -863,6 +1035,42 @@ esp_err_t storage_service_list(
                 capacity,
                 out_count,
                 out_has_more
+            );
+    }
+
+    storage_service_unlock();
+
+    return result;
+}
+
+esp_err_t storage_service_stream_file(
+    const char *path,
+    storage_service_stream_callback_t callback,
+    void *context
+)
+{
+    if ((path == NULL) ||
+        (callback == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t lock_result =
+        storage_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result =
+        ESP_ERR_INVALID_STATE;
+
+    if (s_is_mounted) {
+        result =
+            storage_service_stream_file_locked(
+                path,
+                callback,
+                context
             );
     }
 

@@ -9,6 +9,8 @@ idf_component_register(
         "system_service.c"
         "usb_network_service.c"
         "web_service.c"
+        "network_service.c"
+        "wifi_service.c"
 
     INCLUDE_DIRS
         "include"

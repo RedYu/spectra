@@ -19,6 +19,11 @@ extern "C" {
 #define SETTINGS_LOGGING_SD_ENABLED_DEFAULT      (false)
 #define SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT   (false)
 
+#define SETTINGS_WIFI_SSID_MAX_LENGTH  (33U)
+
+#define SETTINGS_WIFI_ENABLED_DEFAULT  (false)
+#define SETTINGS_WIFI_AP_ENABLED_DEFAULT  (true)
+
 typedef struct
 {
     char target[SETTINGS_DEVICE_TARGET_MAX_LENGTH];
@@ -46,12 +51,24 @@ typedef struct
 
 typedef struct
 {
+    bool enabled;
+    bool ap_enabled;
+
+    char ssid[
+        SETTINGS_WIFI_SSID_MAX_LENGTH
+    ];
+
+} wifi_settings_t;
+
+typedef struct
+{
     uint32_t schema_version;
 
     device_settings_t device;
     display_settings_t display;
     logging_settings_t logging;
     ui_settings_t ui;
+    wifi_settings_t wifi;
 
 } app_settings_t;
 

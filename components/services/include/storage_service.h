@@ -66,7 +66,8 @@ esp_err_t storage_service_get_mounted(
  * @return ESP_OK on success, ESP_ERR_INVALID_ARG if an argument or path
  * is invalid, ESP_ERR_INVALID_STATE if storage is not mounted,
  * ESP_ERR_NOT_FOUND if the file does not exist, ESP_ERR_NO_MEM if
- * memory allocation fails, otherwise an ESP-IDF error code.
+ * the file buffer cannot be allocated, ESP_ERR_TIMEOUT if the service
+ * lock cannot be acquired, otherwise an ESP-IDF error code.
  */
 esp_err_t storage_service_read_file(
     const char *path,
@@ -101,6 +102,7 @@ esp_err_t storage_service_read_file(
  * @return ESP_OK on success, ESP_ERR_INVALID_ARG if an argument or path
  * is invalid, ESP_ERR_INVALID_STATE if storage is not mounted,
  * ESP_ERR_NOT_FOUND if the requested path does not exist,
+ * ESP_ERR_NO_MEM if the temporary listing buffer cannot be allocated,
  * ESP_ERR_TIMEOUT if the service lock cannot be acquired, otherwise
  * an ESP-IDF error code.
  */
@@ -111,6 +113,67 @@ esp_err_t storage_service_list(
     size_t capacity,
     size_t *out_count,
     bool *out_has_more
+);
+
+/**
+ * @brief Process a block of streamed internal-storage file data.
+ *
+ * The data pointer is valid only during the callback invocation.
+ * The callback must not retain or free it.
+ *
+ * The callback is invoked synchronously while the storage-service
+ * lock is held. It must not call another storage_service_* function
+ * and should complete as quickly as possible. A slow callback may
+ * cause concurrent storage operations to return ESP_ERR_TIMEOUT.
+ *
+ * Returning an error aborts the stream and propagates the callback
+ * error to storage_service_stream_file().
+ *
+ * @param[in] data File-data block.
+ * @param[in] size Number of valid bytes in data.
+ * @param[in,out] context Caller-provided callback context.
+ *
+ * @return ESP_OK to continue streaming, otherwise an error code to
+ * abort the operation.
+ */
+typedef esp_err_t (*storage_service_stream_callback_t)(
+    const void *data,
+    size_t size,
+    void *context
+);
+
+/**
+ * @brief Stream an internal-storage file in bounded-size blocks.
+ *
+ * The path must be an absolute path located below the internal storage
+ * mount point, for example "/storage/www/index.html".
+ *
+ * The function opens the file, reads it in bounded-size blocks and
+ * invokes callback for each non-empty block. The file is always closed
+ * and the service lock is always released before this function returns.
+ *
+ * The callback is invoked synchronously from the calling task while
+ * the internal-storage service lock is acquired. It must not call
+ * another storage_service function.
+ *
+ * @param[in] path Absolute path below the internal storage mount point.
+ * @param[in] callback Callback that processes each file-data block.
+ * @param[in,out] context Caller-provided callback context. May be NULL
+ * if the callback does not require context.
+ *
+ * @return ESP_OK when the complete file was streamed successfully,
+ * ESP_ERR_INVALID_ARG if path or callback is invalid,
+ * ESP_ERR_INVALID_STATE if storage is not mounted,
+ * ESP_ERR_NOT_FOUND if the file does not exist,
+ * ESP_ERR_NO_MEM if the stream buffer cannot be allocated,
+ * ESP_ERR_TIMEOUT if the service lock cannot be acquired,
+ * the callback error if the callback aborts the stream,
+ * otherwise an ESP-IDF error code.
+ */
+esp_err_t storage_service_stream_file(
+    const char *path,
+    storage_service_stream_callback_t callback,
+    void *context
 );
 
 #ifdef __cplusplus
