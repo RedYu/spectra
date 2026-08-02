@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "crash_dump_service.c"
         "logging_service.c"
         "gui_service.c"
         "storage_service.c"
@@ -32,6 +33,11 @@ idf_component_register(
         lwip
         dns_server
         esp_http_server
+        esp_wifi
+        esp_event
+        nvs_flash
+        espcoredump
+        spi_flash
 )
 
 spiffs_create_partition_image(

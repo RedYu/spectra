@@ -191,41 +191,72 @@ static void startup_task(
     }
 
     (void)gui_service_set_boot_progress(
-        60U,
-        "Configuration loaded"
-    );
-
-    vTaskDelay(
-        pdMS_TO_TICKS(100U)
+        40U,
+        "Initializing SD card"
     );
 
     result = start_service(
         "Storage SD card",
-        storage_sd_service_start
+        storage_sd_service_start,
+        SERVICE_OPTIONAL
     );
 
     if (result != ESP_OK) {
-        /*
-         * Decide whether an SD-service initialization error is fatal.
-         * Absence of a card should already be handled as ESP_OK by the
-         * SD storage service.
-         */
+        startup_warning = true;
+
         (void)gui_service_set_boot_progress(
-            80U,
-            "SD card initialization failed"
+            45U,
+            "SD card service unavailable"
         );
 
-        vTaskDelete(NULL);
-        return;
+    } else {
+        storage_sd_state_t sd_state =
+            STORAGE_SD_STATE_UNAVAILABLE;
+
+        result = storage_sd_service_get_state(
+            &sd_state
+        );
+
+        if ((result != ESP_OK) ||
+            (sd_state != STORAGE_SD_STATE_MOUNTED)) {
+
+            startup_warning = true;
+
+            (void)gui_service_set_boot_progress(
+                45U,
+                "SD card unavailable"
+            );
+
+        } else {
+            const esp_err_t dump_result =
+                crash_dump_service_export_to_sd();
+
+            if (dump_result != ESP_OK) {
+                startup_warning = true;
+
+                ESP_LOGW(
+                    TAG,
+                    "Failed to export crash dump: %s",
+                    esp_err_to_name(dump_result)
+                );
+
+                (void)gui_service_set_boot_progress(
+                    45U,
+                    "Crash dump export failed"
+                );
+
+            } else {
+                (void)gui_service_set_boot_progress(
+                    45U,
+                    "SD card ready"
+                );
+            }
+        }
     }
 
     (void)gui_service_set_boot_progress(
-        85U,
-        "SD card interface ready"
-    );
-
-    vTaskDelay(
-        pdMS_TO_TICKS(100U)
+        50U,
+        "Applying settings"
     );
 
     result = settings_service_apply();
