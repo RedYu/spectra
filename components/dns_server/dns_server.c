@@ -4,8 +4,15 @@
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
  */
 
+#include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/param.h>
 #include <inttypes.h>
+#include <stdatomic.h>
+#include <strings.h>
 
 #include "esp_log.h"
 #include "esp_system.h"
@@ -18,13 +25,17 @@
 #include "lwip/netdb.h"
 #include "dns_server.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
+
 #define DNS_PORT (53)
 #define DNS_MAX_LEN (256)
 
-#define OPCODE_MASK (0x7800)
-#define QR_FLAG (1 << 7)
 #define QD_TYPE_A (0x0001)
 #define ANS_TTL_SEC (300)
+#define DNS_OPCODE_MASK    (0x7800U)
+#define DNS_RESPONSE_FLAG  (0x8000U)
 
 static const char *TAG = "dns_redirect_server";
 
@@ -58,9 +69,14 @@ typedef struct __attribute__((__packed__))
 
 // DNS server handle
 struct dns_server_handle {
-    bool started;
+    atomic_bool started;
+    
     TaskHandle_t task;
-    int num_of_entries;
+    SemaphoreHandle_t stopped;
+
+    atomic_int socket_fd;
+
+    size_t num_of_entries;
     dns_entry_pair_t entry[];
 };
 
@@ -68,134 +84,332 @@ struct dns_server_handle {
     Parse the name from the packet from the DNS name format to a regular .-seperated name
     returns the pointer to the next part of the packet
 */
-static char *parse_dns_name(char *raw_name, char *parsed_name, size_t parsed_name_max_len)
+static const uint8_t *parse_dns_name(
+    const uint8_t *position,
+    const uint8_t *packet_end,
+    char *parsed_name,
+    size_t parsed_name_size
+)
 {
+    if ((position == NULL) ||
+        (packet_end == NULL) ||
+        (parsed_name == NULL) ||
+        (parsed_name_size == 0U) ||
+        (position >= packet_end)) {
 
-    char *label = raw_name;
-    char *name_itr = parsed_name;
-    int name_len = 0;
+        return NULL;
+    }
 
-    do {
-        int sub_name_len = *label;
-        // (len + 1) since we are adding  a '.'
-        name_len += (sub_name_len + 1);
-        if (name_len > parsed_name_max_len) {
+    size_t output_length = 0U;
+
+    while (position < packet_end) {
+        const uint8_t label_length =
+            *position++;
+
+        if (label_length == 0U) {
+            if (output_length == 0U) {
+                parsed_name[0] = '\0';
+            } else {
+                parsed_name[output_length - 1U] = '\0';
+            }
+
+            return position;
+        }
+
+        /*
+         * Compressed names are not supported in questions by this
+         * simple DNS server.
+         */
+        if (((label_length & 0xC0U) != 0U) ||
+            (label_length > 63U)) {
+
             return NULL;
         }
 
-        // Copy the sub name that follows the the label
-        memcpy(name_itr, label + 1, sub_name_len);
-        name_itr[sub_name_len] = '.';
-        name_itr += (sub_name_len + 1);
-        label += sub_name_len + 1;
-    } while (*label != 0);
+        if ((size_t)(packet_end - position) <
+            (size_t)label_length) {
 
-    // Terminate the final string, replacing the last '.'
-    parsed_name[name_len - 1] = '\0';
-    // Return pointer to first char after the name
-    return label + 1;
-}
-
-// Parses the DNS request and prepares a DNS response with the IP of the softAP
-static int parse_dns_request(char *req, size_t req_len, char *dns_reply, size_t dns_reply_max_len, dns_server_handle_t h)
-{
-    if (req_len > dns_reply_max_len) {
-        return -1;
-    }
-
-    // Prepare the reply
-    memset(dns_reply, 0, dns_reply_max_len);
-    memcpy(dns_reply, req, req_len);
-
-    // Endianess of NW packet different from chip
-    dns_header_t *header = (dns_header_t *)dns_reply;
-    ESP_LOGD(TAG, "DNS query with header id: 0x%X, flags: 0x%X, qd_count: %d",
-             ntohs(header->id), ntohs(header->flags), ntohs(header->qd_count));
-
-    // Not a standard query
-    if ((header->flags & OPCODE_MASK) != 0) {
-        return 0;
-    }
-
-    // Set question response flag
-    header->flags |= QR_FLAG;
-
-    uint16_t qd_count = ntohs(header->qd_count);
-    header->an_count = htons(qd_count);
-
-    int reply_len = qd_count * sizeof(dns_answer_t) + req_len;
-    if (reply_len > dns_reply_max_len) {
-        return -1;
-    }
-
-    // Pointer to current answer and question
-    char *cur_ans_ptr = dns_reply + req_len;
-    char *cur_qd_ptr = dns_reply + sizeof(dns_header_t);
-    char name[128];
-
-    // Respond to all questions based on configured rules
-    for (int qd_i = 0; qd_i < qd_count; qd_i++) {
-        char *name_end_ptr = parse_dns_name(cur_qd_ptr, name, sizeof(name));
-        if (name_end_ptr == NULL) {
-            ESP_LOGE(TAG, "Failed to parse DNS question: %s", cur_qd_ptr);
-            return -1;
+            return NULL;
         }
 
-        dns_question_t *question = (dns_question_t *)(name_end_ptr);
-        uint16_t qd_type = ntohs(question->type);
-        uint16_t qd_class = ntohs(question->class);
+        if ((output_length +
+             (size_t)label_length +
+             1U) >= parsed_name_size) {
 
-        ESP_LOGD(TAG, "Received type: %d | Class: %d | Question for: %s", qd_type, qd_class, name);
+            return NULL;
+        }
 
-        ESP_LOGD(
-            TAG,
-            "DNS query: name=%s, type=%" PRIu16 ", class=%" PRIu16,
-            name,
-            qd_type,
-            qd_class
+        memcpy(
+            &parsed_name[output_length],
+            position,
+            label_length
         );
 
-        if (qd_type == QD_TYPE_A) {
-            esp_ip4_addr_t ip = { .addr = IPADDR_ANY };
-            // Check the configured rules to decide whether to answer this question or not
-            for (int i = 0; i < h->num_of_entries; ++i) {
-                // check if the name either corresponds to the entry, or if we should answer to all queries ("*")
-                if (strcmp(h->entry[i].name, "*") == 0 || strcmp(h->entry[i].name, name) == 0) {
-                    if (h->entry[i].if_key) {
-                        esp_netif_ip_info_t ip_info;
-                        esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey(h->entry[i].if_key), &ip_info);
-                        ip.addr = ip_info.ip.addr;
-                        break;
-                    } else if (h->entry->ip.addr != IPADDR_ANY) {
-                        ip.addr = h->entry[i].ip.addr;
-                        break;
-                    }
-                }
-            }
-            if (ip.addr == IPADDR_ANY) {    // no rule applies, continue with another question
-                continue;
-            }
-            dns_answer_t *answer = (dns_answer_t *)cur_ans_ptr;
+        output_length += label_length;
+        parsed_name[output_length++] = '.';
 
-            answer->ptr_offset = htons(0xC000 | (cur_qd_ptr - dns_reply));
-            answer->type = htons(qd_type);
-            answer->class = htons(qd_class);
-            answer->ttl = htonl(ANS_TTL_SEC);
-
-            ESP_LOGD(TAG, "Answer with PTR offset: 0x%" PRIX16 " and IP 0x%" PRIX32, ntohs(answer->ptr_offset), ip.addr);
-
-            answer->addr_len = htons(sizeof(ip.addr));
-            answer->ip_addr = ip.addr;
-        }
+        position += label_length;
     }
-    return reply_len;
+
+    return NULL;
 }
 
 /*
-    Sets up a socket and listen for DNS queries,
-    replies to all type A queries with the IP of the softAP
-*/
-void dns_server_task(
+ * Parse a DNS request and prepare an IPv4 response using the
+ * configured DNS entries.
+ */
+static int parse_dns_request(
+    const char *request,
+    size_t request_length,
+    char *reply,
+    size_t reply_capacity,
+    uint32_t source_address,
+    dns_server_handle_t handle
+)
+{
+    if ((request == NULL) ||
+        (reply == NULL) ||
+        (handle == NULL) ||
+        (request_length < sizeof(dns_header_t)) ||
+        (request_length > reply_capacity)) {
+
+        return -1;
+    }
+
+    /*
+    * Prepare the response using the original request as its base.
+    */
+    memset(
+        reply,
+        0,
+        reply_capacity
+    );
+
+    memcpy(
+        reply,
+        request,
+        request_length
+    );
+
+    dns_header_t *header =
+        (dns_header_t *)reply;
+
+    uint16_t flags =
+        ntohs(header->flags);
+
+    /*
+     * Ignore packets that are already DNS responses.
+     */
+    if ((flags & DNS_RESPONSE_FLAG) != 0U) {
+        return 0;
+    }
+
+    /*
+     * Only standard DNS queries are supported.
+     */
+    if ((flags & DNS_OPCODE_MASK) != 0U) {
+        return 0;
+    }
+
+    const uint16_t question_count =
+        ntohs(header->qd_count);
+
+    /*
+    * This implementation supports exactly one DNS question.
+    */
+    if (question_count != 1U) {
+        return 0;
+    }
+
+    flags |= DNS_RESPONSE_FLAG;
+
+    header->flags = htons(flags);
+    header->an_count = htons(0U);
+    header->ns_count = htons(0U);
+    header->ar_count = htons(0U);
+
+    const size_t answer_size =
+        sizeof(dns_answer_t);
+
+    if ((answer_size > reply_capacity) ||
+        (request_length >
+        (reply_capacity - answer_size))) {
+
+        return -1;
+    }
+
+    const uint8_t *packet_end =
+        (const uint8_t *)reply +
+        request_length;
+
+    const uint8_t *question_position =
+        (const uint8_t *)reply +
+        sizeof(dns_header_t);
+
+    char name[128];
+
+    const uint8_t *name_end =
+        parse_dns_name(
+            question_position,
+            packet_end,
+            name,
+            sizeof(name)
+        );
+
+    if (name_end == NULL) {
+        return -1;
+    }
+
+    if ((size_t)(packet_end - name_end) <
+        sizeof(dns_question_t)) {
+
+        return -1;
+    }
+
+    dns_question_t question;
+
+    memcpy(
+        &question,
+        name_end,
+        sizeof(question)
+    );
+
+    const uint16_t question_type =
+        ntohs(question.type);
+
+    const uint16_t question_class =
+        ntohs(question.class);
+
+    ESP_LOGI(
+        TAG,
+        "DNS query: name=%s, type=%" PRIu16,
+        name,
+        question_type
+    );
+
+    /*
+     * Only IPv4 Internet-class questions are supported.
+     */
+    if ((question_type != QD_TYPE_A) ||
+        (question_class != 1U)) {
+
+        return (int)request_length;
+    }
+
+    esp_ip4_addr_t response_ip = {
+        .addr = IPADDR_ANY
+    };
+
+    for (size_t index = 0U;
+        index < handle->num_of_entries;
+        ++index) {
+
+        const bool name_matches =
+            (strcmp(
+                handle->entry[index].name,
+                "*"
+            ) == 0) ||
+            (strcasecmp(
+                handle->entry[index].name,
+                name
+            ) == 0);
+
+        if (!name_matches) {
+            continue;
+        }
+
+        const uint32_t source_mask =
+            handle->entry[index]
+                .source_netmask.addr;
+
+        const uint32_t source_network =
+            handle->entry[index]
+                .source_network.addr;
+
+        const bool source_matches =
+            (source_mask == IPADDR_ANY) ||
+            ((source_address & source_mask) ==
+            (source_network & source_mask));
+
+        if (!source_matches) {
+            continue;
+        }
+
+        if (handle->entry[index].if_key != NULL) {
+            esp_netif_t *network_interface =
+                esp_netif_get_handle_from_ifkey(
+                    handle->entry[index].if_key
+                );
+
+            if (network_interface == NULL) {
+                continue;
+            }
+
+            esp_netif_ip_info_t ip_info;
+
+            const esp_err_t result =
+                esp_netif_get_ip_info(
+                    network_interface,
+                    &ip_info
+                );
+
+            if (result != ESP_OK) {
+                continue;
+            }
+
+            response_ip.addr =
+                ip_info.ip.addr;
+
+            break;
+        }
+
+        if (handle->entry[index].ip.addr !=
+            IPADDR_ANY) {
+
+            response_ip.addr =
+                handle->entry[index].ip.addr;
+
+            break;
+        }
+    }
+
+    if (response_ip.addr == IPADDR_ANY) {
+        return (int)request_length;
+    }
+
+    dns_answer_t answer = {
+        .ptr_offset = htons(
+            0xC000U |
+            sizeof(dns_header_t)
+        ),
+        .type = htons(QD_TYPE_A),
+        .class = htons(1U),
+        .ttl = htonl(ANS_TTL_SEC),
+        .addr_len = htons(
+            sizeof(response_ip.addr)
+        ),
+        .ip_addr = response_ip.addr,
+    };
+
+    memcpy(
+        reply + request_length,
+        &answer,
+        sizeof(answer)
+    );
+
+    header->an_count = htons(1U);
+
+    return (int)(
+        request_length +
+        sizeof(answer)
+    );
+}
+
+/*
+ * Listen for IPv4 DNS requests and respond using the first matching
+ * configured rule.
+ */
+static void dns_server_task(
     void *pv_parameters
 )
 {
@@ -225,10 +439,23 @@ void dns_server_task(
             errno
         );
 
-        handle->task = NULL;
+        atomic_store(
+            &handle->socket_fd,
+            -1
+        );
+
+        (void)xSemaphoreGive(
+            handle->stopped
+        );
+
         vTaskDelete(NULL);
         return;
     }
+
+    atomic_store(
+        &handle->socket_fd,
+        socket_fd
+    );
 
     const int bind_result =
         bind(
@@ -244,14 +471,29 @@ void dns_server_task(
             errno
         );
 
-        (void)close(socket_fd);
+        const int descriptor =
+            atomic_exchange(
+                &handle->socket_fd,
+                -1
+            );
 
-        handle->task = NULL;
+        if (descriptor >= 0) {
+            (void)close(
+                descriptor
+            );
+        }
+
+        (void)xSemaphoreGive(
+            handle->stopped
+        );
+
         vTaskDelete(NULL);
         return;
     }
 
-    while (handle->started) {
+    while (atomic_load(
+           &handle->started
+       )) {
         struct sockaddr_storage source_address;
         socklen_t source_length =
             sizeof(source_address);
@@ -267,7 +509,9 @@ void dns_server_task(
             );
 
         if (received_length < 0) {
-            if (handle->started) {
+           if (atomic_load(
+                    &handle->started
+                )) {
                 ESP_LOGE(
                     TAG,
                     "Failed to receive DNS request: errno=%d",
@@ -278,21 +522,37 @@ void dns_server_task(
             break;
         }
 
+        if ((source_address.ss_family != AF_INET) ||
+            (source_length <
+            sizeof(struct sockaddr_in))) {
+
+            continue;
+        }
+
+        const struct sockaddr_in *ipv4_source =
+            (const struct sockaddr_in *)
+            &source_address;
+
         const int reply_length =
             parse_dns_request(
                 rx_buffer,
                 (size_t)received_length,
                 reply,
                 sizeof(reply),
+                ipv4_source->sin_addr.s_addr,
                 handle
             );
 
-        if (reply_length <= 0) {
-            ESP_LOGE(
+        if (reply_length < 0) {
+            ESP_LOGW(
                 TAG,
-                "Failed to prepare DNS response"
+                "Invalid DNS request"
             );
 
+            continue;
+        }
+
+        if (reply_length == 0) {
             continue;
         }
 
@@ -307,48 +567,173 @@ void dns_server_task(
             );
 
         if (sent_length < 0) {
-            ESP_LOGE(
-                TAG,
-                "Failed to send DNS response: errno=%d",
-                errno
-            );
+            if (atomic_load(
+                    &handle->started
+                )) {
 
-            break;
+                ESP_LOGW(
+                    TAG,
+                    "Failed to send DNS response: errno=%d",
+                    errno
+                );
+            }
+
+            continue;
         }
     }
 
-    (void)shutdown(
-        socket_fd,
-        SHUT_RDWR
-    );
+    const int descriptor =
+        atomic_exchange(
+            &handle->socket_fd,
+            -1
+        );
 
-    (void)close(
-        socket_fd
-    );
+    if (descriptor >= 0) {
+        (void)shutdown(
+            descriptor,
+            SHUT_RDWR
+        );
 
-    handle->task = NULL;
+        (void)close(
+            descriptor
+        );
+    }
+
+    (void)xSemaphoreGive(
+        handle->stopped
+    );
 
     vTaskDelete(NULL);
 }
 
-dns_server_handle_t start_dns_server(dns_server_config_t *config)
+dns_server_handle_t start_dns_server(
+    const dns_server_config_t *config
+)
 {
-    dns_server_handle_t handle = calloc(1, sizeof(struct dns_server_handle) + config->num_of_entries * sizeof(dns_entry_pair_t));
-    ESP_RETURN_ON_FALSE(handle, NULL, TAG, "Failed to allocate dns server handle");
+    if ((config == NULL) ||
+        (config->num_of_entries == 0U) ||
+        (config->num_of_entries >
+        DNS_SERVER_MAX_ITEMS)) {
 
-    handle->started = true;
-    handle->num_of_entries = config->num_of_entries;
-    memcpy(handle->entry, config->item, config->num_of_entries * sizeof(dns_entry_pair_t));
+        return NULL;
+    }
 
-    xTaskCreate(dns_server_task, "dns_server", 4096, handle, 5, &handle->task);
+    for (size_t index = 0U;
+        index < config->num_of_entries;
+        ++index) {
+
+        if (config->item[index].name == NULL) {
+            return NULL;
+        }
+    }
+
+    const size_t entry_count =
+        (size_t)config->num_of_entries;
+
+    if (entry_count >
+        ((SIZE_MAX - sizeof(struct dns_server_handle)) /
+         sizeof(dns_entry_pair_t))) {
+
+        return NULL;
+    }
+
+    const size_t allocation_size =
+        sizeof(struct dns_server_handle) +
+        (entry_count * sizeof(dns_entry_pair_t));
+
+    dns_server_handle_t handle =
+        calloc(
+            1U,
+            allocation_size
+        );
+
+    if (handle == NULL) {
+        return NULL;
+    }
+
+    handle->stopped =
+        xSemaphoreCreateBinary();
+
+    if (handle->stopped == NULL) {
+        free(handle);
+        return NULL;
+    }
+
+    atomic_init(
+        &handle->started,
+        true
+    );
+
+    atomic_init(
+        &handle->socket_fd,
+        -1
+    );
+
+    handle->num_of_entries =
+        entry_count;
+
+    memcpy(
+        handle->entry,
+        config->item,
+        entry_count * sizeof(dns_entry_pair_t)
+    );
+
+    const BaseType_t task_result =
+        xTaskCreate(
+            dns_server_task,
+            "dns_server",
+            4096U,
+            handle,
+            5U,
+            &handle->task
+        );
+
+    if (task_result != pdPASS) {
+        vSemaphoreDelete(
+            handle->stopped
+        );
+
+        free(handle);
+
+        return NULL;
+    }
+
     return handle;
 }
 
-void stop_dns_server(dns_server_handle_t handle)
+void stop_dns_server(
+    dns_server_handle_t handle
+)
 {
-    if (handle) {
-        handle->started = false;
-        vTaskDelete(handle->task);
-        free(handle);
+    if (handle == NULL) {
+        return;
     }
+
+    atomic_store(
+        &handle->started,
+        false
+    );
+
+    const int socket_fd =
+        atomic_load(
+            &handle->socket_fd
+        );
+
+    if (socket_fd >= 0) {
+        (void)shutdown(
+            socket_fd,
+            SHUT_RDWR
+        );
+    }
+
+    (void)xSemaphoreTake(
+        handle->stopped,
+        portMAX_DELAY
+    );
+
+    vSemaphoreDelete(
+        handle->stopped
+    );
+
+    free(handle);
 }
