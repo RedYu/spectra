@@ -15,6 +15,8 @@
 #include "settings_service.h"
 #include "wifi_service.h"
 #include "usb_network_service.h"
+#include "storage_service.h"
+#include "storage_sd_service.h"
 
 #include "widgets/toolbar.h"
 
@@ -46,7 +48,10 @@ static lv_obj_t *s_tabview = NULL;
 
 static lv_obj_t *s_brightness_slider = NULL;
 static lv_obj_t *s_brightness_value_label = NULL;
+
 static lv_obj_t *s_sd_logging_switch = NULL;
+static lv_obj_t *s_storage_info_label = NULL;
+
 static lv_obj_t *s_animations_switch = NULL;
 
 static lv_obj_t *s_wifi_enabled_switch = NULL;
@@ -66,6 +71,8 @@ static void settings_screen_refresh_wifi_info(
 );
 
 static void settings_screen_stop_wifi_refresh(void);
+
+static void settings_screen_refresh_storage_info(void);
 
 static void settings_screen_network_refresh_timer_cb(
     lv_timer_t *timer
@@ -148,6 +155,7 @@ static void settings_screen_delete_event_cb(
     s_brightness_slider = NULL;
     s_brightness_value_label = NULL;
     s_sd_logging_switch = NULL;
+    s_storage_info_label = NULL;
     s_animations_switch = NULL;
     s_wifi_enabled_switch = NULL;
     s_wifi_info_label = NULL;
@@ -176,6 +184,68 @@ static void settings_screen_set_switch_state(
             LV_STATE_CHECKED
         );
     }
+}
+
+static void settings_screen_refresh_storage_info(void)
+{
+    if (s_storage_info_label == NULL) {
+        return;
+    }
+
+    bool internal_mounted = false;
+
+    const esp_err_t internal_result =
+        storage_service_get_mounted(
+            &internal_mounted
+        );
+
+    storage_sd_state_t sd_state =
+        STORAGE_SD_STATE_UNAVAILABLE;
+
+    const esp_err_t sd_result =
+        storage_sd_service_get_state(
+            &sd_state
+        );
+
+    const char *internal_state;
+
+    if (internal_result != ESP_OK) {
+        internal_state = "Unavailable";
+    } else {
+        internal_state =
+            internal_mounted
+                ? "Mounted"
+                : "Not mounted";
+    }
+
+    const char *card_state;
+
+    if (sd_result != ESP_OK) {
+        card_state = "Unavailable";
+    } else {
+        switch (sd_state) {
+            case STORAGE_SD_STATE_MOUNTED:
+                card_state = "Mounted";
+                break;
+
+            case STORAGE_SD_STATE_ERROR:
+                card_state = "Error";
+                break;
+
+            case STORAGE_SD_STATE_UNAVAILABLE:
+            default:
+                card_state = "Not mounted";
+                break;
+        }
+    }
+
+    lv_label_set_text_fmt(
+        s_storage_info_label,
+        "Internal storage: %s\n"
+        "SD card: %s",
+        internal_state,
+        card_state
+    );
 }
 
 static void settings_screen_refresh_wifi_info(
@@ -440,6 +510,8 @@ static esp_err_t settings_screen_refresh(void)
     settings_screen_refresh_usb_rndis_info(
         &settings
     );
+
+    settings_screen_refresh_storage_info();
 
     s_updating_controls = false;
 
@@ -1334,6 +1406,75 @@ static esp_err_t settings_screen_create_storage_tab(
         return ESP_ERR_NO_MEM;
     }
 
+    lv_obj_t *info_card =
+        lv_obj_create(tab);
+
+    if (info_card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        info_card,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_height(
+        info_card,
+        LV_SIZE_CONTENT
+    );
+
+    settings_screen_style_card(
+        info_card
+    );
+
+    lv_obj_remove_flag(
+        info_card,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    s_storage_info_label =
+        lv_label_create(
+            info_card
+        );
+
+    if (s_storage_info_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        s_storage_info_label,
+        LV_PCT(100)
+    );
+
+    lv_label_set_long_mode(
+        s_storage_info_label,
+        LV_LABEL_LONG_WRAP
+    );
+
+    lv_label_set_text(
+        s_storage_info_label,
+        "Internal storage: Loading...\n"
+        "SD card: Loading..."
+    );
+
+    lv_obj_set_style_text_font(
+        s_storage_info_label,
+        &lv_font_montserrat_14,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        s_storage_info_label,
+        lv_color_hex(0x374151U),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_line_space(
+        s_storage_info_label,
+        6,
+        LV_PART_MAIN
+    );
+
     return ESP_OK;
 }
 
@@ -1548,6 +1689,7 @@ lv_obj_t *settings_screen_create(void)
     s_brightness_slider = NULL;
     s_brightness_value_label = NULL;
     s_sd_logging_switch = NULL;
+    s_storage_info_label = NULL;
     s_animations_switch = NULL;
     s_wifi_enabled_switch = NULL;
     s_wifi_info_label = NULL;
@@ -1695,6 +1837,7 @@ void settings_screen_destroy(
     s_brightness_slider = NULL;
     s_brightness_value_label = NULL;
     s_sd_logging_switch = NULL;
+    s_storage_info_label = NULL;
     s_animations_switch = NULL;
     s_wifi_enabled_switch = NULL;
     s_wifi_info_label = NULL;
