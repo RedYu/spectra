@@ -6,9 +6,6 @@
 
 #include "dns_server.h"
 
-#define USB_NETWORK_INTERFACE_KEY  ("USB_RNDIS")
-#define WIFI_AP_INTERFACE_KEY      ("WIFI_AP_DEF")
-
 static const char *TAG = "network_service";
 
 static bool s_netif_initialized = false;

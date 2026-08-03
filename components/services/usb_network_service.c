@@ -19,7 +19,6 @@
 #include "dhcpserver/dhcpserver.h"
 #include "tinyusb_net.h"
 #include "network_service.h"
-#include "dns_server.h"
 
 #define USB_RNDIS_VENDOR_ID            (TINYUSB_ESPRESSIF_VID)
 #define USB_RNDIS_PRODUCT_ID           (0x4000U)
@@ -58,7 +57,6 @@
 #define USB_NETWORK_TX_TIMEOUT_MS         (1000U)
 
 static esp_netif_t *s_usb_netif = NULL;
-static dns_server_handle_t s_dns_server = NULL;
 
 /*
  * esp_netif requires a non-null driver handle.
@@ -205,58 +203,6 @@ static const char *s_string_descriptors[] = {
     "Spectra RNDIS Network",
     "",
 };
-
-static esp_err_t usb_network_dns_start(void)
-{
-    if (s_dns_server != NULL) {
-        return ESP_OK;
-    }
-
-    /*
-     * Resolve spectra.device directly to the USB network address.
-     * A static address avoids dependency on the esp_netif interface key.
-     */
-    dns_server_config_t config = {
-        .num_of_entries = 1,
-
-        .item = {
-            {
-                .name = "spectra.device",
-                .if_key = NULL,
-
-                .ip = {
-                    .addr = ESP_IP4TOADDR(
-                        USB_NETWORK_IP_A,
-                        USB_NETWORK_IP_B,
-                        USB_NETWORK_IP_C,
-                        USB_NETWORK_IP_D
-                    ),
-                },
-            },
-        },
-    };
-
-    s_dns_server =
-        start_dns_server(
-            &config
-        );
-
-    if (s_dns_server == NULL) {
-        ESP_LOGE(
-            TAG,
-            "Failed to start USB DNS server"
-        );
-
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(
-        TAG,
-        "DNS server started: spectra.device -> 172.16.10.1"
-    );
-
-    return ESP_OK;
-}
 
 static esp_err_t usb_network_initialize_mac(void)
 {
@@ -436,7 +382,7 @@ static esp_err_t usb_network_netif_init(void)
         .get_ip_event = 0,
         .lost_ip_event = 0,
 
-        .if_key = "USB_RNDIS",
+        .if_key = USB_NETWORK_INTERFACE_KEY,
         .if_desc = "usb_rndis",
 
         .route_prio = 5,
@@ -799,35 +745,6 @@ esp_err_t usb_network_service_init(void)
             "Failed to initialize USB network interface: %s",
             esp_err_to_name(result)
         );
-
-        tinyusb_net_deinit();
-
-        (void)tinyusb_driver_uninstall();
-
-        return result;
-    }
-
-    result = usb_network_dns_start();
-
-    if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to start USB DNS server: %s",
-            esp_err_to_name(result)
-        );
-
-        esp_netif_action_stop(
-            s_usb_netif,
-            NULL,
-            0,
-            NULL
-        );
-
-        esp_netif_destroy(
-            s_usb_netif
-        );
-
-        s_usb_netif = NULL;
 
         tinyusb_net_deinit();
 

@@ -8,6 +8,9 @@
 extern "C" {
 #endif
 
+#define USB_NETWORK_INTERFACE_KEY  ("USB_RNDIS")
+#define WIFI_AP_INTERFACE_KEY      ("WIFI_AP_DEF")
+
 /**
  * @brief Initialize the global network stack.
  *

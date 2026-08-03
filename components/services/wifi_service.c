@@ -60,6 +60,11 @@ static char s_ap_ssid[
     WIFI_SERVICE_AP_SSID_MAX_LENGTH
 ];
 
+static esp_err_t wifi_service_configure_dns(
+    esp_netif_t *netif,
+    const esp_netif_ip_info_t *ip_info
+);
+
 static esp_err_t wifi_service_lock(void)
 {
     if (s_state_mutex == NULL) {
@@ -224,6 +229,15 @@ static esp_err_t wifi_service_configure_ip(void)
         return result;
     }
 
+    result = wifi_service_configure_dns(
+        s_ap_netif,
+        &ip_info
+    );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
     const dhcps_lease_t lease = {
         .enable = true,
 
@@ -324,6 +338,50 @@ static esp_err_t wifi_service_configure_ap(void)
     return esp_wifi_set_config(
         WIFI_IF_AP,
         &config
+    );
+}
+
+static esp_err_t wifi_service_configure_dns(
+    esp_netif_t *netif,
+    const esp_netif_ip_info_t *ip_info
+)
+{
+    if ((netif == NULL) ||
+        (ip_info == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_netif_dns_info_t dns_info = {0};
+
+    dns_info.ip.type =
+        ESP_IPADDR_TYPE_V4;
+
+    dns_info.ip.u_addr.ip4.addr =
+        ip_info->ip.addr;
+
+    esp_err_t result =
+        esp_netif_set_dns_info(
+            netif,
+            ESP_NETIF_DNS_MAIN,
+            &dns_info
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    /*
+     * Enable the DNS server option in DHCP responses.
+     */
+    uint8_t dns_offer_enabled = 1U;
+
+    return esp_netif_dhcps_option(
+        netif,
+        ESP_NETIF_OP_SET,
+        ESP_NETIF_DOMAIN_NAME_SERVER,
+        &dns_offer_enabled,
+        sizeof(dns_offer_enabled)
     );
 }
 
