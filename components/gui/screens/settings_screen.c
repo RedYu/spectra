@@ -12,6 +12,8 @@
 #include "screen_manager.h"
 #include "settings_model.h"
 #include "settings_service.h"
+#include "wifi_service.h"
+
 #include "widgets/toolbar.h"
 
 #define TOOLBAR_HEIGHT                  (56U)
@@ -31,7 +33,11 @@
 #define SETTINGS_SWITCH_WIDTH           (48)
 #define SETTINGS_SWITCH_HEIGHT          (26)
 
+#define WIFI_INFO_REFRESH_PERIOD_MS  (1000U)
+
 static const char *TAG = "settings_screen";
+
+static lv_timer_t *s_wifi_refresh_timer = NULL;
 
 static lv_obj_t *s_root = NULL;
 static lv_obj_t *s_tabview = NULL;
@@ -40,8 +46,80 @@ static lv_obj_t *s_brightness_slider = NULL;
 static lv_obj_t *s_brightness_value_label = NULL;
 static lv_obj_t *s_sd_logging_switch = NULL;
 static lv_obj_t *s_animations_switch = NULL;
+static lv_obj_t *s_wifi_enabled_switch = NULL;
+static lv_obj_t *s_wifi_info_label = NULL;
 
 static bool s_updating_controls = false;
+
+static void settings_screen_refresh_wifi_info(
+    const app_settings_t *settings
+);
+
+static void settings_screen_stop_wifi_refresh(void);
+
+static void settings_screen_wifi_refresh_timer_cb(
+    lv_timer_t *timer
+)
+{
+    (void)timer;
+
+    if (s_root == NULL) {
+        return;
+    }
+
+    app_settings_t settings;
+
+    const esp_err_t result =
+        settings_model_get(
+            &settings
+        );
+
+    if (result != ESP_OK) {
+        return;
+    }
+
+    s_updating_controls = true;
+
+    settings_screen_refresh_wifi_info(
+        &settings
+    );
+
+    s_updating_controls = false;
+}
+
+static void settings_screen_start_wifi_refresh(void)
+{
+    if (s_wifi_refresh_timer != NULL) {
+        return;
+    }
+
+    s_wifi_refresh_timer =
+        lv_timer_create(
+            settings_screen_wifi_refresh_timer_cb,
+            WIFI_INFO_REFRESH_PERIOD_MS,
+            NULL
+        );
+
+    if (s_wifi_refresh_timer == NULL) {
+        ESP_LOGW(
+            TAG,
+            "Failed to create Wi-Fi refresh timer"
+        );
+    }
+}
+
+static void settings_screen_stop_wifi_refresh(void)
+{
+    if (s_wifi_refresh_timer == NULL) {
+        return;
+    }
+
+    lv_timer_delete(
+        s_wifi_refresh_timer
+    );
+
+    s_wifi_refresh_timer = NULL;
+}
 
 static void settings_screen_delete_event_cb(
     lv_event_t *event
@@ -49,12 +127,16 @@ static void settings_screen_delete_event_cb(
 {
     (void)event;
 
+    settings_screen_stop_wifi_refresh();
+
     s_root = NULL;
     s_tabview = NULL;
     s_brightness_slider = NULL;
     s_brightness_value_label = NULL;
     s_sd_logging_switch = NULL;
     s_animations_switch = NULL;
+    s_wifi_enabled_switch = NULL;
+    s_wifi_info_label = NULL;
     s_updating_controls = false;
 }
 
@@ -76,6 +158,111 @@ static void settings_screen_set_switch_state(
         lv_obj_remove_state(
             switch_obj,
             LV_STATE_CHECKED
+        );
+    }
+}
+
+static void settings_screen_refresh_wifi_info(
+    const app_settings_t *settings
+)
+{
+    if (settings == NULL) {
+        return;
+    }
+
+    settings_screen_set_switch_state(
+        s_wifi_enabled_switch,
+        settings->wifi_ap.enabled
+    );
+
+    if (s_wifi_info_label == NULL) {
+        return;
+    }
+
+    wifi_service_info_t info = {0};
+
+    const esp_err_t result =
+        wifi_service_get_info(
+            &info
+        );
+
+    if (result != ESP_OK) {
+        lv_label_set_text_fmt(
+            s_wifi_info_label,
+            "State: Unavailable\n"
+            "Configured SSID: %s\n"
+            "IP address: N/A\n"
+            "DHCP: N/A\n"
+            "DNS: N/A",
+            settings->wifi_ap.ssid
+        );
+
+        return;
+    }
+
+    const char *state =
+        info.started
+            ? "Running"
+            : "Stopped";
+
+    const char *ssid =
+        info.ssid[0] != '\0'
+            ? info.ssid
+            : settings->wifi_ap.ssid;
+
+    const char *ip_address =
+        info.started &&
+        info.ip_address[0] != '\0'
+            ? info.ip_address
+            : "N/A";
+
+    const char *dhcp_start =
+        info.started &&
+        info.dhcp_start[0] != '\0'
+            ? info.dhcp_start
+            : "N/A";
+
+    const char *dhcp_end =
+        info.started &&
+        info.dhcp_end[0] != '\0'
+            ? info.dhcp_end
+            : "N/A";
+
+    const char *dns_address =
+        info.started &&
+        info.dns_address[0] != '\0'
+            ? info.dns_address
+            : "N/A";
+
+    if (info.started) {
+        lv_label_set_text_fmt(
+            s_wifi_info_label,
+            "State: %s\n"
+            "SSID: %s\n"
+            "IP address: %s\n"
+            "DHCP: %s - %s\n"
+            "DNS: %s\n"
+            "Clients: %u",
+            state,
+            ssid,
+            ip_address,
+            dhcp_start,
+            dhcp_end,
+            dns_address,
+            (unsigned int)info.client_count
+        );
+    } else {
+        lv_label_set_text_fmt(
+            s_wifi_info_label,
+            "State: %s\n"
+            "SSID: %s\n"
+            "IP address: Not active\n"
+            "DHCP: Not active\n"
+            "DNS: Not active\n"
+            "Clients: %u",
+            state,
+            ssid,
+            (unsigned int)info.client_count
         );
     }
 }
@@ -125,6 +312,10 @@ static esp_err_t settings_screen_refresh(void)
     settings_screen_set_switch_state(
         s_animations_switch,
         settings.ui.animations_enabled
+    );
+
+    settings_screen_refresh_wifi_info(
+        &settings
     );
 
     s_updating_controls = false;
@@ -288,6 +479,49 @@ static void animations_switch_event_cb(
 
         (void)settings_screen_refresh();
     }
+}
+
+static void wifi_enabled_switch_event_cb(
+    lv_event_t *event
+)
+{
+    if (s_updating_controls) {
+        return;
+    }
+
+    lv_obj_t *switch_obj =
+        lv_event_get_target_obj(event);
+
+    if (switch_obj == NULL) {
+        return;
+    }
+
+    const bool enabled =
+        lv_obj_has_state(
+            switch_obj,
+            LV_STATE_CHECKED
+        );
+
+    const esp_err_t result =
+        settings_service_set_wifi_ap_enabled(
+            enabled
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to change Wi-Fi SoftAP state: %s",
+            esp_err_to_name(result)
+        );
+
+        /*
+         * Restore the control from the actual settings model.
+         */
+        (void)settings_screen_refresh();
+        return;
+    }
+
+    (void)settings_screen_refresh();
 }
 
 static void settings_screen_style_card(
@@ -718,6 +952,105 @@ static esp_err_t settings_screen_create_general_tab(
     return ESP_OK;
 }
 
+static esp_err_t settings_screen_create_wifi_tab(
+    lv_obj_t *tab
+)
+{
+    if (tab == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    settings_screen_style_tab(
+        tab
+    );
+
+    s_wifi_enabled_switch =
+        settings_screen_create_switch_card(
+            tab,
+            "Wi-Fi SoftAP",
+            wifi_enabled_switch_event_cb
+        );
+
+    if (s_wifi_enabled_switch == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_t *info_card =
+        lv_obj_create(tab);
+
+    if (info_card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        info_card,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_height(
+        info_card,
+        LV_SIZE_CONTENT
+    );
+
+    lv_obj_set_flex_grow(
+        info_card,
+        0
+    );
+
+    settings_screen_style_card(
+        info_card
+    );
+
+    lv_obj_remove_flag(
+        info_card,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    s_wifi_info_label =
+        lv_label_create(
+            info_card
+        );
+
+    if (s_wifi_info_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        s_wifi_info_label,
+        LV_PCT(100)
+    );
+
+    lv_label_set_long_mode(
+        s_wifi_info_label,
+        LV_LABEL_LONG_WRAP
+    );
+
+    lv_label_set_text(
+        s_wifi_info_label,
+        "State: Loading..."
+    );
+
+    lv_obj_set_style_text_font(
+        s_wifi_info_label,
+        &lv_font_montserrat_14,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        s_wifi_info_label,
+        lv_color_hex(0x374151U),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_line_space(
+        s_wifi_info_label,
+        6,
+        LV_PART_MAIN
+    );
+
+    return ESP_OK;
+}
+
 static esp_err_t settings_screen_create_storage_tab(
     lv_obj_t *tab
 )
@@ -904,9 +1237,8 @@ static esp_err_t settings_screen_create_tabs(
     }
 
     result =
-        settings_screen_create_placeholder_tab(
-            wifi_tab,
-            "Wi-Fi settings"
+        settings_screen_create_wifi_tab(
+            wifi_tab
         );
 
     if (result != ESP_OK) {
@@ -958,6 +1290,8 @@ lv_obj_t *settings_screen_create(void)
     s_brightness_value_label = NULL;
     s_sd_logging_switch = NULL;
     s_animations_switch = NULL;
+    s_wifi_enabled_switch = NULL;
+    s_wifi_info_label = NULL;
     s_updating_controls = false;
 
     lv_obj_add_event_cb(
@@ -1066,13 +1400,21 @@ void settings_screen_on_show(
             esp_err_to_name(result)
         );
     }
+
+    settings_screen_start_wifi_refresh();
 }
 
 void settings_screen_on_hide(
     lv_obj_t *screen
 )
 {
-    (void)screen;
+    if ((screen == NULL) ||
+        (screen != s_root)) {
+
+        return;
+    }
+
+    settings_screen_stop_wifi_refresh();
 }
 
 void settings_screen_destroy(
@@ -1085,12 +1427,16 @@ void settings_screen_destroy(
         return;
     }
 
+    settings_screen_stop_wifi_refresh();
+
     s_root = NULL;
     s_tabview = NULL;
     s_brightness_slider = NULL;
     s_brightness_value_label = NULL;
     s_sd_logging_switch = NULL;
     s_animations_switch = NULL;
+    s_wifi_enabled_switch = NULL;
+    s_wifi_info_label = NULL;
     s_updating_controls = false;
 
     lv_obj_delete(
