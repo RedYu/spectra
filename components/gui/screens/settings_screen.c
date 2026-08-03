@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "esp_err.h"
 #include "esp_log.h"
@@ -13,6 +14,7 @@
 #include "settings_model.h"
 #include "settings_service.h"
 #include "wifi_service.h"
+#include "usb_network_service.h"
 
 #include "widgets/toolbar.h"
 
@@ -46,10 +48,18 @@ static lv_obj_t *s_brightness_slider = NULL;
 static lv_obj_t *s_brightness_value_label = NULL;
 static lv_obj_t *s_sd_logging_switch = NULL;
 static lv_obj_t *s_animations_switch = NULL;
+
 static lv_obj_t *s_wifi_enabled_switch = NULL;
 static lv_obj_t *s_wifi_info_label = NULL;
 
+static lv_obj_t *s_usb_rndis_enabled_switch = NULL;
+static lv_obj_t *s_usb_rndis_info_label = NULL;
+
 static bool s_updating_controls = false;
+
+static void settings_screen_refresh_usb_rndis_info(
+    const app_settings_t *settings
+);
 
 static void settings_screen_refresh_wifi_info(
     const app_settings_t *settings
@@ -57,7 +67,7 @@ static void settings_screen_refresh_wifi_info(
 
 static void settings_screen_stop_wifi_refresh(void);
 
-static void settings_screen_wifi_refresh_timer_cb(
+static void settings_screen_network_refresh_timer_cb(
     lv_timer_t *timer
 )
 {
@@ -84,6 +94,10 @@ static void settings_screen_wifi_refresh_timer_cb(
         &settings
     );
 
+    settings_screen_refresh_usb_rndis_info(
+        &settings
+    );
+
     s_updating_controls = false;
 }
 
@@ -95,7 +109,7 @@ static void settings_screen_start_wifi_refresh(void)
 
     s_wifi_refresh_timer =
         lv_timer_create(
-            settings_screen_wifi_refresh_timer_cb,
+            settings_screen_network_refresh_timer_cb,
             WIFI_INFO_REFRESH_PERIOD_MS,
             NULL
         );
@@ -137,6 +151,8 @@ static void settings_screen_delete_event_cb(
     s_animations_switch = NULL;
     s_wifi_enabled_switch = NULL;
     s_wifi_info_label = NULL;
+    s_usb_rndis_enabled_switch = NULL;
+    s_usb_rndis_info_label = NULL;
     s_updating_controls = false;
 }
 
@@ -267,6 +283,109 @@ static void settings_screen_refresh_wifi_info(
     }
 }
 
+static void settings_screen_refresh_usb_rndis_info(
+    const app_settings_t *settings
+)
+{
+    if (settings == NULL) {
+        return;
+    }
+
+    settings_screen_set_switch_state(
+        s_usb_rndis_enabled_switch,
+        settings->usb_rndis.enabled
+    );
+
+    if (s_usb_rndis_info_label == NULL) {
+        return;
+    }
+
+    usb_network_service_info_t info = {0};
+
+    const esp_err_t result =
+        usb_network_service_get_info(
+            &info
+        );
+
+    if (result != ESP_OK) {
+        lv_label_set_text_fmt(
+            s_usb_rndis_info_label,
+            "Configured: %s\n"
+            "State: Unavailable\n"
+            "Host: Not connected\n"
+            "IP address: N/A\n"
+            "DHCP: N/A\n"
+            "DNS: N/A\n"
+            "Changes apply after restart",
+            settings->usb_rndis.enabled
+                ? "Enabled"
+                : "Disabled"
+        );
+
+        return;
+    }
+
+    char mac_address[18];
+
+    (void)snprintf(
+        mac_address,
+        sizeof(mac_address),
+        "%02X:%02X:%02X:%02X:%02X:%02X",
+        info.mac[0],
+        info.mac[1],
+        info.mac[2],
+        info.mac[3],
+        info.mac[4],
+        info.mac[5]
+    );
+
+    if (info.started) {
+        lv_label_set_text_fmt(
+            s_usb_rndis_info_label,
+            "Configured: %s\n"
+            "State: Running\n"
+            "Host: %s\n"
+            "MAC: %s\n"
+            "IP address: %s\n"
+            "DHCP: %s - %s\n"
+            "DNS: %s",
+            settings->usb_rndis.enabled
+                ? "Enabled"
+                : "Disabled",
+            info.host_connected
+                ? "Connected"
+                : "Not connected",
+            mac_address,
+            info.ip_address[0] != '\0'
+                ? info.ip_address
+                : "N/A",
+            info.dhcp_start[0] != '\0'
+                ? info.dhcp_start
+                : "N/A",
+            info.dhcp_end[0] != '\0'
+                ? info.dhcp_end
+                : "N/A",
+            info.dns_address[0] != '\0'
+                ? info.dns_address
+                : "N/A"
+        );
+    } else {
+        lv_label_set_text_fmt(
+            s_usb_rndis_info_label,
+            "Configured: %s\n"
+            "State: Stopped\n"
+            "Host: Not connected\n"
+            "IP address: Not active\n"
+            "DHCP: Not active\n"
+            "DNS: Not active\n"
+            "Changes apply after restart",
+            settings->usb_rndis.enabled
+                ? "Enabled"
+                : "Disabled"
+        );
+    }
+}
+
 static esp_err_t settings_screen_refresh(void)
 {
     app_settings_t settings;
@@ -315,6 +434,10 @@ static esp_err_t settings_screen_refresh(void)
     );
 
     settings_screen_refresh_wifi_info(
+        &settings
+    );
+
+    settings_screen_refresh_usb_rndis_info(
         &settings
     );
 
@@ -521,6 +644,49 @@ static void wifi_enabled_switch_event_cb(
         return;
     }
 
+    (void)settings_screen_refresh();
+}
+
+static void usb_rndis_enabled_switch_event_cb(
+    lv_event_t *event
+)
+{
+    if (s_updating_controls) {
+        return;
+    }
+
+    lv_obj_t *switch_obj =
+        lv_event_get_target_obj(event);
+
+    if (switch_obj == NULL) {
+        return;
+    }
+
+    const bool enabled =
+        lv_obj_has_state(
+            switch_obj,
+            LV_STATE_CHECKED
+        );
+
+    const esp_err_t result =
+        settings_service_set_usb_rndis_enabled(
+            enabled
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to change USB RNDIS setting: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)settings_screen_refresh();
+        return;
+    }
+
+    /*
+     * The new USB configuration is applied after device restart.
+     */
     (void)settings_screen_refresh();
 }
 
@@ -1051,6 +1217,100 @@ static esp_err_t settings_screen_create_wifi_tab(
     return ESP_OK;
 }
 
+static esp_err_t settings_screen_create_usb_tab(
+    lv_obj_t *tab
+)
+{
+    if (tab == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    settings_screen_style_tab(
+        tab
+    );
+
+    s_usb_rndis_enabled_switch =
+        settings_screen_create_switch_card(
+            tab,
+            "USB RNDIS",
+            usb_rndis_enabled_switch_event_cb
+        );
+
+    if (s_usb_rndis_enabled_switch == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_t *info_card =
+        lv_obj_create(tab);
+
+    if (info_card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        info_card,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_height(
+        info_card,
+        LV_SIZE_CONTENT
+    );
+
+    settings_screen_style_card(
+        info_card
+    );
+
+    lv_obj_remove_flag(
+        info_card,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    s_usb_rndis_info_label =
+        lv_label_create(
+            info_card
+        );
+
+    if (s_usb_rndis_info_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        s_usb_rndis_info_label,
+        LV_PCT(100)
+    );
+
+    lv_label_set_long_mode(
+        s_usb_rndis_info_label,
+        LV_LABEL_LONG_WRAP
+    );
+
+    lv_label_set_text(
+        s_usb_rndis_info_label,
+        "State: Loading..."
+    );
+
+    lv_obj_set_style_text_font(
+        s_usb_rndis_info_label,
+        &lv_font_montserrat_14,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        s_usb_rndis_info_label,
+        lv_color_hex(0x374151U),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_line_space(
+        s_usb_rndis_info_label,
+        6,
+        LV_PART_MAIN
+    );
+
+    return ESP_OK;
+}
+
 static esp_err_t settings_screen_create_storage_tab(
     lv_obj_t *tab
 )
@@ -1246,9 +1506,8 @@ static esp_err_t settings_screen_create_tabs(
     }
 
     result =
-        settings_screen_create_placeholder_tab(
-            usb_tab,
-            "USB RNDIS settings"
+        settings_screen_create_usb_tab(
+            usb_tab
         );
 
     if (result != ESP_OK) {
@@ -1292,6 +1551,8 @@ lv_obj_t *settings_screen_create(void)
     s_animations_switch = NULL;
     s_wifi_enabled_switch = NULL;
     s_wifi_info_label = NULL;
+    s_usb_rndis_enabled_switch = NULL;
+    s_usb_rndis_info_label = NULL;
     s_updating_controls = false;
 
     lv_obj_add_event_cb(
@@ -1437,6 +1698,8 @@ void settings_screen_destroy(
     s_animations_switch = NULL;
     s_wifi_enabled_switch = NULL;
     s_wifi_info_label = NULL;
+    s_usb_rndis_enabled_switch = NULL;
+    s_usb_rndis_info_label = NULL;
     s_updating_controls = false;
 
     lv_obj_delete(
