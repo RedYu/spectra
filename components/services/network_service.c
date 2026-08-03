@@ -4,17 +4,26 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 
+#include "dns_server.h"
+
+#define USB_NETWORK_INTERFACE_KEY  ("USB_RNDIS")
+#define WIFI_AP_INTERFACE_KEY      ("WIFI_AP_DEF")
+
 static const char *TAG = "network_service";
 
 static bool s_netif_initialized = false;
 static bool s_event_loop_initialized = false;
+
+static dns_server_handle_t s_dns_server = NULL;
+
+static esp_err_t network_service_start_dns(void);
 
 esp_err_t network_service_init(void)
 {
     if (s_netif_initialized &&
         s_event_loop_initialized) {
 
-        return ESP_OK;
+        return network_service_start_dns();
     }
 
     if (!s_netif_initialized) {
@@ -56,9 +65,22 @@ esp_err_t network_service_init(void)
         s_event_loop_initialized = true;
     }
 
+    const esp_err_t dns_result =
+        network_service_start_dns();
+
+    if (dns_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to start DNS server: %s",
+            esp_err_to_name(dns_result)
+        );
+
+        return dns_result;
+    }
+
     ESP_LOGI(
         TAG,
-        "Global network stack initialized"
+        "Global network stack and DNS server initialized"
     );
 
     return ESP_OK;
@@ -74,7 +96,92 @@ esp_err_t network_service_get_initialized(
 
     *initialized =
         s_netif_initialized &&
-        s_event_loop_initialized;
+        s_event_loop_initialized &&
+        (s_dns_server != NULL);
+
+    return ESP_OK;
+}
+
+static esp_err_t network_service_start_dns(void)
+{
+    if (s_dns_server != NULL) {
+        return ESP_OK;
+    }
+
+    const dns_server_config_t config = {
+        .num_of_entries = 2U,
+
+        .item = {
+            {
+                .name = "spectra.device",
+                .if_key = USB_NETWORK_INTERFACE_KEY,
+
+                .source_network = {
+                    .addr = ESP_IP4TOADDR(
+                        172U,
+                        16U,
+                        10U,
+                        0U
+                    ),
+                },
+
+                .source_netmask = {
+                    .addr = ESP_IP4TOADDR(
+                        255U,
+                        255U,
+                        255U,
+                        0U
+                    ),
+                },
+            },
+            {
+                .name = "spectra.device",
+
+                /*
+                 * Use the actual if_key assigned to the SoftAP
+                 * esp_netif instance.
+                 */
+                .if_key = WIFI_AP_INTERFACE_KEY,
+
+                .source_network = {
+                    .addr = ESP_IP4TOADDR(
+                        172U,
+                        16U,
+                        20U,
+                        0U
+                    ),
+                },
+
+                .source_netmask = {
+                    .addr = ESP_IP4TOADDR(
+                        255U,
+                        255U,
+                        255U,
+                        0U
+                    ),
+                },
+            },
+        },
+    };
+
+    s_dns_server =
+        start_dns_server(
+            &config
+        );
+
+    if (s_dns_server == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create DNS server"
+        );
+
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "DNS server started for USB and Wi-Fi networks"
+    );
 
     return ESP_OK;
 }
