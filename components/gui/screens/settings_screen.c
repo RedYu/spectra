@@ -11,6 +11,7 @@
 #include "board_config.h"
 #include "gui_config.h"
 #include "screen_manager.h"
+#include "system_model.h"
 #include "settings_model.h"
 #include "settings_service.h"
 #include "wifi_service.h"
@@ -41,7 +42,7 @@
 
 static const char *TAG = "settings_screen";
 
-static lv_timer_t *s_wifi_refresh_timer = NULL;
+static lv_timer_t *s_status_refresh_timer = NULL;
 
 static lv_obj_t *s_root = NULL;
 static lv_obj_t *s_tabview = NULL;
@@ -60,6 +61,8 @@ static lv_obj_t *s_wifi_info_label = NULL;
 static lv_obj_t *s_usb_rndis_enabled_switch = NULL;
 static lv_obj_t *s_usb_rndis_info_label = NULL;
 
+static lv_obj_t *s_system_info_label = NULL;
+
 static bool s_updating_controls = false;
 
 static void settings_screen_refresh_usb_rndis_info(
@@ -74,7 +77,9 @@ static void settings_screen_stop_wifi_refresh(void);
 
 static void settings_screen_refresh_storage_info(void);
 
-static void settings_screen_network_refresh_timer_cb(
+static void settings_screen_refresh_system_info(void);
+
+static void settings_screen_status_refresh_timer_cb(
     lv_timer_t *timer
 )
 {
@@ -105,23 +110,25 @@ static void settings_screen_network_refresh_timer_cb(
         &settings
     );
 
+    settings_screen_refresh_system_info();
+
     s_updating_controls = false;
 }
 
 static void settings_screen_start_wifi_refresh(void)
 {
-    if (s_wifi_refresh_timer != NULL) {
+    if (s_status_refresh_timer != NULL) {
         return;
     }
 
-    s_wifi_refresh_timer =
+    s_status_refresh_timer =
         lv_timer_create(
-            settings_screen_network_refresh_timer_cb,
+            settings_screen_status_refresh_timer_cb,
             WIFI_INFO_REFRESH_PERIOD_MS,
             NULL
         );
 
-    if (s_wifi_refresh_timer == NULL) {
+    if (s_status_refresh_timer == NULL) {
         ESP_LOGW(
             TAG,
             "Failed to create Wi-Fi refresh timer"
@@ -131,15 +138,15 @@ static void settings_screen_start_wifi_refresh(void)
 
 static void settings_screen_stop_wifi_refresh(void)
 {
-    if (s_wifi_refresh_timer == NULL) {
+    if (s_status_refresh_timer == NULL) {
         return;
     }
 
     lv_timer_delete(
-        s_wifi_refresh_timer
+        s_status_refresh_timer
     );
 
-    s_wifi_refresh_timer = NULL;
+    s_status_refresh_timer = NULL;
 }
 
 static void settings_screen_delete_event_cb(
@@ -161,6 +168,7 @@ static void settings_screen_delete_event_cb(
     s_wifi_info_label = NULL;
     s_usb_rndis_enabled_switch = NULL;
     s_usb_rndis_info_label = NULL;
+    s_system_info_label = NULL;
     s_updating_controls = false;
 }
 
@@ -184,6 +192,84 @@ static void settings_screen_set_switch_state(
             LV_STATE_CHECKED
         );
     }
+}
+
+static void settings_screen_refresh_system_info(void)
+{
+    if (s_system_info_label == NULL) {
+        return;
+    }
+
+    system_model_t model;
+
+    const esp_err_t result =
+        system_model_get_snapshot(
+            &model
+        );
+
+    if (result != ESP_OK) {
+        lv_label_set_text(
+            s_system_info_label,
+            "System information unavailable"
+        );
+
+        return;
+    }
+
+    const uint32_t days =
+        model.uptime_sec / 86400U;
+
+    const uint32_t hours =
+        (model.uptime_sec % 86400U) / 3600U;
+
+    const uint32_t minutes =
+        (model.uptime_sec % 3600U) / 60U;
+
+    const uint32_t seconds =
+        model.uptime_sec % 60U;
+
+    const char *device_name =
+        model.device_name[0] != '\0'
+            ? model.device_name
+            : "N/A";
+
+    const char *firmware_version =
+        model.firmware_version[0] != '\0'
+            ? model.firmware_version
+            : "N/A";
+
+    const char *hardware_version =
+        model.hardware_version[0] != '\0'
+            ? model.hardware_version
+            : "N/A";
+
+    const char *serial_number =
+        model.serial_number[0] != '\0'
+            ? model.serial_number
+            : "N/A";
+
+    lv_label_set_text_fmt(
+        s_system_info_label,
+        "Device: %s\n"
+        "Firmware: %s\n"
+        "Hardware: %s\n"
+        "Serial: %s\n"
+        "Uptime: %u d %02u:%02u:%02u\n"
+        "Free heap: %u KB\n"
+        "Minimum heap: %u KB\n"
+        "CPU usage: %u%%",
+        device_name,
+        firmware_version,
+        hardware_version,
+        serial_number,
+        (unsigned int)days,
+        (unsigned int)hours,
+        (unsigned int)minutes,
+        (unsigned int)seconds,
+        (unsigned int)(model.free_heap / 1024U),
+        (unsigned int)(model.minimum_free_heap / 1024U),
+        (unsigned int)model.cpu_usage
+    );
 }
 
 static void settings_screen_refresh_storage_info(void)
@@ -512,6 +598,8 @@ static esp_err_t settings_screen_refresh(void)
     );
 
     settings_screen_refresh_storage_info();
+
+    settings_screen_refresh_system_info();
 
     s_updating_controls = false;
 
@@ -1478,6 +1566,89 @@ static esp_err_t settings_screen_create_storage_tab(
     return ESP_OK;
 }
 
+static esp_err_t settings_screen_create_system_tab(
+    lv_obj_t *tab
+)
+{
+    if (tab == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    settings_screen_style_tab(
+        tab
+    );
+
+    lv_obj_t *info_card =
+        lv_obj_create(tab);
+
+    if (info_card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        info_card,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_height(
+        info_card,
+        LV_SIZE_CONTENT
+    );
+
+    settings_screen_style_card(
+        info_card
+    );
+
+    lv_obj_remove_flag(
+        info_card,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    s_system_info_label =
+        lv_label_create(
+            info_card
+        );
+
+    if (s_system_info_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        s_system_info_label,
+        LV_PCT(100)
+    );
+
+    lv_label_set_long_mode(
+        s_system_info_label,
+        LV_LABEL_LONG_WRAP
+    );
+
+    lv_label_set_text(
+        s_system_info_label,
+        "Loading system information..."
+    );
+
+    lv_obj_set_style_text_font(
+        s_system_info_label,
+        &lv_font_montserrat_14,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        s_system_info_label,
+        lv_color_hex(0x374151U),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_line_space(
+        s_system_info_label,
+        6,
+        LV_PART_MAIN
+    );
+
+    return ESP_OK;
+}
+
 static esp_err_t settings_screen_create_placeholder_tab(
     lv_obj_t *tab,
     const char *text
@@ -1664,9 +1835,8 @@ static esp_err_t settings_screen_create_tabs(
         return result;
     }
 
-    return settings_screen_create_placeholder_tab(
-        system_tab,
-        "System information"
+    return settings_screen_create_system_tab(
+        system_tab
     );
 }
 
@@ -1695,6 +1865,7 @@ lv_obj_t *settings_screen_create(void)
     s_wifi_info_label = NULL;
     s_usb_rndis_enabled_switch = NULL;
     s_usb_rndis_info_label = NULL;
+    s_system_info_label = NULL;
     s_updating_controls = false;
 
     lv_obj_add_event_cb(
@@ -1843,6 +2014,7 @@ void settings_screen_destroy(
     s_wifi_info_label = NULL;
     s_usb_rndis_enabled_switch = NULL;
     s_usb_rndis_info_label = NULL;
+    s_system_info_label = NULL;
     s_updating_controls = false;
 
     lv_obj_delete(
