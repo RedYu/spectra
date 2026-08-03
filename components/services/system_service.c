@@ -3,10 +3,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_system.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -23,6 +25,10 @@
 #define SYSTEM_TASK_PRIORITY        (2U)
 #define SYSTEM_UPDATE_INTERVAL_MS   (1000U)
 #define SYSTEM_TASK_STATUS_EXTRA_COUNT  (4U)
+
+#define SYSTEM_RESTART_TASK_STACK_SIZE  (2048U)
+#define SYSTEM_RESTART_TASK_PRIORITY    (3U)
+#define SYSTEM_RESTART_DELAY_MAX_MS     (60000U)
 
 /*
  * TODO:
@@ -44,6 +50,9 @@
 static const char *TAG = "system_service";
 
 static TaskHandle_t s_task_handle = NULL;
+
+static atomic_bool s_restart_scheduled =
+    ATOMIC_VAR_INIT(false);
 
 #if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
 
@@ -371,6 +380,47 @@ static esp_err_t system_service_update_runtime(void)
     );
 }
 
+static void system_service_restart_task(
+    void *argument
+)
+{
+    const uint32_t delay_ms =
+        (uint32_t)(uintptr_t)argument;
+
+    if (delay_ms > 0U) {
+        vTaskDelay(
+            pdMS_TO_TICKS(
+                delay_ms
+            )
+        );
+    }
+
+    ESP_LOGW(
+        TAG,
+        "Restarting device"
+    );
+
+    /*
+     * Give the logging backend a short opportunity to transmit the
+     * final message before restarting.
+     */
+    vTaskDelay(
+        pdMS_TO_TICKS(50U)
+    );
+
+    esp_restart();
+
+    /*
+     * esp_restart() is not expected to return.
+     */
+    atomic_store(
+        &s_restart_scheduled,
+        false
+    );
+
+    vTaskDelete(NULL);
+}
+
 static void system_service_task(
     void *argument
 )
@@ -550,4 +600,68 @@ void system_service_stop(void)
     (void)xTaskNotifyGive(
         task_handle
     );
+}
+
+/*
+ * TODO:
+ * Add a coordinated restart preparation phase. Before restarting, all
+ * services that buffer persistent data should be asked to flush and
+ * close their resources. This includes file logging, settings storage
+ * and active SD-card operations.
+ *
+ * The restart task currently assumes that the caller has already saved
+ * settings, flushed persistent logs and completed any HTTP response.
+ *
+ * Consider adding restart cancellation and status-query APIs if restart
+ * scheduling later becomes accessible from multiple application
+ * components.
+ */
+
+esp_err_t system_service_schedule_restart(
+    uint32_t delay_ms
+)
+{
+    if (delay_ms >
+        SYSTEM_RESTART_DELAY_MAX_MS) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    bool expected = false;
+
+    if (!atomic_compare_exchange_strong(
+            &s_restart_scheduled,
+            &expected,
+            true
+        )) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const BaseType_t task_result =
+        xTaskCreate(
+            system_service_restart_task,
+            "restart_task",
+            SYSTEM_RESTART_TASK_STACK_SIZE,
+            (void *)(uintptr_t)delay_ms,
+            SYSTEM_RESTART_TASK_PRIORITY,
+            NULL
+        );
+
+    if (task_result != pdPASS) {
+        atomic_store(
+            &s_restart_scheduled,
+            false
+        );
+
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGW(
+        TAG,
+        "Device restart scheduled in %u ms",
+        (unsigned int)delay_ms
+    );
+
+    return ESP_OK;
 }

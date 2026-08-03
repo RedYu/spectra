@@ -33,14 +33,22 @@
 #define WIFI_SERVICE_AP_NETMASK_D    (0U)
 
 #define WIFI_SERVICE_AP_CHANNEL      (6U)
-#define WIFI_SERVICE_AP_MAX_CLIENTS  (2U)
-
-#define WIFI_SERVICE_AP_PASSWORD     "spectra123"
 
 #define WIFI_SERVICE_AP_DHCP_START_D  (2U)
 #define WIFI_SERVICE_AP_DHCP_END_D    (10U)
 
+#define WIFI_SERVICE_AP_SSID_SUFFIX_LENGTH  (7U)
+
+#define WIFI_SERVICE_AP_SSID_BASE_MAX_LENGTH \
+    (WIFI_SERVICE_AP_SSID_MAX_LENGTH -      \
+     WIFI_SERVICE_AP_SSID_SUFFIX_LENGTH - 1U)
+
 static const char *TAG = "wifi_service";
+
+/*
+ * TODO: Resolve DHCP-assigned client IPv4 addresses by MAC address.
+ * The required ESP-NETIF DHCP API depends on the ESP-IDF version.
+ */
 
 static SemaphoreHandle_t
     s_state_mutex = NULL;
@@ -56,9 +64,17 @@ static esp_event_handler_instance_t
 static bool s_initialized = false;
 static bool s_started = false;
 
+static char s_ap_ssid_base[
+    WIFI_SERVICE_AP_SSID_MAX_LENGTH
+] = "Spectra";
+
 static char s_ap_ssid[
     WIFI_SERVICE_AP_SSID_MAX_LENGTH
 ];
+
+static char s_ap_password[
+    WIFI_SERVICE_AP_PASSWORD_MAX_LENGTH
+] = "spectra123";
 
 static esp_err_t wifi_service_configure_dns(
     esp_netif_t *netif,
@@ -91,6 +107,55 @@ static void wifi_service_unlock(void)
             s_state_mutex
         );
     }
+}
+
+static esp_err_t wifi_service_build_ssid(void)
+{
+    uint8_t mac[
+        WIFI_SERVICE_MAC_ADDRESS_LENGTH
+    ];
+
+    const esp_err_t result =
+        esp_read_mac(
+            mac,
+            ESP_MAC_WIFI_SOFTAP
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    const size_t base_length =
+        strlen(s_ap_ssid_base);
+
+    if ((base_length == 0U) ||
+        (base_length >
+         WIFI_SERVICE_AP_SSID_BASE_MAX_LENGTH)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    const int written =
+        snprintf(
+            s_ap_ssid,
+            sizeof(s_ap_ssid),
+            "%s-%02X%02X%02X",
+            s_ap_ssid_base,
+            mac[3],
+            mac[4],
+            mac[5]
+        );
+
+    if ((written < 0) ||
+        ((size_t)written >=
+         sizeof(s_ap_ssid))) {
+
+        s_ap_ssid[0] = '\0';
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    return ESP_OK;
 }
 
 static void wifi_service_event_handler(
@@ -138,42 +203,6 @@ static void wifi_service_event_handler(
             );
         }
     }
-}
-
-static esp_err_t wifi_service_build_ssid(void)
-{
-    uint8_t mac[6];
-
-    const esp_err_t result =
-        esp_read_mac(
-            mac,
-            ESP_MAC_WIFI_SOFTAP
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    const int written =
-        snprintf(
-            s_ap_ssid,
-            sizeof(s_ap_ssid),
-            "Spectra-%02X%02X%02X",
-            mac[3],
-            mac[4],
-            mac[5]
-        );
-
-    if ((written < 0) ||
-        ((size_t)written >=
-         sizeof(s_ap_ssid))) {
-
-        s_ap_ssid[0] = '\0';
-
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    return ESP_OK;
 }
 
 static esp_err_t wifi_service_configure_ip(void)
@@ -285,16 +314,20 @@ static esp_err_t wifi_service_configure_ap(void)
         strlen(s_ap_ssid);
 
     const size_t password_length =
-        strlen(
-            WIFI_SERVICE_AP_PASSWORD
-        );
+        strlen(s_ap_password);
 
     if ((ssid_length == 0U) ||
         (ssid_length >
-         sizeof(config.ap.ssid)) ||
-        (password_length < 8U) ||
-        (password_length >=
-         sizeof(config.ap.password))) {
+         sizeof(config.ap.ssid))) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if ((password_length != 0U) &&
+        ((password_length <
+          WIFI_SERVICE_AP_PASSWORD_MIN_LENGTH) ||
+         (password_length >=
+          sizeof(config.ap.password)))) {
 
         return ESP_ERR_INVALID_SIZE;
     }
@@ -308,20 +341,25 @@ static esp_err_t wifi_service_configure_ap(void)
     config.ap.ssid_len =
         (uint8_t)ssid_length;
 
-    memcpy(
-        config.ap.password,
-        WIFI_SERVICE_AP_PASSWORD,
-        password_length
-    );
+    if (password_length > 0U) {
+        memcpy(
+            config.ap.password,
+            s_ap_password,
+            password_length
+        );
+
+        config.ap.authmode =
+            WIFI_AUTH_WPA2_PSK;
+    } else {
+        config.ap.authmode =
+            WIFI_AUTH_OPEN;
+    }
 
     config.ap.channel =
         WIFI_SERVICE_AP_CHANNEL;
 
     config.ap.max_connection =
-        WIFI_SERVICE_AP_MAX_CLIENTS;
-
-    config.ap.authmode =
-        WIFI_AUTH_WPA2_PSK;
+        WIFI_SERVICE_MAX_CLIENT_COUNT;
 
     config.ap.pmf_cfg.capable = true;
     config.ap.pmf_cfg.required = false;
@@ -415,7 +453,6 @@ static void wifi_service_cleanup(void)
 
     s_initialized = false;
     s_started = false;
-    s_ap_ssid[0] = '\0';
 }
 
 esp_err_t wifi_service_init(void)
@@ -484,6 +521,7 @@ esp_err_t wifi_service_init(void)
     if (result != ESP_OK) {
         wifi_service_cleanup();
         wifi_service_unlock();
+
         return result;
     }
 
@@ -916,6 +954,354 @@ esp_err_t wifi_service_get_ap_ip_address(
         address,
         WIFI_SERVICE_AP_IP_ADDRESS,
         required_size
+    );
+
+    wifi_service_unlock();
+
+    return ESP_OK;
+}
+
+esp_err_t wifi_service_get_info(
+    wifi_service_info_t *info
+)
+{
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        info,
+        0,
+        sizeof(*info)
+    );
+
+    const esp_err_t lock_result =
+        wifi_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    info->initialized =
+        s_initialized;
+
+    info->started =
+        s_started;
+
+    if (!s_initialized) {
+        wifi_service_unlock();
+
+        return ESP_OK;
+    }
+
+    (void)strlcpy(
+        info->ssid,
+        s_ap_ssid,
+        sizeof(info->ssid)
+    );
+
+    info->password_configured =
+        s_ap_password[0] != '\0';
+
+    info->channel =
+        WIFI_SERVICE_AP_CHANNEL;
+
+    (void)strlcpy(
+        info->ip_address,
+        WIFI_SERVICE_AP_IP_ADDRESS,
+        sizeof(info->ip_address)
+    );
+
+    (void)snprintf(
+        info->netmask,
+        sizeof(info->netmask),
+        "%u.%u.%u.%u",
+        WIFI_SERVICE_AP_NETMASK_A,
+        WIFI_SERVICE_AP_NETMASK_B,
+        WIFI_SERVICE_AP_NETMASK_C,
+        WIFI_SERVICE_AP_NETMASK_D
+    );
+
+    (void)snprintf(
+        info->dhcp_start,
+        sizeof(info->dhcp_start),
+        "%u.%u.%u.%u",
+        WIFI_SERVICE_AP_IP_A,
+        WIFI_SERVICE_AP_IP_B,
+        WIFI_SERVICE_AP_IP_C,
+        WIFI_SERVICE_AP_DHCP_START_D
+    );
+
+    (void)snprintf(
+        info->dhcp_end,
+        sizeof(info->dhcp_end),
+        "%u.%u.%u.%u",
+        WIFI_SERVICE_AP_IP_A,
+        WIFI_SERVICE_AP_IP_B,
+        WIFI_SERVICE_AP_IP_C,
+        WIFI_SERVICE_AP_DHCP_END_D
+    );
+
+    /*
+     * The SoftAP address is advertised as the DNS server through DHCP.
+     */
+    (void)strlcpy(
+        info->dns_address,
+        WIFI_SERVICE_AP_IP_ADDRESS,
+        sizeof(info->dns_address)
+    );
+
+    if (!s_started) {
+        wifi_service_unlock();
+
+        return ESP_OK;
+    }
+
+    wifi_sta_list_t station_list = {0};
+
+    const esp_err_t station_result =
+        esp_wifi_ap_get_sta_list(
+            &station_list
+        );
+
+    if (station_result != ESP_OK) {
+        wifi_service_unlock();
+
+        return station_result;
+    }
+
+    size_t client_count =
+        station_list.num;
+
+    if (client_count >
+        WIFI_SERVICE_MAX_CLIENT_COUNT) {
+
+        client_count =
+            WIFI_SERVICE_MAX_CLIENT_COUNT;
+    }
+
+    for (size_t index = 0U;
+         index < client_count;
+         ++index) {
+
+        memcpy(
+            info->clients[index].mac,
+            station_list.sta[index].mac,
+            sizeof(info->clients[index].mac)
+        );
+
+        info->clients[index].rssi =
+            station_list.sta[index].rssi;
+
+        /*
+         * esp_wifi_ap_get_sta_list() provides MAC and RSSI but does
+         * not provide the DHCP-assigned IPv4 address.
+         */
+        info->clients[index].ip_address[0] =
+            '\0';
+    }
+
+    info->client_count =
+        client_count;
+
+    wifi_service_unlock();
+
+    return ESP_OK;
+}
+
+esp_err_t wifi_service_set_ap_credentials(
+    const char *ssid,
+    const char *password
+)
+{
+    if ((ssid == NULL) ||
+        (password == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t ssid_length =
+        strlen(ssid);
+
+    const size_t password_length =
+        strlen(password);
+
+    if ((ssid_length == 0U) ||
+        (ssid_length >
+        WIFI_SERVICE_AP_SSID_BASE_MAX_LENGTH)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if (password_length >=
+        WIFI_SERVICE_AP_PASSWORD_MAX_LENGTH) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if ((password_length != 0U) &&
+        (password_length <
+         WIFI_SERVICE_AP_PASSWORD_MIN_LENGTH)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_state_mutex == NULL) {
+        s_state_mutex =
+            xSemaphoreCreateMutex();
+
+        if (s_state_mutex == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    esp_err_t result =
+        wifi_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if ((strcmp(s_ap_ssid_base, ssid) == 0) &&
+        (strcmp(s_ap_password, password) == 0)) {
+
+        if (s_ap_ssid[0] == '\0') {
+            result =
+                wifi_service_build_ssid();
+
+            if (result != ESP_OK) {
+                wifi_service_unlock();
+
+                return result;
+            }
+        }
+
+        wifi_service_unlock();
+
+        return ESP_OK;
+    }
+
+    char previous_ssid_base[
+        WIFI_SERVICE_AP_SSID_MAX_LENGTH
+    ];
+
+    char previous_ssid[
+        WIFI_SERVICE_AP_SSID_MAX_LENGTH
+    ];
+
+    char previous_password[
+        WIFI_SERVICE_AP_PASSWORD_MAX_LENGTH
+    ];
+
+    (void)strlcpy(
+        previous_ssid_base,
+        s_ap_ssid_base,
+        sizeof(previous_ssid_base)
+    );
+
+    (void)strlcpy(
+        previous_ssid,
+        s_ap_ssid,
+        sizeof(previous_ssid)
+    );
+
+    (void)strlcpy(
+        previous_password,
+        s_ap_password,
+        sizeof(previous_password)
+    );
+
+    (void)strlcpy(
+        s_ap_ssid_base,
+        ssid,
+        sizeof(s_ap_ssid_base)
+    );
+
+    (void)strlcpy(
+        s_ap_password,
+        password,
+        sizeof(s_ap_password)
+    );
+
+    result =
+        wifi_service_build_ssid();
+
+    if (result != ESP_OK) {
+        (void)strlcpy(
+            s_ap_ssid_base,
+            previous_ssid_base,
+            sizeof(s_ap_ssid_base)
+        );
+
+        (void)strlcpy(
+            s_ap_ssid,
+            previous_ssid,
+            sizeof(s_ap_ssid)
+        );
+
+        (void)strlcpy(
+            s_ap_password,
+            previous_password,
+            sizeof(s_ap_password)
+        );
+
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    /*
+     * Before initialization, only store the configuration. It will be
+     * applied by wifi_service_init().
+     */
+    if (!s_initialized) {
+        wifi_service_unlock();
+
+        return ESP_OK;
+    }
+
+    result =
+        wifi_service_configure_ap();
+
+    if (result != ESP_OK) {
+        (void)strlcpy(
+            s_ap_ssid_base,
+            previous_ssid_base,
+            sizeof(s_ap_ssid_base)
+        );
+
+        (void)strlcpy(
+            s_ap_ssid,
+            previous_ssid,
+            sizeof(s_ap_ssid)
+        );
+
+        (void)strlcpy(
+            s_ap_password,
+            previous_password,
+            sizeof(s_ap_password)
+        );
+
+        const esp_err_t restore_result =
+            wifi_service_configure_ap();
+
+        if (restore_result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to restore previous SoftAP configuration: %s",
+                esp_err_to_name(restore_result)
+            );
+        }
+
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "SoftAP credentials updated: SSID=%s",
+        s_ap_ssid
     );
 
     wifi_service_unlock();

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -26,6 +28,33 @@ esp_err_t system_service_start(void);
  * Calling this function when the service is not running has no effect.
  */
 void system_service_stop(void);
+
+/**
+ * @brief Schedule a device restart.
+ *
+ * The restart is performed asynchronously after the requested delay,
+ * allowing the caller to finish operations such as sending an HTTP
+ * response.
+ *
+ * Only one restart may be scheduled at a time. A zero delay requests
+ * an immediate asynchronous restart. Callers that need to complete an
+ * operation before restarting must provide a sufficient delay.
+ *
+ * The caller is responsible for saving settings, flushing persistent
+ * data and completing any pending response before the restart occurs.
+ *
+ * @param[in] delay_ms Delay before restart in milliseconds. The
+ * maximum supported delay is 60000 milliseconds.
+ *
+ * @return ESP_OK when the restart task is created,
+ * ESP_ERR_INVALID_ARG if delay_ms exceeds the supported maximum,
+ * ESP_ERR_INVALID_STATE if a restart is already scheduled,
+ * ESP_ERR_NO_MEM if the restart task cannot be created, otherwise an
+ * ESP-IDF error code.
+ */
+esp_err_t system_service_schedule_restart(
+    uint32_t delay_ms
+);
 
 #ifdef __cplusplus
 }

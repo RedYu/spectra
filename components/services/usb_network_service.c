@@ -1,5 +1,7 @@
 #include "usb_network_service.h"
 
+#include <stdatomic.h>
+#include <stdio.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -56,6 +58,16 @@
 
 #define USB_NETWORK_TX_TIMEOUT_MS         (1000U)
 
+static const char *TAG = "usb_network_service";
+
+/*
+ * TODO:
+ * Protect s_initialized and s_usb_netif with a mutex or atomic state
+ * before adding runtime USB RNDIS stop or deinitialization. The current
+ * implementation is safe only because initialization occurs during
+ * startup and these values are not modified afterward.
+ */
+
 static esp_netif_t *s_usb_netif = NULL;
 
 /*
@@ -64,9 +76,10 @@ static esp_netif_t *s_usb_netif = NULL;
  */
 static uint8_t s_netif_driver_context = 0U;
 
-static const char *TAG = "usb_network_service";
-
 static bool s_initialized = false;
+
+static atomic_bool s_host_connected =
+    ATOMIC_VAR_INIT(false);
 
 /*
  * Microsoft OS 1.0 Extended Compatible ID descriptor.
@@ -575,6 +588,11 @@ static void usb_network_event_callback(
 
     switch (event->id) {
         case TINYUSB_EVENT_ATTACHED:
+            atomic_store(
+                &s_host_connected,
+                true
+            );
+
             ESP_LOGI(
                 TAG,
                 "USB host attached"
@@ -582,6 +600,11 @@ static void usb_network_event_callback(
             break;
 
         case TINYUSB_EVENT_DETACHED:
+            atomic_store(
+                &s_host_connected,
+                false
+            );
+
             ESP_LOGI(
                 TAG,
                 "USB host detached"
@@ -697,6 +720,11 @@ esp_err_t usb_network_service_init(void)
     usb_config.descriptor.full_speed_config =
         s_configuration_descriptor;
 
+    atomic_store(
+        &s_host_connected,
+        false
+    );
+
     ESP_RETURN_ON_ERROR(
         tinyusb_driver_install(
             &usb_config
@@ -759,6 +787,117 @@ esp_err_t usb_network_service_init(void)
         TAG,
         "USB RNDIS service initialized"
     );
+
+    return ESP_OK;
+}
+
+esp_err_t usb_network_service_get_info(
+    usb_network_service_info_t *info
+)
+{
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        info,
+        0,
+        sizeof(*info)
+    );
+
+    info->initialized =
+        s_initialized;
+
+    info->started =
+        s_initialized &&
+        (s_usb_netif != NULL);
+
+    info->host_connected =
+        atomic_load(
+            &s_host_connected
+        );
+
+    memcpy(
+        info->mac,
+        tud_network_mac_address,
+        sizeof(info->mac)
+    );
+
+    const int ip_result =
+        snprintf(
+            info->ip_address,
+            sizeof(info->ip_address),
+            "%u.%u.%u.%u",
+            USB_NETWORK_IP_A,
+            USB_NETWORK_IP_B,
+            USB_NETWORK_IP_C,
+            USB_NETWORK_IP_D
+        );
+
+    const int netmask_result =
+        snprintf(
+            info->netmask,
+            sizeof(info->netmask),
+            "255.255.255.0"
+        );
+
+    const int dhcp_start_result =
+        snprintf(
+            info->dhcp_start,
+            sizeof(info->dhcp_start),
+            "%u.%u.%u.%u",
+            USB_NETWORK_IP_A,
+            USB_NETWORK_IP_B,
+            USB_NETWORK_IP_C,
+            USB_NETWORK_DHCP_START_D
+        );
+
+    const int dhcp_end_result =
+        snprintf(
+            info->dhcp_end,
+            sizeof(info->dhcp_end),
+            "%u.%u.%u.%u",
+            USB_NETWORK_IP_A,
+            USB_NETWORK_IP_B,
+            USB_NETWORK_IP_C,
+            USB_NETWORK_DHCP_END_D
+        );
+
+    const int dns_result =
+        snprintf(
+            info->dns_address,
+            sizeof(info->dns_address),
+            "%u.%u.%u.%u",
+            USB_NETWORK_IP_A,
+            USB_NETWORK_IP_B,
+            USB_NETWORK_IP_C,
+            USB_NETWORK_IP_D
+        );
+
+    if ((ip_result < 0) ||
+        ((size_t)ip_result >=
+         sizeof(info->ip_address)) ||
+        (netmask_result < 0) ||
+        ((size_t)netmask_result >=
+         sizeof(info->netmask)) ||
+        (dhcp_start_result < 0) ||
+        ((size_t)dhcp_start_result >=
+         sizeof(info->dhcp_start)) ||
+        (dhcp_end_result < 0) ||
+        ((size_t)dhcp_end_result >=
+         sizeof(info->dhcp_end)) ||
+        (dns_result < 0) ||
+        ((size_t)dns_result >=
+         sizeof(info->dns_address))) {
+
+        memset(
+            info,
+            0,
+            sizeof(*info)
+        );
+
+        return ESP_ERR_INVALID_SIZE;
+    }
 
     return ESP_OK;
 }

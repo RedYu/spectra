@@ -9,6 +9,8 @@
 extern "C" {
 #endif
 
+#define SETTINGS_SCHEMA_VERSION                  (1U)
+
 #define SETTINGS_DEVICE_NAME_MAX_LENGTH          (32U)
 #define SETTINGS_DEVICE_TARGET_MAX_LENGTH        (32U)
 
@@ -19,10 +21,19 @@ extern "C" {
 #define SETTINGS_LOGGING_SD_ENABLED_DEFAULT      (false)
 #define SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT   (false)
 
-#define SETTINGS_WIFI_SSID_MAX_LENGTH  (33U)
+#define SETTINGS_WIFI_SSID_MAX_LENGTH            (26U)
+#define SETTINGS_WIFI_PASSWORD_MIN_LENGTH        (8U)
+#define SETTINGS_WIFI_PASSWORD_MAX_LENGTH        (64U)
 
-#define SETTINGS_WIFI_ENABLED_DEFAULT  (false)
-#define SETTINGS_WIFI_AP_ENABLED_DEFAULT  (true)
+#define SETTINGS_WIFI_SSID_MAX_LENGTH            (26U)
+#define SETTINGS_WIFI_PASSWORD_MIN_LENGTH        (8U)
+#define SETTINGS_WIFI_PASSWORD_MAX_LENGTH        (64U)
+
+#define SETTINGS_WIFI_AP_ENABLED_DEFAULT         (true)
+#define SETTINGS_WIFI_AP_SSID_DEFAULT            ("Spectra")
+#define SETTINGS_WIFI_AP_PASSWORD_DEFAULT        ("spectra123")
+
+#define SETTINGS_USB_RNDIS_ENABLED_DEFAULT       (true)
 
 typedef struct
 {
@@ -49,16 +60,41 @@ typedef struct
 
 } ui_settings_t;
 
+/**
+ * @brief Wi-Fi SoftAP settings.
+ *
+ * The SSID field contains the base name. The Wi-Fi service appends a
+ * hyphen and the final six hexadecimal characters of the SoftAP MAC
+ * address to produce the advertised SSID.
+ *
+ * An empty password configures an open network. Otherwise, the
+ * password must contain from 8 to 63 bytes.
+ */
 typedef struct
 {
     bool enabled;
-    bool ap_enabled;
 
     char ssid[
         SETTINGS_WIFI_SSID_MAX_LENGTH
     ];
 
-} wifi_settings_t;
+    char password[
+        SETTINGS_WIFI_PASSWORD_MAX_LENGTH
+    ];
+
+} wifi_ap_settings_t;
+
+/**
+ * @brief USB RNDIS settings.
+ */
+typedef struct
+{
+    /*
+     * Changes to this setting are applied after restart.
+     */
+    bool enabled;
+
+} usb_rndis_settings_t;
 
 typedef struct
 {
@@ -68,7 +104,9 @@ typedef struct
     display_settings_t display;
     logging_settings_t logging;
     ui_settings_t ui;
-    wifi_settings_t wifi;
+
+    wifi_ap_settings_t wifi_ap;
+    usb_rndis_settings_t usb_rndis;
 
 } app_settings_t;
 

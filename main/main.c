@@ -14,12 +14,12 @@
 #include "system_service.h"
 #include "storage_service.h"
 #include "storage_sd_service.h"
+#include "settings_model.h"
 #include "settings_service.h"
 #include "gui_service.h"
 #include "logging_service.h"
 #include "network_service.h"
 #include "usb_network_service.h"
-#include "wifi_service.h"
 #include "web_service.h"
 #include "crash_dump_service.h"
 
@@ -311,7 +311,30 @@ static void startup_task(
     }
 
     (void)gui_service_set_boot_progress(
-        25U,
+        20U,
+        "Initializing network stack"
+    );
+
+    result = network_service_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize network service: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)gui_service_set_boot_progress(
+            20U,
+            "Network initialization failed"
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    (void)gui_service_set_boot_progress(
+        30U,
         "Loading configuration"
     );
 
@@ -325,8 +348,25 @@ static void startup_task(
         );
 
         (void)gui_service_set_boot_progress(
-            25U,
+            30U,
             "Configuration loading failed"
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    app_settings_t settings;
+
+    result = settings_model_get(
+        &settings
+    );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to read application settings: %s",
+            esp_err_to_name(result)
         );
 
         vTaskDelete(NULL);
@@ -421,79 +461,15 @@ static void startup_task(
     }
 
     (void)gui_service_set_boot_progress(
-        60U,
-        "Initializing network"
+        75U,
+        settings.usb_rndis.enabled
+            ? "Starting USB network"
+            : "USB network disabled"
     );
 
-    result = network_service_init();
-
-    if (result != ESP_OK) {
-        ESP_LOGW(
-            TAG,
-            "Failed to initialize network service: %s",
-            esp_err_to_name(result)
-        );
-
-        startup_warning = true;
-
-        (void)gui_service_set_boot_progress(
-            90U,
-            "Network unavailable"
-        );
-
-    } else {
-        (void)gui_service_set_boot_progress(
-            70U,
-            "Starting Wi-Fi"
-        );
-
-        result = wifi_service_init();
-
-        if (result != ESP_OK) {
-            ESP_LOGW(
-                TAG,
-                "Failed to initialize Wi-Fi service: %s",
-                esp_err_to_name(result)
-            );
-
-            startup_warning = true;
-
-            (void)gui_service_set_boot_progress(
-                78U,
-                "Wi-Fi unavailable"
-            );
-
-        } else {
-            result = wifi_service_start();
-
-            if (result != ESP_OK) {
-                ESP_LOGW(
-                    TAG,
-                    "Failed to start Wi-Fi SoftAP: %s",
-                    esp_err_to_name(result)
-                );
-
-                startup_warning = true;
-
-                (void)gui_service_set_boot_progress(
-                    78U,
-                    "Wi-Fi startup failed"
-                );
-
-            } else {
-                (void)gui_service_set_boot_progress(
-                    78U,
-                    "Wi-Fi access point ready"
-                );
-            }
-        }
-
-        (void)gui_service_set_boot_progress(
-            82U,
-            "Starting USB network"
-        );
-
-        result = usb_network_service_init();
+    if (settings.usb_rndis.enabled) {
+        result =
+            usb_network_service_init();
 
         if (result != ESP_OK) {
             ESP_LOGW(
@@ -505,44 +481,54 @@ static void startup_task(
             startup_warning = true;
 
             (void)gui_service_set_boot_progress(
-                86U,
+                85U,
                 "USB network unavailable"
             );
 
         } else {
             (void)gui_service_set_boot_progress(
-                86U,
+                85U,
                 "USB network ready"
             );
         }
-
-        (void)gui_service_set_boot_progress(
-            90U,
-            "Starting web interface"
+    } else {
+        ESP_LOGI(
+            TAG,
+            "USB RNDIS is disabled in settings"
         );
 
-        result = web_service_start();
+        (void)gui_service_set_boot_progress(
+            85U,
+            "USB network disabled"
+        );
+    }
 
-        if (result != ESP_OK) {
-            ESP_LOGW(
-                TAG,
-                "Failed to start web service: %s",
-                esp_err_to_name(result)
-            );
+    (void)gui_service_set_boot_progress(
+        90U,
+        "Starting web interface"
+    );
 
-            startup_warning = true;
+    result = web_service_start();
 
-            (void)gui_service_set_boot_progress(
-                95U,
-                "Web interface unavailable"
-            );
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to start web service: %s",
+            esp_err_to_name(result)
+        );
 
-        } else {
-            (void)gui_service_set_boot_progress(
-                95U,
-                "Web interface ready"
-            );
-        }
+        startup_warning = true;
+
+        (void)gui_service_set_boot_progress(
+            95U,
+            "Web interface unavailable"
+        );
+
+    } else {
+        (void)gui_service_set_boot_progress(
+            95U,
+            "Web interface ready"
+        );
     }
 
     log_memory_status(

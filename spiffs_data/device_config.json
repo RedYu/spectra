@@ -16,5 +16,17 @@
 
     "ui": {
         "animations_enabled": false
+    },
+
+    "network": {
+        "wifi_ap": {
+            "enabled": true,
+            "ssid": "Spectra",
+            "password": "spectra123"
+        },
+
+        "usb_rndis": {
+            "enabled": true
+        }
     }
 }
