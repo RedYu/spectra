@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stddef.h>
 
 #include "esp_err.h"
 #include "esp_log.h"
@@ -38,7 +39,7 @@
 #define SETTINGS_SWITCH_WIDTH           (48)
 #define SETTINGS_SWITCH_HEIGHT          (26)
 
-#define WIFI_INFO_REFRESH_PERIOD_MS  (1000U)
+#define SETTINGS_STATUS_REFRESH_PERIOD_MS  (1000U)
 
 static const char *TAG = "settings_screen";
 
@@ -73,7 +74,11 @@ static void settings_screen_refresh_wifi_info(
     const app_settings_t *settings
 );
 
-static void settings_screen_stop_wifi_refresh(void);
+static void settings_screen_format_size(
+    uint64_t bytes,
+    char *buffer,
+    size_t buffer_size
+);
 
 static void settings_screen_refresh_storage_info(void);
 
@@ -115,7 +120,7 @@ static void settings_screen_status_refresh_timer_cb(
     s_updating_controls = false;
 }
 
-static void settings_screen_start_wifi_refresh(void)
+static void settings_screen_start_status_refresh(void)
 {
     if (s_status_refresh_timer != NULL) {
         return;
@@ -124,19 +129,19 @@ static void settings_screen_start_wifi_refresh(void)
     s_status_refresh_timer =
         lv_timer_create(
             settings_screen_status_refresh_timer_cb,
-            WIFI_INFO_REFRESH_PERIOD_MS,
+            SETTINGS_STATUS_REFRESH_PERIOD_MS,
             NULL
         );
 
     if (s_status_refresh_timer == NULL) {
         ESP_LOGW(
             TAG,
-            "Failed to create Wi-Fi refresh timer"
+            "Failed to create settings status refresh timer"
         );
     }
 }
 
-static void settings_screen_stop_wifi_refresh(void)
+static void settings_screen_stop_status_refresh(void)
 {
     if (s_status_refresh_timer == NULL) {
         return;
@@ -155,7 +160,7 @@ static void settings_screen_delete_event_cb(
 {
     (void)event;
 
-    settings_screen_stop_wifi_refresh();
+    settings_screen_stop_status_refresh();
 
     s_root = NULL;
     s_tabview = NULL;
@@ -285,14 +290,6 @@ static void settings_screen_refresh_storage_info(void)
             &internal_mounted
         );
 
-    storage_sd_state_t sd_state =
-        STORAGE_SD_STATE_UNAVAILABLE;
-
-    const esp_err_t sd_result =
-        storage_sd_service_get_state(
-            &sd_state
-        );
-
     const char *internal_state;
 
     if (internal_result != ESP_OK) {
@@ -304,33 +301,88 @@ static void settings_screen_refresh_storage_info(void)
                 : "Not mounted";
     }
 
-    const char *card_state;
+    storage_sd_info_t sd_info;
+
+    const esp_err_t sd_result =
+        storage_sd_service_get_info(
+            &sd_info
+        );
 
     if (sd_result != ESP_OK) {
-        card_state = "Unavailable";
-    } else {
-        switch (sd_state) {
-            case STORAGE_SD_STATE_MOUNTED:
-                card_state = "Mounted";
-                break;
+        storage_sd_state_t sd_state =
+            STORAGE_SD_STATE_UNAVAILABLE;
 
-            case STORAGE_SD_STATE_ERROR:
-                card_state = "Error";
-                break;
+        const esp_err_t state_result =
+            storage_sd_service_get_state(
+                &sd_state
+            );
 
-            case STORAGE_SD_STATE_UNAVAILABLE:
-            default:
-                card_state = "Not mounted";
-                break;
+        const char *card_state =
+            "Unavailable";
+
+        if (state_result == ESP_OK) {
+            switch (sd_state) {
+                case STORAGE_SD_STATE_MOUNTED:
+                    card_state = "Information unavailable";
+                    break;
+
+                case STORAGE_SD_STATE_ERROR:
+                    card_state = "Error";
+                    break;
+
+                case STORAGE_SD_STATE_UNAVAILABLE:
+                default:
+                    card_state = "Not mounted";
+                    break;
+            }
         }
+
+        lv_label_set_text_fmt(
+            s_storage_info_label,
+            "Internal storage: %s\n"
+            "SD card: %s",
+            internal_state,
+            card_state
+        );
+
+        return;
     }
+
+    char total_text[24];
+    char used_text[24];
+    char free_text[24];
+
+    settings_screen_format_size(
+        sd_info.total_bytes,
+        total_text,
+        sizeof(total_text)
+    );
+
+    settings_screen_format_size(
+        sd_info.used_bytes,
+        used_text,
+        sizeof(used_text)
+    );
+
+    settings_screen_format_size(
+        sd_info.free_bytes,
+        free_text,
+        sizeof(free_text)
+    );
 
     lv_label_set_text_fmt(
         s_storage_info_label,
         "Internal storage: %s\n"
-        "SD card: %s",
+        "SD card: Mounted\n"
+        "Filesystem: %s\n"
+        "Capacity: %s\n"
+        "Used: %s\n"
+        "Free: %s",
         internal_state,
-        card_state
+        sd_info.filesystem,
+        total_text,
+        used_text,
+        free_text
     );
 }
 
@@ -538,6 +590,73 @@ static void settings_screen_refresh_usb_rndis_info(
             settings->usb_rndis.enabled
                 ? "Enabled"
                 : "Disabled"
+        );
+    }
+}
+
+static void settings_screen_format_size(
+    uint64_t bytes,
+    char *buffer,
+    size_t buffer_size
+)
+{
+    if ((buffer == NULL) ||
+        (buffer_size == 0U)) {
+
+        return;
+    }
+
+    const uint64_t kibibyte = 1024U;
+    const uint64_t mebibyte =
+        1024U * kibibyte;
+    const uint64_t gibibyte =
+        1024U * mebibyte;
+
+    if (bytes >= gibibyte) {
+        const uint64_t whole =
+            bytes / gibibyte;
+
+        const uint64_t decimal =
+            ((bytes % gibibyte) * 10U) /
+            gibibyte;
+
+        (void)snprintf(
+            buffer,
+            buffer_size,
+            "%llu.%llu GB",
+            (unsigned long long)whole,
+            (unsigned long long)decimal
+        );
+    } else if (bytes >= mebibyte) {
+        const uint64_t whole =
+            bytes / mebibyte;
+
+        const uint64_t decimal =
+            ((bytes % mebibyte) * 10U) /
+            mebibyte;
+
+        (void)snprintf(
+            buffer,
+            buffer_size,
+            "%llu.%llu MB",
+            (unsigned long long)whole,
+            (unsigned long long)decimal
+        );
+    } else if (bytes >= kibibyte) {
+        (void)snprintf(
+            buffer,
+            buffer_size,
+            "%llu KB",
+            (unsigned long long)(
+                bytes / kibibyte
+            )
+        );
+    } else {
+        (void)snprintf(
+            buffer,
+            buffer_size,
+            "%llu B",
+            (unsigned long long)bytes
         );
     }
 }
@@ -1649,52 +1768,6 @@ static esp_err_t settings_screen_create_system_tab(
     return ESP_OK;
 }
 
-static esp_err_t settings_screen_create_placeholder_tab(
-    lv_obj_t *tab,
-    const char *text
-)
-{
-    if ((tab == NULL) ||
-        (text == NULL)) {
-
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    settings_screen_style_tab(
-        tab
-    );
-
-    lv_obj_t *label =
-        lv_label_create(tab);
-
-    if (label == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
-
-    lv_label_set_text(
-        label,
-        text
-    );
-
-    lv_obj_set_style_text_font(
-        label,
-        &lv_font_montserrat_16,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        label,
-        lv_color_hex(0x6B7280U),
-        LV_PART_MAIN
-    );
-
-    lv_obj_center(
-        label
-    );
-
-    return ESP_OK;
-}
-
 static esp_err_t settings_screen_create_tabs(
     lv_obj_t *screen
 )
@@ -1975,7 +2048,7 @@ void settings_screen_on_show(
         );
     }
 
-    settings_screen_start_wifi_refresh();
+    settings_screen_start_status_refresh();
 }
 
 void settings_screen_on_hide(
@@ -1988,7 +2061,7 @@ void settings_screen_on_hide(
         return;
     }
 
-    settings_screen_stop_wifi_refresh();
+    settings_screen_stop_status_refresh();
 }
 
 void settings_screen_destroy(
@@ -2001,7 +2074,7 @@ void settings_screen_destroy(
         return;
     }
 
-    settings_screen_stop_wifi_refresh();
+    settings_screen_stop_status_refresh();
 
     s_root = NULL;
     s_tabview = NULL;

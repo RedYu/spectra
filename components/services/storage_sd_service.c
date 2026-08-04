@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "esp_vfs_fat.h"
 
 #include "sd_card_driver.h"
 #include "logging_service.h"
@@ -1430,6 +1431,95 @@ esp_err_t storage_sd_service_get_state(
     storage_sd_service_mutex_unlock();
 
     return ESP_OK;
+}
+
+esp_err_t storage_sd_service_get_info(
+    storage_sd_info_t *info
+)
+{
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        info,
+        0,
+        sizeof(*info)
+    );
+
+    info->state =
+        STORAGE_SD_STATE_UNAVAILABLE;
+
+    esp_err_t result =
+        storage_sd_service_mutex_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        storage_sd_service_validate_state_locked();
+
+    if (result != ESP_OK) {
+        storage_sd_service_mutex_unlock();
+        return result;
+    }
+
+    result =
+        storage_sd_service_spi_lock();
+
+    if (result != ESP_OK) {
+        storage_sd_service_mutex_unlock();
+        return result;
+    }
+
+    uint64_t total_bytes = 0U;
+    uint64_t free_bytes = 0U;
+
+    result =
+        esp_vfs_fat_info(
+            STORAGE_SD_MOUNT_POINT,
+            &total_bytes,
+            &free_bytes
+        );
+
+    board_spi_unlock();
+
+    if (result == ESP_OK) {
+        if (free_bytes > total_bytes) {
+            result = ESP_ERR_INVALID_SIZE;
+        } else {
+            info->state =
+                STORAGE_SD_STATE_MOUNTED;
+
+            info->total_bytes =
+                total_bytes;
+
+            info->free_bytes =
+                free_bytes;
+
+            info->used_bytes =
+                total_bytes - free_bytes;
+
+            (void)strlcpy(
+                info->filesystem,
+                "FAT",
+                sizeof(info->filesystem)
+            );
+        }
+    }
+
+    storage_sd_service_mutex_unlock();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to get SD filesystem information: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    return result;
 }
 
 esp_err_t storage_sd_service_mount(void)

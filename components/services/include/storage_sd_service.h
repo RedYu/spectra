@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <sys/stat.h>
 
@@ -13,13 +14,32 @@
 extern "C" {
 #endif
 
+#define STORAGE_SD_FILESYSTEM_NAME_MAX_LENGTH  (16U)
+
 typedef enum
 {
     STORAGE_SD_STATE_UNAVAILABLE = 0,
-    STORAGE_SD_STATE_MOUNTED = 1,
-    STORAGE_SD_STATE_ERROR = 2
+    STORAGE_SD_STATE_MOUNTED,
+    STORAGE_SD_STATE_ERROR
 
 } storage_sd_state_t;
+
+/**
+ * @brief SD-card filesystem information.
+ */
+typedef struct
+{
+    storage_sd_state_t state;
+
+    char filesystem[
+        STORAGE_SD_FILESYSTEM_NAME_MAX_LENGTH
+    ];
+
+    uint64_t total_bytes;
+    uint64_t used_bytes;
+    uint64_t free_bytes;
+
+} storage_sd_info_t;
 
 /**
  * @brief Open a file on the SD card.
@@ -223,6 +243,20 @@ esp_err_t storage_sd_service_unmount(void);
  */
 esp_err_t storage_sd_service_get_state(
     storage_sd_state_t *state
+);
+
+/**
+ * @brief Get SD-card filesystem information.
+ *
+ * @param[out] info Destination information structure.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if info is NULL,
+ * ESP_ERR_INVALID_STATE if the card is not mounted,
+ * ESP_ERR_TIMEOUT if a required lock cannot be acquired, otherwise
+ * an ESP-IDF error code.
+ */
+esp_err_t storage_sd_service_get_info(
+    storage_sd_info_t *info
 );
 
 #ifdef __cplusplus
