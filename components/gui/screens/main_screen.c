@@ -13,6 +13,8 @@
 #include "gui_config.h"
 #include "board_config.h"
 #include "screen_manager.h"
+#include "usb_network_service.h"
+#include "wifi_service.h"
 
 #define TOOLBAR_HEIGHT          (56U)
 #define MAIN_SCREEN_UPDATE_MS   (1000U)
@@ -358,6 +360,49 @@ static void main_screen_update(void)
         &s_context.toolbar,
         model.ota_available
     );
+
+    toolbar_set_cpu_usage(
+        &s_context.toolbar,
+        model.cpu_usage
+    );
+
+    usb_network_service_info_t usb_info = {0};
+
+    if (usb_network_service_get_info(
+            &usb_info
+        ) == ESP_OK) {
+
+        toolbar_set_usb_status(
+            &s_context.toolbar,
+            usb_info.started,
+            usb_info.host_connected
+        );
+    } else {
+        toolbar_set_usb_status(
+            &s_context.toolbar,
+            false,
+            false
+        );
+    }
+
+    wifi_service_info_t wifi_info = {0};
+
+    if (wifi_service_get_info(
+            &wifi_info
+        ) == ESP_OK) {
+
+        toolbar_set_wifi_status(
+            &s_context.toolbar,
+            wifi_info.started,
+            wifi_info.client_count
+        );
+    } else {
+        toolbar_set_wifi_status(
+            &s_context.toolbar,
+            false,
+            0U
+        );
+    }
 
     /*
      * CAN and recording information will be updated here after the
@@ -945,15 +990,24 @@ lv_obj_t *main_screen_create(void)
 
         .left_icon = NULL,
         .left_action = NULL,
-        
+
         .right_icon = &icons8_settings_32,
         .right_action = main_screen_settings_action,
+
+        .show_usb_status = true,
+        .usb_action = NULL,
+
+        .show_wifi_status = true,
+        .wifi_action = NULL,
+
+        .show_cpu_status = true,
+        .cpu_action = NULL,
 
         .show_sd_status = true,
         .sd_action = sd_button_action,
 
         .show_ota_status = true,
-        .ota_action = ota_button_action
+        .ota_action = ota_button_action,
     };
 
     s_context.toolbar =
