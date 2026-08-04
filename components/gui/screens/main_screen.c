@@ -1,7 +1,5 @@
 #include "screens/main_screen.h"
 
-#include <inttypes.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -19,23 +17,54 @@
 #define TOOLBAR_HEIGHT          (56U)
 #define MAIN_SCREEN_UPDATE_MS   (1000U)
 
+#define MAIN_CAN_CHANNEL_COUNT  (2U)
+#define MAIN_CAN_ROW_HEIGHT     (132)
+#define MAIN_CAN_CARD_PADDING   (8)
+#define MAIN_CAN_CARD_RADIUS    (12)
+#define MAIN_RECORDING_ROW_HEIGHT  (44)
+#define MAIN_ACTION_ROW_HEIGHT  (44)
+
 typedef struct
 {
     lv_obj_t *root;
-    lv_timer_t *update_timer;
 
     toolbar_t toolbar;
 
-    lv_obj_t *device_name_label;
-    lv_obj_t *device_id_label;
-    lv_obj_t *firmware_label;
-    lv_obj_t *hardware_label;
-    lv_obj_t *serial_label;
+    /*
+     * Dashboard recording status.
+     */
+    lv_obj_t *recording_indicator;
+    lv_obj_t *recording_status_label;
+    lv_obj_t *recording_details_label;
 
-    lv_obj_t *uptime_label;
-    lv_obj_t *heap_label;
-    lv_obj_t *minimum_heap_label;
-    lv_obj_t *cpu_label;
+    /*
+     * CAN channel cards.
+     */
+    lv_obj_t *can_state_label[
+        MAIN_CAN_CHANNEL_COUNT
+    ];
+
+    lv_obj_t *can_bitrate_label[
+        MAIN_CAN_CHANNEL_COUNT
+    ];
+
+    lv_obj_t *can_load_label[
+        MAIN_CAN_CHANNEL_COUNT
+    ];
+
+    lv_obj_t *can_frames_label[
+        MAIN_CAN_CHANNEL_COUNT
+    ];
+
+    lv_obj_t *can_errors_label[
+        MAIN_CAN_CHANNEL_COUNT
+    ];
+
+    lv_obj_t *capture_button;
+    lv_obj_t *capture_button_label;
+    lv_obj_t *monitor_button;
+
+    lv_timer_t *update_timer;
 
 } main_screen_context_t;
 
@@ -44,6 +73,34 @@ static const char *TAG = "main_screen";
 static main_screen_context_t s_context = {0};
 
 static modal_dialog_t s_update_dialog = {0};
+
+static void main_screen_capture_button_event_cb(
+    lv_event_t *event
+)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Capture control is not implemented yet"
+    );
+}
+
+static void main_screen_monitor_button_event_cb(
+    lv_event_t *event
+)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "CAN monitor screen is not implemented yet"
+    );
+}
 
 static void main_screen_settings_action(void)
 {
@@ -70,44 +127,209 @@ static void main_screen_settings_action(void)
     }
 }
 
-static void format_uptime(
-    uint32_t uptime_sec,
-    char *buffer,
-    size_t buffer_size
+static lv_obj_t *main_screen_create_action_button(
+    lv_obj_t *parent,
+    const char *text,
+    lv_event_cb_t event_cb,
+    bool primary
 )
 {
-    uint32_t days =
-        uptime_sec / 86400U;
+    if ((parent == NULL) ||
+        (text == NULL) ||
+        (event_cb == NULL)) {
 
-    uint32_t hours =
-        (uptime_sec % 86400U) / 3600U;
-
-    uint32_t minutes =
-        (uptime_sec % 3600U) / 60U;
-
-    uint32_t seconds =
-        uptime_sec % 60U;
-
-    if (days > 0U) {
-        snprintf(
-            buffer,
-            buffer_size,
-            "%" PRIu32 "d %02" PRIu32 ":%02" PRIu32 ":%02" PRIu32,
-            days,
-            hours,
-            minutes,
-            seconds
-        );
-    } else {
-        snprintf(
-            buffer,
-            buffer_size,
-            "%02" PRIu32 ":%02" PRIu32 ":%02" PRIu32,
-            hours,
-            minutes,
-            seconds
-        );
+        return NULL;
     }
+
+    lv_obj_t *button =
+        lv_button_create(parent);
+
+    if (button == NULL) {
+        return NULL;
+    }
+
+    lv_obj_set_height(
+        button,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_flex_grow(
+        button,
+        1
+    );
+
+    lv_obj_set_style_radius(
+        button,
+        10,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        button,
+        primary ? 0 : 1,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_color(
+        button,
+        lv_color_hex(0x2563EBU),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        button,
+        primary
+            ? lv_color_hex(0x2563EBU)
+            : lv_color_hex(0xFFFFFFU),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        button,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_add_event_cb(
+        button,
+        event_cb,
+        LV_EVENT_CLICKED,
+        NULL
+    );
+
+    lv_obj_t *label =
+        lv_label_create(button);
+
+    if (label == NULL) {
+        lv_obj_delete(button);
+        return NULL;
+    }
+
+    lv_label_set_text(
+        label,
+        text
+    );
+
+    lv_obj_set_style_text_font(
+        label,
+        &lv_font_montserrat_14,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        label,
+        primary
+            ? lv_color_hex(0xFFFFFFU)
+            : lv_color_hex(0x2563EBU),
+        LV_PART_MAIN
+    );
+
+    lv_obj_center(
+        label
+    );
+
+    return button;
+}
+
+static esp_err_t main_screen_create_action_row(
+    lv_obj_t *parent
+)
+{
+    if (parent == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    lv_obj_t *row =
+        lv_obj_create(parent);
+
+    if (row == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        row,
+        LV_PCT(100),
+        MAIN_ACTION_ROW_HEIGHT
+    );
+
+    lv_obj_set_style_bg_opa(
+        row,
+        LV_OPA_TRANSP,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        row,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_all(
+        row,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_column(
+        row,
+        8,
+        LV_PART_MAIN
+    );
+
+    lv_obj_remove_flag(
+        row,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    lv_obj_set_flex_flow(
+        row,
+        LV_FLEX_FLOW_ROW
+    );
+
+    s_context.capture_button =
+        main_screen_create_action_button(
+            row,
+            "Start capture",
+            main_screen_capture_button_event_cb,
+            true
+        );
+
+    if (s_context.capture_button == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_context.capture_button_label =
+        lv_obj_get_child(
+            s_context.capture_button,
+            0
+        );
+
+    s_context.monitor_button =
+        main_screen_create_action_button(
+            row,
+            "Monitor",
+            main_screen_monitor_button_event_cb,
+            false
+        );
+
+    if (s_context.monitor_button == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    /*
+     * Enable these controls after their services are implemented.
+     */
+    lv_obj_add_state(
+        s_context.capture_button,
+        LV_STATE_DISABLED
+    );
+
+    lv_obj_add_state(
+        s_context.monitor_button,
+        LV_STATE_DISABLED
+    );
+
+    return ESP_OK;
 }
 
 static void main_screen_update(void)
@@ -118,7 +340,12 @@ static void main_screen_update(void)
 
     system_model_t model;
 
-    if (system_model_get_snapshot(&model) != ESP_OK) {
+    const esp_err_t result =
+        system_model_get_snapshot(
+            &model
+        );
+
+    if (result != ESP_OK) {
         return;
     }
 
@@ -132,62 +359,10 @@ static void main_screen_update(void)
         model.ota_available
     );
 
-    char buffer[96];
-    char uptime_buffer[32];
-
-    format_uptime(
-        model.uptime_sec,
-        uptime_buffer,
-        sizeof(uptime_buffer)
-    );
-
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "Uptime: %s",
-        uptime_buffer
-    );
-
-    lv_label_set_text(
-        s_context.uptime_label,
-        buffer
-    );
-
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "Free heap: %" PRIu32 " KB",
-        model.free_heap / 1024U
-    );
-
-    lv_label_set_text(
-        s_context.heap_label,
-        buffer
-    );
-
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "Minimum heap: %" PRIu32 " KB",
-        model.minimum_free_heap / 1024U
-    );
-
-    lv_label_set_text(
-        s_context.minimum_heap_label,
-        buffer
-    );
-
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "CPU usage: %u%%",
-        (unsigned int)model.cpu_usage
-    );
-
-    lv_label_set_text(
-        s_context.cpu_label,
-        buffer
-    );
+    /*
+     * CAN and recording information will be updated here after the
+     * dashboard model is implemented.
+     */
 }
 
 static void main_screen_update_timer_cb(
@@ -213,51 +388,11 @@ static void main_screen_delete_event_cb(
         s_context.update_timer = NULL;
     }
 
-    s_context.root = NULL;
-
-    s_context.device_name_label = NULL;
-    s_context.device_id_label = NULL;
-    s_context.firmware_label = NULL;
-    s_context.hardware_label = NULL;
-    s_context.serial_label = NULL;
-
-    s_context.uptime_label = NULL;
-    s_context.heap_label = NULL;
-    s_context.minimum_heap_label = NULL;
-    s_context.cpu_label = NULL;
-
-    s_context.toolbar = (toolbar_t){0};
+    s_context =
+        (main_screen_context_t){0};
 
     s_update_dialog =
         (modal_dialog_t){0};
-}
-
-static lv_obj_t *create_info_label(
-    lv_obj_t *parent,
-    const char *text
-)
-{
-    lv_obj_t *label =
-        lv_label_create(parent);
-
-    lv_label_set_text(
-        label,
-        text
-    );
-
-    lv_obj_set_style_text_font(
-        label,
-        &lv_font_montserrat_16,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        label,
-        lv_color_hex(0x20252A),
-        LV_PART_MAIN
-    );
-
-    return label;
 }
 
 static void sd_button_action(void)
@@ -340,14 +475,430 @@ static void ota_button_action(void)
     );
 }
 
-lv_obj_t *main_screen_create(void)
+static void main_screen_style_card(
+    lv_obj_t *card
+)
 {
-    system_model_t model;
+    if (card == NULL) {
+        return;
+    }
 
-    if (system_model_get_snapshot(&model) != ESP_OK) {
+    lv_obj_set_style_bg_color(
+        card,
+        lv_color_hex(0xF5F7FAU),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        card,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        card,
+        1,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_color(
+        card,
+        lv_color_hex(0xE2E8F0U),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_radius(
+        card,
+        MAIN_CAN_CARD_RADIUS,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_all(
+        card,
+        MAIN_CAN_CARD_PADDING,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_row(
+        card,
+        2,
+        LV_PART_MAIN
+    );
+
+    lv_obj_remove_flag(
+        card,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    lv_obj_set_flex_flow(
+        card,
+        LV_FLEX_FLOW_COLUMN
+    );
+
+    lv_obj_set_flex_align(
+        card,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_START
+    );
+}
+
+static lv_obj_t *main_screen_create_card_label(
+    lv_obj_t *parent,
+    const char *text,
+    const lv_font_t *font,
+    lv_color_t color
+)
+{
+    if ((parent == NULL) ||
+        (text == NULL) ||
+        (font == NULL)) {
+
         return NULL;
     }
 
+    lv_obj_t *label =
+        lv_label_create(parent);
+
+    if (label == NULL) {
+        return NULL;
+    }
+
+    lv_label_set_text(
+        label,
+        text
+    );
+
+    lv_obj_set_style_text_font(
+        label,
+        font,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        label,
+        color,
+        LV_PART_MAIN
+    );
+
+    return label;
+}
+
+static esp_err_t main_screen_create_can_card(
+    lv_obj_t *parent,
+    size_t channel_index,
+    const char *title
+)
+{
+    if ((parent == NULL) ||
+        (title == NULL) ||
+        (channel_index >= MAIN_CAN_CHANNEL_COUNT)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    lv_obj_t *card =
+        lv_obj_create(parent);
+
+    if (card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_height(
+        card,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_flex_grow(
+        card,
+        1
+    );
+
+    main_screen_style_card(
+        card
+    );
+
+    lv_obj_t *title_label =
+        main_screen_create_card_label(
+            card,
+            title,
+            &lv_font_montserrat_16,
+            lv_color_hex(0x111827U)
+        );
+
+    if (title_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_context.can_state_label[channel_index] =
+        main_screen_create_card_label(
+            card,
+            "State: Not configured",
+            &lv_font_montserrat_14,
+            lv_color_hex(0x6B7280U)
+        );
+
+    s_context.can_bitrate_label[channel_index] =
+        main_screen_create_card_label(
+            card,
+            "Bitrate: N/A",
+            &lv_font_montserrat_14,
+            lv_color_hex(0x374151U)
+        );
+
+    s_context.can_load_label[channel_index] =
+        main_screen_create_card_label(
+            card,
+            "Load: 0%",
+            &lv_font_montserrat_14,
+            lv_color_hex(0x374151U)
+        );
+
+    s_context.can_frames_label[channel_index] =
+        main_screen_create_card_label(
+            card,
+            "Frames/s: 0",
+            &lv_font_montserrat_14,
+            lv_color_hex(0x374151U)
+        );
+
+    s_context.can_errors_label[channel_index] =
+        main_screen_create_card_label(
+            card,
+            "Errors: 0",
+            &lv_font_montserrat_14,
+            lv_color_hex(0x374151U)
+        );
+
+    if ((s_context.can_state_label[channel_index] == NULL) ||
+        (s_context.can_bitrate_label[channel_index] == NULL) ||
+        (s_context.can_load_label[channel_index] == NULL) ||
+        (s_context.can_frames_label[channel_index] == NULL) ||
+        (s_context.can_errors_label[channel_index] == NULL)) {
+
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t main_screen_create_recording_row(
+    lv_obj_t *parent
+)
+{
+    if (parent == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    lv_obj_t *row =
+        lv_obj_create(parent);
+
+    if (row == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        row,
+        LV_PCT(100),
+        MAIN_RECORDING_ROW_HEIGHT
+    );
+
+    main_screen_style_card(
+        row
+    );
+
+    lv_obj_set_style_pad_all(
+        row,
+        10,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_column(
+        row,
+        8,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_flex_flow(
+        row,
+        LV_FLEX_FLOW_ROW
+    );
+
+    lv_obj_set_flex_align(
+        row,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_CENTER,
+        LV_FLEX_ALIGN_CENTER
+    );
+
+    s_context.recording_indicator =
+        lv_obj_create(row);
+
+    if (s_context.recording_indicator == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        s_context.recording_indicator,
+        10,
+        10
+    );
+
+    lv_obj_set_style_radius(
+        s_context.recording_indicator,
+        LV_RADIUS_CIRCLE,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        s_context.recording_indicator,
+        lv_color_hex(0x9CA3AFU),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_context.recording_indicator,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        s_context.recording_indicator,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_all(
+        s_context.recording_indicator,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_remove_flag(
+        s_context.recording_indicator,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    s_context.recording_status_label =
+        main_screen_create_card_label(
+            row,
+            "Idle",
+            &lv_font_montserrat_14,
+            lv_color_hex(0x374151U)
+        );
+
+    if (s_context.recording_status_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_context.recording_details_label =
+        main_screen_create_card_label(
+            row,
+            "00:00:00 | 0 B | Dropped: 0",
+            &lv_font_montserrat_14,
+            lv_color_hex(0x6B7280U)
+        );
+
+    if (s_context.recording_details_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_flex_grow(
+        s_context.recording_details_label,
+        1
+    );
+
+    lv_obj_set_style_text_align(
+        s_context.recording_details_label,
+        LV_TEXT_ALIGN_RIGHT,
+        LV_PART_MAIN
+    );
+
+    return ESP_OK;
+}
+
+static esp_err_t main_screen_create_can_row(
+    lv_obj_t *parent
+)
+{
+    if (parent == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    lv_obj_t *row =
+        lv_obj_create(parent);
+
+    if (row == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        row,
+        LV_PCT(100),
+        MAIN_CAN_ROW_HEIGHT
+    );
+
+    lv_obj_set_style_bg_opa(
+        row,
+        LV_OPA_TRANSP,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        row,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_all(
+        row,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_column(
+        row,
+        8,
+        LV_PART_MAIN
+    );
+
+    lv_obj_remove_flag(
+        row,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    lv_obj_set_flex_flow(
+        row,
+        LV_FLEX_FLOW_ROW
+    );
+
+    lv_obj_set_flex_align(
+        row,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_START
+    );
+
+    esp_err_t result =
+        main_screen_create_can_card(
+            row,
+            0U,
+            "CAN 1"
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return main_screen_create_can_card(
+        row,
+        1U,
+        "CAN 2"
+    );
+}
+
+lv_obj_t *main_screen_create(void)
+{
     lv_obj_t *screen =
         lv_obj_create(NULL);
 
@@ -425,7 +976,7 @@ lv_obj_t *main_screen_create(void)
     }
 
     /*
-     * Main scrollable content container.
+     * Main fixed dashboard container.
      */
     lv_obj_t *content =
         lv_obj_create(screen);
@@ -457,21 +1008,16 @@ lv_obj_t *main_screen_create(void)
     );
 
     /*
-     * Enable only vertical scrolling.
+     * Fixed dashboard content container.
      */
-    lv_obj_add_flag(
+    lv_obj_remove_flag(
         content,
         LV_OBJ_FLAG_SCROLLABLE
     );
 
-    lv_obj_set_scroll_dir(
-        content,
-        LV_DIR_VER
-    );
-
     lv_obj_set_scrollbar_mode(
         content,
-        LV_SCROLLBAR_MODE_AUTO
+        LV_SCROLLBAR_MODE_OFF
     );
 
     lv_obj_set_style_border_width(
@@ -488,7 +1034,7 @@ lv_obj_t *main_screen_create(void)
 
     lv_obj_set_style_pad_all(
         content,
-        16,
+        10,
         LV_PART_MAIN
     );
 
@@ -505,7 +1051,7 @@ lv_obj_t *main_screen_create(void)
     );
 
     /*
-     * Arrange labels vertically.
+     * Arrange dashboard sections vertically.
      */
     lv_obj_set_flex_flow(
         content,
@@ -525,96 +1071,62 @@ lv_obj_t *main_screen_create(void)
         LV_PART_MAIN
     );
 
-    char buffer[96];
-
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "Device: %s",
-        model.device_name
-    );
-
-    s_context.device_name_label =
-        create_info_label(
-            content,
-            buffer
+    esp_err_t dashboard_result =
+        main_screen_create_recording_row(
+            content
         );
 
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "Device ID: %s",
-        model.device_id
-    );
-
-    s_context.device_id_label =
-        create_info_label(
-            content,
-            buffer
+    if (dashboard_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create recording status row: %s",
+            esp_err_to_name(dashboard_result)
         );
 
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "Firmware: %s",
-        model.firmware_version
-    );
-
-    s_context.firmware_label =
-        create_info_label(
-            content,
-            buffer
+        lv_obj_delete(
+            screen
         );
 
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "Hardware: %s",
-        model.hardware_version
-    );
+        return NULL;
+    }
 
-    s_context.hardware_label =
-        create_info_label(
-            content,
-            buffer
+    dashboard_result =
+        main_screen_create_can_row(
+            content
         );
 
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "Serial: %s",
-        model.serial_number
-    );
-
-    s_context.serial_label =
-        create_info_label(
-            content,
-            buffer
+    if (dashboard_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create CAN dashboard: %s",
+            esp_err_to_name(dashboard_result)
         );
 
-    s_context.uptime_label =
-        create_info_label(
-            content,
-            ""
+        lv_obj_delete(
+            screen
         );
 
-    s_context.heap_label =
-        create_info_label(
-            content,
-            ""
+        return NULL;
+    }
+
+    dashboard_result =
+        main_screen_create_action_row(
+            content
         );
 
-    s_context.minimum_heap_label =
-        create_info_label(
-            content,
-            ""
+    if (dashboard_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create dashboard actions: %s",
+            esp_err_to_name(dashboard_result)
         );
 
-    s_context.cpu_label =
-        create_info_label(
-            content,
-            ""
+        lv_obj_delete(
+            screen
         );
+
+        return NULL;
+    }
 
     main_screen_update();
 

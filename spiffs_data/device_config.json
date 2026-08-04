@@ -26,7 +26,7 @@
         },
 
         "usb_rndis": {
-            "enabled": true
+            "enabled": false
         }
     }
 }
