@@ -140,8 +140,9 @@ esp_err_t settings_service_set_usb_rndis_enabled(
  *
  * @param[in] ssid Null-terminated base SoftAP SSID containing from
  * 1 to 25 bytes.
- * @param[in] password Null-terminated WPA2 password containing from
- * 8 to 63 bytes.
+ * @param[in] password Null-terminated password. An empty string
+ * configures an open network; otherwise it must contain from 8 to
+ * 63 bytes.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_ARG if an argument or
  * password is invalid, ESP_ERR_INVALID_SIZE if a credential is too
@@ -150,9 +151,100 @@ esp_err_t settings_service_set_usb_rndis_enabled(
  * ESP_ERR_TIMEOUT if a required lock cannot be acquired, otherwise an
  * ESP-IDF error code.
  */
-esp_err_t settings_service_set_wifi_credentials(
+esp_err_t settings_service_set_wifi_ap_credentials(
     const char *ssid,
     const char *password
+);
+
+/**
+ * @brief Enable or disable the Wi-Fi Station interface.
+ *
+ * Updates the settings model and immediately applies the requested
+ * Station state.
+ *
+ * Enabling STA requires a configured SSID and a matching credential
+ * record stored in NVS. If credentials are missing or do not match the
+ * credential identifier in the settings model, STA is not enabled.
+ *
+ * The setting is not automatically saved to the configuration file.
+ *
+ * @param[in] enabled True to enable the Wi-Fi Station interface.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the settings
+ * service is not initialized or matching credentials are unavailable,
+ * ESP_ERR_TIMEOUT if a required lock cannot be acquired, otherwise an
+ * ESP-IDF error code.
+ */
+esp_err_t settings_service_set_wifi_sta_enabled(
+    bool enabled
+);
+
+/**
+ * @brief Store and apply Wi-Fi Station credentials.
+ *
+ * Stores the SSID and password in NVS, generates a new credential
+ * identifier and updates the public Station settings with the SSID and
+ * generated identifier. The password is never stored in the settings
+ * model or configuration JSON.
+ *
+ * When the Station interface is running, it reconnects using the new
+ * credentials.
+ *
+ * NVS credentials are committed immediately. The updated public
+ * settings are not automatically saved to the configuration file;
+ * call settings_service_save() after this function succeeds.
+ *
+ * @param[in] ssid Null-terminated Station SSID containing from 1 to
+ * 32 bytes.
+ * @param[in] password Null-terminated password. An empty string is
+ * accepted for an open network; otherwise it must contain from 8 to
+ * 63 bytes.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if an argument or
+ * password is invalid, ESP_ERR_INVALID_SIZE if a credential is too
+ * long, ESP_ERR_INVALID_STATE if a required service is not initialized,
+ * ESP_ERR_NO_MEM if required resources cannot be allocated,
+ * ESP_ERR_TIMEOUT if a required lock cannot be acquired, otherwise an
+ * ESP-IDF error code.
+ */
+esp_err_t settings_service_set_wifi_sta_credentials(
+    const char *ssid,
+    const char *password
+);
+
+/**
+ * @brief Remove stored Wi-Fi Station credentials.
+ *
+ * Disables the Station interface, removes its credentials from NVS and
+ * clears the Station SSID and credential identifier in the settings
+ * model.
+ *
+ * The updated public settings are not automatically saved to the
+ * configuration file; call settings_service_save() after this function
+ * succeeds.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if a required
+ * service is not initialized, ESP_ERR_TIMEOUT if a required lock
+ * cannot be acquired, otherwise an ESP-IDF error code.
+ */
+esp_err_t settings_service_clear_wifi_sta_credentials(void);
+
+/**
+ * @brief Check whether matching Wi-Fi Station credentials are stored.
+ *
+ * Credentials are considered configured only when the SSID and
+ * credential identifier in the settings model match the credential
+ * record stored in NVS.
+ *
+ * @param[out] configured Set to true when matching credentials exist.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if configured is NULL,
+ * ESP_ERR_INVALID_STATE if a required service is not initialized,
+ * ESP_ERR_TIMEOUT if a required lock cannot be acquired, otherwise an
+ * ESP-IDF error code.
+ */
+esp_err_t settings_service_get_wifi_sta_credentials_configured(
+    bool *configured
 );
 
 /**
@@ -169,9 +261,13 @@ esp_err_t settings_service_save(void);
  * @brief Apply the current settings to application services.
  *
  * Applies display brightness, SD-card logging, GUI animations and the
- * Wi-Fi SoftAP state and credentials. The USB RNDIS setting is applied
- * only during application startup because changing USB descriptors
- * requires re-enumeration.
+ * configured Wi-Fi SoftAP and Station states.
+ *
+ * STA credentials are loaded separately from NVS and must match the
+ * SSID and credential identifier stored in the settings model.
+ *
+ * The USB RNDIS setting is applied only during application startup
+ * because changing USB descriptors requires re-enumeration.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if a required
  * service is not initialized, ESP_ERR_TIMEOUT if a required lock

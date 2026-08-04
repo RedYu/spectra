@@ -9,31 +9,44 @@
 extern "C" {
 #endif
 
-#define SETTINGS_SCHEMA_VERSION                  (1U)
+#define SETTINGS_SCHEMA_VERSION                    (1U)
 
-#define SETTINGS_DEVICE_NAME_MAX_LENGTH          (32U)
-#define SETTINGS_DEVICE_TARGET_MAX_LENGTH        (32U)
+#define SETTINGS_DEVICE_NAME_MAX_LENGTH            (32U)
+#define SETTINGS_DEVICE_TARGET_MAX_LENGTH          (32U)
 
-#define SETTINGS_DISPLAY_BRIGHTNESS_MIN          (10U)
-#define SETTINGS_DISPLAY_BRIGHTNESS_MAX          (100U)
-#define SETTINGS_DISPLAY_BRIGHTNESS_DEFAULT      (80U)
+#define SETTINGS_DISPLAY_BRIGHTNESS_MIN            (10U)
+#define SETTINGS_DISPLAY_BRIGHTNESS_MAX            (100U)
+#define SETTINGS_DISPLAY_BRIGHTNESS_DEFAULT        (80U)
 
-#define SETTINGS_LOGGING_SD_ENABLED_DEFAULT      (false)
-#define SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT   (false)
+#define SETTINGS_LOGGING_SD_ENABLED_DEFAULT        (false)
+#define SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT     (false)
 
-#define SETTINGS_WIFI_SSID_MAX_LENGTH            (26U)
-#define SETTINGS_WIFI_PASSWORD_MIN_LENGTH        (8U)
-#define SETTINGS_WIFI_PASSWORD_MAX_LENGTH        (64U)
+/*
+ * Password limits used by SoftAP settings and STA credentials stored
+ * separately in NVS. The maximum length includes the null terminator.
+ */
+#define SETTINGS_WIFI_PASSWORD_MIN_LENGTH          (8U)
+#define SETTINGS_WIFI_PASSWORD_MAX_LENGTH          (64U)
 
-#define SETTINGS_WIFI_SSID_MAX_LENGTH            (26U)
-#define SETTINGS_WIFI_PASSWORD_MIN_LENGTH        (8U)
-#define SETTINGS_WIFI_PASSWORD_MAX_LENGTH        (64U)
+/*
+ * The SoftAP base SSID reserves seven characters for the hyphen and
+ * six-character MAC suffix.
+ */
+#define SETTINGS_WIFI_AP_SSID_MAX_LENGTH           (26U)
 
-#define SETTINGS_WIFI_AP_ENABLED_DEFAULT         (true)
-#define SETTINGS_WIFI_AP_SSID_DEFAULT            ("Spectra")
-#define SETTINGS_WIFI_AP_PASSWORD_DEFAULT        ("spectra123")
+#define SETTINGS_WIFI_AP_ENABLED_DEFAULT           (true)
+#define SETTINGS_WIFI_AP_SSID_DEFAULT              ("Spectra")
+#define SETTINGS_WIFI_AP_PASSWORD_DEFAULT          ("spectra123")
 
-#define SETTINGS_USB_RNDIS_ENABLED_DEFAULT       (true)
+#define SETTINGS_WIFI_STA_SSID_MAX_LENGTH          (33U)
+/*
+ * A credential identifier contains 16 hexadecimal characters and a
+ * terminating null character.
+ */
+#define SETTINGS_WIFI_CREDENTIAL_ID_LENGTH         (17U)
+#define SETTINGS_WIFI_STA_ENABLED_DEFAULT          (false)
+
+#define SETTINGS_USB_RNDIS_ENABLED_DEFAULT         (true)
 
 typedef struct
 {
@@ -75,7 +88,7 @@ typedef struct
     bool enabled;
 
     char ssid[
-        SETTINGS_WIFI_SSID_MAX_LENGTH
+        SETTINGS_WIFI_AP_SSID_MAX_LENGTH
     ];
 
     char password[
@@ -83,6 +96,30 @@ typedef struct
     ];
 
 } wifi_ap_settings_t;
+
+/**
+ * @brief Wi-Fi station settings.
+ *
+ * The SSID identifies the last configured station network.
+ * The credential identifier associates these public settings with
+ * credentials stored separately in NVS.
+ *
+ * The credential identifier is not secret. It changes whenever the
+ * stored STA credentials are replaced.
+ */
+typedef struct
+{
+    bool enabled;
+
+    char ssid[
+        SETTINGS_WIFI_STA_SSID_MAX_LENGTH
+    ];
+
+    char credential_id[
+        SETTINGS_WIFI_CREDENTIAL_ID_LENGTH
+    ];
+
+} wifi_sta_settings_t;
 
 /**
  * @brief USB RNDIS settings.
@@ -106,6 +143,7 @@ typedef struct
     ui_settings_t ui;
 
     wifi_ap_settings_t wifi_ap;
+    wifi_sta_settings_t wifi_sta;
     usb_rndis_settings_t usb_rndis;
 
 } app_settings_t;

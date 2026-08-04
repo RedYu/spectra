@@ -11,6 +11,7 @@ idf_component_register(
         "web_service.c"
         "network_service.c"
         "wifi_service.c"
+        "wifi_credentials_service.c"
 
     INCLUDE_DIRS
         "include"

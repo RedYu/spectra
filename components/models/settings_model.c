@@ -35,11 +35,19 @@ static esp_err_t settings_model_validate(
     ] = '\0';
 
     settings->wifi_ap.ssid[
-        SETTINGS_WIFI_SSID_MAX_LENGTH - 1U
+        SETTINGS_WIFI_AP_SSID_MAX_LENGTH - 1U
     ] = '\0';
 
     settings->wifi_ap.password[
         SETTINGS_WIFI_PASSWORD_MAX_LENGTH - 1U
+    ] = '\0';
+
+    settings->wifi_sta.ssid[
+        SETTINGS_WIFI_STA_SSID_MAX_LENGTH - 1U
+    ] = '\0';
+
+    settings->wifi_sta.credential_id[
+        SETTINGS_WIFI_CREDENTIAL_ID_LENGTH - 1U
     ] = '\0';
 
     if (settings->display.brightness <
@@ -55,19 +63,20 @@ static esp_err_t settings_model_validate(
             SETTINGS_DISPLAY_BRIGHTNESS_MAX;
     }
 
-    const size_t ssid_length =
+    const size_t ap_ssid_length =
         strlen(
             settings->wifi_ap.ssid
         );
 
-    if ((ssid_length == 0U) ||
-        (ssid_length >=
-         SETTINGS_WIFI_SSID_MAX_LENGTH)) {
-
+    /*
+     * A valid base SSID is required even when SoftAP is disabled so
+     * the interface can be enabled later without additional setup.
+     */
+    if (ap_ssid_length == 0U) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    const size_t password_length =
+    const size_t ap_password_length =
         strlen(
             settings->wifi_ap.password
         );
@@ -76,11 +85,71 @@ static esp_err_t settings_model_validate(
      * An empty password configures an open network. Otherwise, the
      * password must contain from 8 to 63 bytes.
      */
-    if ((password_length != 0U) &&
-        (password_length <
-        SETTINGS_WIFI_PASSWORD_MIN_LENGTH)) {
+    if ((ap_password_length != 0U) &&
+        (ap_password_length <
+         SETTINGS_WIFI_PASSWORD_MIN_LENGTH)) {
 
         return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t sta_ssid_length =
+        strlen(
+            settings->wifi_sta.ssid
+        );
+
+    const size_t credential_id_length =
+        strlen(
+            settings->wifi_sta.credential_id
+        );
+
+    /*
+     * STA may remain unconfigured while disabled. Enabling it requires
+     * both a selected SSID and a reference to credentials stored in
+     * NVS.
+     */
+    if (settings->wifi_sta.enabled &&
+        ((sta_ssid_length == 0U) ||
+         (credential_id_length == 0U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /*
+     * A configured credential identifier must contain exactly
+     * 16 hexadecimal characters.
+     */
+    if ((credential_id_length != 0U) &&
+        (credential_id_length !=
+         (SETTINGS_WIFI_CREDENTIAL_ID_LENGTH - 1U))) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    for (size_t index = 0U;
+         index < credential_id_length;
+         ++index) {
+
+        const char character =
+            settings->wifi_sta.credential_id[index];
+
+        const bool is_digit =
+            (character >= '0') &&
+            (character <= '9');
+
+        const bool is_lower_hex =
+            (character >= 'a') &&
+            (character <= 'f');
+
+        const bool is_upper_hex =
+            (character >= 'A') &&
+            (character <= 'F');
+
+        if (!is_digit &&
+            !is_lower_hex &&
+            !is_upper_hex) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
     }
 
     return ESP_OK;
@@ -158,9 +227,6 @@ esp_err_t settings_model_set_defaults(
     settings->wifi_ap.enabled =
         SETTINGS_WIFI_AP_ENABLED_DEFAULT;
 
-    settings->usb_rndis.enabled =
-        SETTINGS_USB_RNDIS_ENABLED_DEFAULT;
-
     (void)strlcpy(
         settings->wifi_ap.ssid,
         SETTINGS_WIFI_AP_SSID_DEFAULT,
@@ -172,6 +238,18 @@ esp_err_t settings_model_set_defaults(
         SETTINGS_WIFI_AP_PASSWORD_DEFAULT,
         sizeof(settings->wifi_ap.password)
     );
+
+    settings->wifi_sta.enabled =
+        SETTINGS_WIFI_STA_ENABLED_DEFAULT;
+
+    settings->wifi_sta.ssid[0] =
+        '\0';
+
+    settings->wifi_sta.credential_id[0] =
+        '\0';
+
+    settings->usb_rndis.enabled =
+        SETTINGS_USB_RNDIS_ENABLED_DEFAULT;
 
     return ESP_OK;
 }

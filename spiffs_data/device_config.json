@@ -25,6 +25,12 @@
             "password": "spectra123"
         },
 
+        "wifi_sta": {
+            "enabled": false,
+            "ssid": "",
+            "credential_id": ""
+        },
+
         "usb_rndis": {
             "enabled": false
         }

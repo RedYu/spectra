@@ -14,6 +14,10 @@ extern "C" {
 #define WIFI_SERVICE_AP_PASSWORD_MIN_LENGTH   (8U)
 #define WIFI_SERVICE_AP_PASSWORD_MAX_LENGTH   (64U)
 
+#define WIFI_SERVICE_STA_SSID_MAX_LENGTH       (33U)
+#define WIFI_SERVICE_STA_PASSWORD_MIN_LENGTH   (8U)
+#define WIFI_SERVICE_STA_PASSWORD_MAX_LENGTH   (64U)
+
 #define WIFI_SERVICE_IPV4_ADDRESS_MAX_LENGTH  (16U)
 #define WIFI_SERVICE_MAC_ADDRESS_LENGTH       (6U)
 #define WIFI_SERVICE_MAX_CLIENT_COUNT         (2U)
@@ -38,12 +42,19 @@ typedef struct
 } wifi_service_client_info_t;
 
 /**
- * @brief Current Wi-Fi SoftAP service information.
+ * @brief Current Wi-Fi service information.
+ *
+ * Contains the common driver state, SoftAP configuration and clients,
+ * and the current Station connection information.
  */
 typedef struct
 {
     bool initialized;
     bool started;
+
+    bool ap_enabled;
+    bool sta_enabled;
+    bool sta_connected;
 
     char ssid[
         WIFI_SERVICE_AP_SSID_MAX_LENGTH
@@ -83,15 +94,37 @@ typedef struct
         WIFI_SERVICE_MAX_CLIENT_COUNT
     ];
 
+    char sta_ssid[
+        WIFI_SERVICE_STA_SSID_MAX_LENGTH
+    ];
+
+    int8_t sta_rssi;
+
+    char sta_ip_address[
+        WIFI_SERVICE_IPV4_ADDRESS_MAX_LENGTH
+    ];
+
+    char sta_netmask[
+        WIFI_SERVICE_IPV4_ADDRESS_MAX_LENGTH
+    ];
+
+    char sta_gateway[
+        WIFI_SERVICE_IPV4_ADDRESS_MAX_LENGTH
+    ];
+
+    char sta_dns_address[
+        WIFI_SERVICE_IPV4_ADDRESS_MAX_LENGTH
+    ];
+
 } wifi_service_info_t;
 
 /**
- * @brief Initialize the Wi-Fi SoftAP service.
+ * @brief Initialize the Wi-Fi service.
  *
  * The global ESP-NETIF stack and default event loop must already be
- * initialized. This function creates the service synchronization
- * resources, network interface and Wi-Fi driver, but does not start
- * the SoftAP.
+ * initialized. This function creates the synchronization resources,
+ * SoftAP and Station network interfaces, event handlers and Wi-Fi
+ * driver, but does not start the driver.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
  * already initialized or a required network service is unavailable,
@@ -102,37 +135,33 @@ typedef struct
 esp_err_t wifi_service_init(void);
 
 /**
- * @brief Start the Wi-Fi SoftAP.
+ * @brief Start the Wi-Fi driver and enabled interfaces.
  *
- * The service must be initialized first. Resources created during
- * initialization remain available after wifi_service_stop(), allowing
- * the SoftAP to be started again without reinitialization.
+ * The effective mode is selected from the configured SoftAP and
+ * Station states. At least one interface must be enabled.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
- * not initialized or is already running, ESP_ERR_TIMEOUT if the
- * service lock cannot be acquired or SoftAP startup times out,
- * otherwise an ESP-IDF error code.
+ * not initialized, already running, or no interface is enabled,
+ * ESP_ERR_TIMEOUT if the service lock cannot be acquired, otherwise
+ * an ESP-IDF error code.
  */
 esp_err_t wifi_service_start(void);
 
 /**
- * @brief Stop the Wi-Fi SoftAP.
+ * @brief Stop all Wi-Fi interfaces.
  *
- * This function stops the wireless interface but preserves the Wi-Fi
- * driver, network interface and synchronization resources. Calling
- * this function when the service is already stopped returns ESP_OK.
- *
- * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
- * not initialized, ESP_ERR_TIMEOUT if the service lock cannot be
- * acquired, otherwise an ESP-IDF error code.
+ * This function stops both SoftAP and Station while preserving the
+ * driver, network interfaces and synchronization resources. Calling
+ * it when the service is already stopped returns ESP_OK.
  */
 esp_err_t wifi_service_stop(void);
 
 /**
- * @brief Deinitialize the Wi-Fi SoftAP service.
+ * @brief Deinitialize the Wi-Fi service.
  *
- * If the SoftAP is running, it is stopped first. The Wi-Fi driver,
- * network interface and service resources are then released.
+ * If Wi-Fi is running, both interfaces are stopped first. The Wi-Fi
+ * driver, event handlers, network interfaces and service resources
+ * are then released.
  *
  * The persistent service mutex is retained to keep repeated
  * initialization and deinitialization synchronized.
@@ -144,9 +173,9 @@ esp_err_t wifi_service_stop(void);
 esp_err_t wifi_service_deinit(void);
 
 /**
- * @brief Get the Wi-Fi SoftAP running state.
+ * @brief Get the common Wi-Fi driver running state.
  *
- * @param[out] started Set to true when the SoftAP is running.
+ * @param[out] started Set to true when the Wi-Fi driver is running.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_ARG if started is NULL,
  * ESP_ERR_INVALID_STATE if the service is not initialized, or
@@ -189,14 +218,16 @@ esp_err_t wifi_service_get_ap_ip_address(
 );
 
 /**
- * @brief Get the current Wi-Fi SoftAP information.
+ * @brief Get the current Wi-Fi service information.
  *
  * The connected-client list is queried directly from the Wi-Fi driver.
  * It currently contains the MAC address and RSSI of each station.
  * Client IPv4 addresses remain empty until DHCP lease lookup support
  * is implemented.
  *
- * The returned structure does not contain the SoftAP password.
+ * The result contains SoftAP state and clients as well as Station
+ * connection state and IPv4 configuration. Passwords are never
+ * returned.
  *
  * @param[out] info Destination information structure.
  *
@@ -207,6 +238,22 @@ esp_err_t wifi_service_get_ap_ip_address(
  */
 esp_err_t wifi_service_get_info(
     wifi_service_info_t *info
+);
+
+/**
+ * @brief Enable or disable the SoftAP interface.
+ *
+ * The Wi-Fi driver remains initialized. The effective Wi-Fi mode is
+ * selected automatically from the enabled AP and Station interfaces.
+ *
+ * @param[in] enabled True to enable SoftAP.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not initialized, ESP_ERR_TIMEOUT if the service lock cannot be
+ * acquired, otherwise an ESP-IDF error code.
+ */
+esp_err_t wifi_service_set_ap_enabled(
+    bool enabled
 );
 
 /**
@@ -234,6 +281,47 @@ esp_err_t wifi_service_get_info(
  * otherwise an ESP-IDF error code.
  */
 esp_err_t wifi_service_set_ap_credentials(
+    const char *ssid,
+    const char *password
+);
+
+/**
+ * @brief Enable or disable the Wi-Fi Station interface.
+ *
+ * Enabling Station starts a connection attempt using the configured
+ * credentials. Disabling Station disconnects it without disabling
+ * SoftAP.
+ *
+ * @param[in] enabled True to enable the Station interface.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not initialized, ESP_ERR_TIMEOUT if the service lock cannot be
+ * acquired, otherwise an ESP-IDF error code.
+ */
+esp_err_t wifi_service_set_sta_enabled(
+    bool enabled
+);
+
+/**
+ * @brief Configure Wi-Fi Station credentials.
+ *
+ * This function may be called before wifi_service_init(). When Station
+ * is running, the interface reconnects using the new credentials.
+ *
+ * An empty password configures an open network. A non-empty password
+ * must contain from 8 to 63 bytes.
+ *
+ * @param[in] ssid Null-terminated Station SSID containing from 1 to
+ * 32 bytes.
+ * @param[in] password Null-terminated Station password.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if an argument or
+ * password is invalid, ESP_ERR_INVALID_SIZE if a credential is too
+ * long, ESP_ERR_NO_MEM if synchronization resources cannot be created,
+ * ESP_ERR_TIMEOUT if the service lock cannot be acquired, otherwise an
+ * ESP-IDF error code.
+ */
+esp_err_t wifi_service_set_sta_credentials(
     const char *ssid,
     const char *password
 );

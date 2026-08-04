@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -54,15 +55,31 @@ static SemaphoreHandle_t
     s_state_mutex = NULL;
 
 static SemaphoreHandle_t
-    s_ap_started_semaphore = NULL;
+    s_started_semaphore = NULL;
 
 static esp_netif_t *s_ap_netif = NULL;
+static esp_netif_t *s_sta_netif = NULL;
 
 static esp_event_handler_instance_t
     s_wifi_event_instance = NULL;
 
+static esp_event_handler_instance_t
+    s_ip_event_instance = NULL;
+
 static bool s_initialized = false;
 static bool s_started = false;
+
+static atomic_bool s_ap_enabled =
+    ATOMIC_VAR_INIT(true);
+
+static atomic_bool s_sta_enabled =
+    ATOMIC_VAR_INIT(false);
+
+static atomic_bool s_sta_connected =
+    ATOMIC_VAR_INIT(false);
+
+static atomic_bool s_reconnect_allowed =
+    ATOMIC_VAR_INIT(false);
 
 static char s_ap_ssid_base[
     WIFI_SERVICE_AP_SSID_MAX_LENGTH
@@ -76,9 +93,35 @@ static char s_ap_password[
     WIFI_SERVICE_AP_PASSWORD_MAX_LENGTH
 ] = "spectra123";
 
+static char s_sta_ssid[
+    WIFI_SERVICE_STA_SSID_MAX_LENGTH
+] = "";
+
+static char s_sta_password[
+    WIFI_SERVICE_STA_PASSWORD_MAX_LENGTH
+] = "";
+
 static esp_err_t wifi_service_configure_dns(
     esp_netif_t *netif,
     const esp_netif_ip_info_t *ip_info
+);
+
+static wifi_mode_t wifi_service_get_mode(void);
+
+static esp_err_t wifi_service_apply_mode(void);
+
+static esp_err_t wifi_service_configure_sta(void);
+
+static void wifi_service_ip_event_handler(
+    void *argument,
+    esp_event_base_t event_base,
+    int32_t event_id,
+    void *event_data
+);
+
+static esp_err_t wifi_service_set_interface_enabled_locked(
+    bool station,
+    bool enabled
 );
 
 static esp_err_t wifi_service_lock(void)
@@ -158,6 +201,36 @@ static esp_err_t wifi_service_build_ssid(void)
     return ESP_OK;
 }
 
+static wifi_mode_t wifi_service_get_mode(void)
+{
+    const bool ap_enabled =
+        atomic_load(&s_ap_enabled);
+
+    const bool sta_enabled =
+        atomic_load(&s_sta_enabled);
+
+    if (ap_enabled && sta_enabled) {
+        return WIFI_MODE_APSTA;
+    }
+
+    if (ap_enabled) {
+        return WIFI_MODE_AP;
+    }
+
+    if (sta_enabled) {
+        return WIFI_MODE_STA;
+    }
+
+    return WIFI_MODE_NULL;
+}
+
+static esp_err_t wifi_service_apply_mode(void)
+{
+    return esp_wifi_set_mode(
+        wifi_service_get_mode()
+    );
+}
+
 static void wifi_service_event_handler(
     void *argument,
     esp_event_base_t event_base,
@@ -168,40 +241,121 @@ static void wifi_service_event_handler(
     (void)argument;
     (void)event_base;
 
-    if (event_id == WIFI_EVENT_AP_START) {
-        if (s_ap_started_semaphore != NULL) {
+    if ((event_id == WIFI_EVENT_AP_START) ||
+        (event_id == WIFI_EVENT_STA_START)) {
+
+        if (s_started_semaphore != NULL) {
             (void)xSemaphoreGive(
-                s_ap_started_semaphore
+                s_started_semaphore
             );
         }
+    }
 
-    } else if (event_id ==
-            WIFI_EVENT_AP_STACONNECTED) {
+    if (event_id == WIFI_EVENT_STA_START) {
+        if (atomic_load(&s_sta_enabled) &&
+            atomic_load(&s_reconnect_allowed)) {
+            const esp_err_t result =
+                esp_wifi_connect();
 
+            if (result != ESP_OK) {
+                ESP_LOGW(
+                    TAG,
+                    "Failed to start Station connection: %s",
+                    esp_err_to_name(result)
+                );
+            }
+        }
+
+        return;
+    }
+
+    if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        atomic_store(
+            &s_sta_connected,
+            false
+        );
+
+        if (atomic_load(&s_sta_enabled) &&
+            atomic_load(&s_reconnect_allowed)) {
+            const esp_err_t result =
+                esp_wifi_connect();
+
+            if (result != ESP_OK) {
+                ESP_LOGW(
+                    TAG,
+                    "Failed to reconnect Station: %s",
+                    esp_err_to_name(result)
+                );
+            }
+        }
+
+        return;
+    }
+
+    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
         const wifi_event_ap_staconnected_t *event =
             event_data;
 
         if (event != NULL) {
             ESP_LOGI(
                 TAG,
-                "Station connected, AID=%d",
+                "SoftAP client connected, AID=%d",
                 event->aid
             );
         }
 
-    } else if (event_id ==
-               WIFI_EVENT_AP_STADISCONNECTED) {
+        return;
+    }
 
+    if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
         const wifi_event_ap_stadisconnected_t *event =
             event_data;
 
         if (event != NULL) {
             ESP_LOGI(
                 TAG,
-                "Station disconnected, AID=%d",
+                "SoftAP client disconnected, AID=%d",
                 event->aid
             );
         }
+    }
+}
+
+static void wifi_service_ip_event_handler(
+    void *argument,
+    esp_event_base_t event_base,
+    int32_t event_id,
+    void *event_data
+)
+{
+    (void)argument;
+    (void)event_base;
+
+    if (event_id == IP_EVENT_STA_GOT_IP) {
+        const ip_event_got_ip_t *event =
+            event_data;
+
+        atomic_store(
+            &s_sta_connected,
+            true
+        );
+
+        if (event != NULL) {
+            ESP_LOGI(
+                TAG,
+                "Station connected, IP=" IPSTR,
+                IP2STR(&event->ip_info.ip)
+            );
+        }
+
+        return;
+    }
+
+    if (event_id == IP_EVENT_STA_LOST_IP) {
+        atomic_store(
+            &s_sta_connected,
+            false
+        );
     }
 }
 
@@ -364,17 +518,64 @@ static esp_err_t wifi_service_configure_ap(void)
     config.ap.pmf_cfg.capable = true;
     config.ap.pmf_cfg.required = false;
 
-    esp_err_t result =
-        esp_wifi_set_mode(
-            WIFI_MODE_AP
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
     return esp_wifi_set_config(
         WIFI_IF_AP,
+        &config
+    );
+}
+
+static esp_err_t wifi_service_configure_sta(void)
+{
+    const size_t ssid_length =
+        strlen(s_sta_ssid);
+
+    const size_t password_length =
+        strlen(s_sta_password);
+
+    if ((ssid_length == 0U) ||
+        (ssid_length >=
+         WIFI_SERVICE_STA_SSID_MAX_LENGTH)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if (password_length >=
+        WIFI_SERVICE_STA_PASSWORD_MAX_LENGTH) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if ((password_length != 0U) &&
+        (password_length <
+         WIFI_SERVICE_STA_PASSWORD_MIN_LENGTH)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    wifi_config_t config = {0};
+
+    memcpy(
+        config.sta.ssid,
+        s_sta_ssid,
+        ssid_length
+    );
+
+    if (password_length > 0U) {
+        memcpy(
+            config.sta.password,
+            s_sta_password,
+            password_length
+        );
+    }
+
+    config.sta.threshold.authmode =
+        WIFI_AUTH_OPEN;
+
+    config.sta.pmf_cfg.capable = true;
+    config.sta.pmf_cfg.required = false;
+
+    return esp_wifi_set_config(
+        WIFI_IF_STA,
         &config
     );
 }
@@ -425,6 +626,16 @@ static esp_err_t wifi_service_configure_dns(
 
 static void wifi_service_cleanup(void)
 {
+    if (s_ip_event_instance != NULL) {
+        (void)esp_event_handler_instance_unregister(
+            IP_EVENT,
+            ESP_EVENT_ANY_ID,
+            s_ip_event_instance
+        );
+
+        s_ip_event_instance = NULL;
+    }
+
     if (s_wifi_event_instance != NULL) {
         (void)esp_event_handler_instance_unregister(
             WIFI_EVENT,
@@ -435,12 +646,20 @@ static void wifi_service_cleanup(void)
         s_wifi_event_instance = NULL;
     }
 
-    if (s_ap_started_semaphore != NULL) {
+    if (s_started_semaphore != NULL) {
         vSemaphoreDelete(
-            s_ap_started_semaphore
+            s_started_semaphore
         );
 
-        s_ap_started_semaphore = NULL;
+        s_started_semaphore = NULL;
+    }
+
+    if (s_sta_netif != NULL) {
+        esp_netif_destroy_default_wifi(
+            s_sta_netif
+        );
+
+        s_sta_netif = NULL;
     }
 
     if (s_ap_netif != NULL) {
@@ -450,6 +669,16 @@ static void wifi_service_cleanup(void)
 
         s_ap_netif = NULL;
     }
+
+    atomic_store(
+        &s_sta_connected,
+        false
+    );
+
+    atomic_store(
+        &s_reconnect_allowed,
+        false
+    );
 
     s_initialized = false;
     s_started = false;
@@ -507,10 +736,10 @@ esp_err_t wifi_service_init(void)
      * mutex, preventing concurrent start, stop and getter operations.
      */
 
-    s_ap_started_semaphore =
+    s_started_semaphore =
         xSemaphoreCreateBinary();
 
-    if (s_ap_started_semaphore == NULL) {
+    if (s_started_semaphore == NULL) {
         wifi_service_unlock();
         return ESP_ERR_NO_MEM;
     }
@@ -529,6 +758,16 @@ esp_err_t wifi_service_init(void)
         esp_netif_create_default_wifi_ap();
 
     if (s_ap_netif == NULL) {
+        wifi_service_cleanup();
+        wifi_service_unlock();
+
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_sta_netif =
+        esp_netif_create_default_wifi_sta();
+
+    if (s_sta_netif == NULL) {
         wifi_service_cleanup();
         wifi_service_unlock();
 
@@ -620,6 +859,34 @@ esp_err_t wifi_service_init(void)
         return result;
     }
 
+    result =
+        esp_event_handler_instance_register(
+            IP_EVENT,
+            ESP_EVENT_ANY_ID,
+            wifi_service_ip_event_handler,
+            NULL,
+            &s_ip_event_instance
+        );
+
+    if (result != ESP_OK) {
+        (void)esp_wifi_deinit();
+        wifi_service_cleanup();
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    result =
+        wifi_service_apply_mode();
+
+    if (result != ESP_OK) {
+        (void)esp_wifi_deinit();
+        wifi_service_cleanup();
+        wifi_service_unlock();
+
+        return result;
+    }
+
     result = wifi_service_configure_ip();
 
     if (result != ESP_OK) {
@@ -630,21 +897,43 @@ esp_err_t wifi_service_init(void)
         return result;
     }
 
-    result = wifi_service_configure_ap();
+    if (atomic_load(&s_ap_enabled)) {
+        result =
+            wifi_service_configure_ap();
 
-    if (result != ESP_OK) {
-        (void)esp_wifi_deinit();
-        wifi_service_cleanup();
-        wifi_service_unlock();
+        if (result != ESP_OK) {
+            (void)esp_wifi_deinit();
+            wifi_service_cleanup();
+            wifi_service_unlock();
 
-        return result;
+            return result;
+        }
+    }
+
+    if (atomic_load(&s_sta_enabled)) {
+        result =
+            wifi_service_configure_sta();
+
+        if (result != ESP_OK) {
+            (void)esp_wifi_deinit();
+            wifi_service_cleanup();
+            wifi_service_unlock();
+
+            return result;
+        }
     }
 
     s_initialized = true;
 
     ESP_LOGI(
         TAG,
-        "Wi-Fi SoftAP initialized"
+        "Wi-Fi service initialized: AP=%s, STA=%s",
+        atomic_load(&s_ap_enabled)
+            ? "enabled"
+            : "disabled",
+        atomic_load(&s_sta_enabled)
+            ? "enabled"
+            : "disabled"
     );
 
     wifi_service_unlock();
@@ -663,23 +952,24 @@ esp_err_t wifi_service_start(void)
 
     if (!s_initialized ||
         s_started ||
-        (s_ap_started_semaphore == NULL)) {
+        (s_started_semaphore == NULL)) {
 
         wifi_service_unlock();
 
         return ESP_ERR_INVALID_STATE;
     }
 
-    /*
-     * Remove a stale notification left by an earlier start attempt.
-     */
-    while (xSemaphoreTake(
-               s_ap_started_semaphore,
-               0U
-           ) == pdTRUE) {
+    const wifi_mode_t mode =
+        wifi_service_get_mode();
+
+    if (mode == WIFI_MODE_NULL) {
+        wifi_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
     }
 
-    result = esp_wifi_start();
+    result =
+        wifi_service_apply_mode();
 
     if (result != ESP_OK) {
         wifi_service_unlock();
@@ -687,8 +977,45 @@ esp_err_t wifi_service_start(void)
         return result;
     }
 
+    /*
+     * Remove a stale notification left by an earlier start attempt.
+     */
+    while (xSemaphoreTake(
+               s_started_semaphore,
+               0U
+           ) == pdTRUE) {
+    }
+
+    atomic_store(
+        &s_sta_connected,
+        false
+    );
+
+    atomic_store(
+        &s_reconnect_allowed,
+        true
+    );
+
+    result =
+        esp_wifi_start();
+
+    if (result != ESP_OK) {
+        atomic_store(
+            &s_reconnect_allowed,
+            false
+        );
+
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    /*
+     * AP_START or STA_START indicates that at least one configured
+     * interface has started.
+     */
     if (xSemaphoreTake(
-            s_ap_started_semaphore,
+            s_started_semaphore,
             pdMS_TO_TICKS(
                 WIFI_SERVICE_START_TIMEOUT_MS
             )
@@ -696,7 +1023,12 @@ esp_err_t wifi_service_start(void)
 
         ESP_LOGE(
             TAG,
-            "Timed out waiting for Wi-Fi SoftAP startup"
+            "Timed out waiting for Wi-Fi startup"
+        );
+
+        atomic_store(
+            &s_reconnect_allowed,
+            false
         );
 
         (void)esp_wifi_stop();
@@ -706,45 +1038,76 @@ esp_err_t wifi_service_start(void)
         return ESP_ERR_TIMEOUT;
     }
 
-    esp_netif_dhcp_status_t dhcp_status =
-        ESP_NETIF_DHCP_INIT;
+    /*
+     * The DHCP server is relevant only when SoftAP is enabled.
+     */
+    if (atomic_load(&s_ap_enabled)) {
+        esp_netif_dhcp_status_t dhcp_status =
+            ESP_NETIF_DHCP_INIT;
 
-    result = esp_netif_dhcps_get_status(
-        s_ap_netif,
-        &dhcp_status
-    );
+        result =
+            esp_netif_dhcps_get_status(
+                s_ap_netif,
+                &dhcp_status
+            );
 
-    if (result != ESP_OK) {
-        (void)esp_wifi_stop();
+        if (result != ESP_OK) {
+            atomic_store(
+                &s_reconnect_allowed,
+                false
+            );
+            (void)esp_wifi_stop();
 
-        wifi_service_unlock();
+            wifi_service_unlock();
 
-        return result;
-    }
+            return result;
+        }
 
-    if (dhcp_status !=
-        ESP_NETIF_DHCP_STARTED) {
+        if (dhcp_status !=
+            ESP_NETIF_DHCP_STARTED) {
 
-        ESP_LOGE(
-            TAG,
-            "Wi-Fi DHCP server did not start"
-        );
+            ESP_LOGE(
+                TAG,
+                "Wi-Fi DHCP server did not start"
+            );
 
-        (void)esp_wifi_stop();
+            atomic_store(
+                &s_reconnect_allowed,
+                false
+            );
 
-        wifi_service_unlock();
+            (void)esp_wifi_stop();
 
-        return ESP_FAIL;
+            wifi_service_unlock();
+
+            return ESP_FAIL;
+        }
     }
 
     s_started = true;
 
-    ESP_LOGI(
-        TAG,
-        "SoftAP started: SSID=%s, IP=%s",
-        s_ap_ssid,
-        WIFI_SERVICE_AP_IP_ADDRESS
-    );
+    if (mode == WIFI_MODE_APSTA) {
+        ESP_LOGI(
+            TAG,
+            "Wi-Fi started in APSTA mode: SSID=%s",
+            s_ap_ssid
+        );
+
+    } else if (mode == WIFI_MODE_AP) {
+        ESP_LOGI(
+            TAG,
+            "Wi-Fi started in AP mode: SSID=%s, IP=%s",
+            s_ap_ssid,
+            WIFI_SERVICE_AP_IP_ADDRESS
+        );
+
+    } else {
+        ESP_LOGI(
+            TAG,
+            "Wi-Fi started in STA mode: SSID=%s",
+            s_sta_ssid
+        );
+    }
 
     wifi_service_unlock();
 
@@ -772,19 +1135,39 @@ esp_err_t wifi_service_stop(void)
         return ESP_OK;
     }
 
-    result = esp_wifi_stop();
+    /*
+     * Prevent the disconnect event from starting a new connection
+     * while the driver is being stopped intentionally.
+     */
+    atomic_store(
+        &s_reconnect_allowed,
+        false
+    );
+
+    result =
+        esp_wifi_stop();
 
     if (result != ESP_OK) {
+        atomic_store(
+            &s_reconnect_allowed,
+            true
+        );
+
         wifi_service_unlock();
 
         return result;
     }
 
+    atomic_store(
+        &s_sta_connected,
+        false
+    );
+
     s_started = false;
 
     ESP_LOGI(
         TAG,
-        "Wi-Fi SoftAP stopped"
+        "Wi-Fi service stopped"
     );
 
     wifi_service_unlock();
@@ -807,10 +1190,21 @@ esp_err_t wifi_service_deinit(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    atomic_store(
+        &s_reconnect_allowed,
+        false
+    );
+
     if (s_started) {
-        result = esp_wifi_stop();
+        result =
+            esp_wifi_stop();
 
         if (result != ESP_OK) {
+            atomic_store(
+                &s_reconnect_allowed,
+                true
+            );
+
             wifi_service_unlock();
 
             return result;
@@ -819,7 +1213,13 @@ esp_err_t wifi_service_deinit(void)
         s_started = false;
     }
 
-    result = esp_wifi_deinit();
+    atomic_store(
+        &s_sta_connected,
+        false
+    );
+
+    result =
+        esp_wifi_deinit();
 
     if (result != ESP_OK) {
         wifi_service_unlock();
@@ -831,7 +1231,7 @@ esp_err_t wifi_service_deinit(void)
 
     ESP_LOGI(
         TAG,
-        "Wi-Fi SoftAP deinitialized"
+        "Wi-Fi service deinitialized"
     );
 
     wifi_service_unlock();
@@ -988,12 +1388,19 @@ esp_err_t wifi_service_get_info(
     info->started =
         s_started;
 
-    if (!s_initialized) {
-        wifi_service_unlock();
+    info->ap_enabled =
+        atomic_load(&s_ap_enabled);
 
-        return ESP_OK;
-    }
+    info->sta_enabled =
+        atomic_load(&s_sta_enabled);
 
+    info->sta_connected =
+        s_started &&
+        atomic_load(&s_sta_connected);
+
+    /*
+     * Return configured values even when an interface is disabled.
+     */
     (void)strlcpy(
         info->ssid,
         s_ap_ssid,
@@ -1042,71 +1449,366 @@ esp_err_t wifi_service_get_info(
         WIFI_SERVICE_AP_DHCP_END_D
     );
 
-    /*
-     * The SoftAP address is advertised as the DNS server through DHCP.
-     */
     (void)strlcpy(
         info->dns_address,
         WIFI_SERVICE_AP_IP_ADDRESS,
         sizeof(info->dns_address)
     );
 
-    if (!s_started) {
+    (void)strlcpy(
+        info->sta_ssid,
+        s_sta_ssid,
+        sizeof(info->sta_ssid)
+    );
+
+    if (!s_initialized ||
+        !s_started) {
+
         wifi_service_unlock();
 
         return ESP_OK;
     }
 
-    wifi_sta_list_t station_list = {0};
+    /*
+     * Query SoftAP clients only when the AP interface is enabled.
+     */
+    if (info->ap_enabled) {
+        wifi_sta_list_t station_list = {0};
 
-    const esp_err_t station_result =
-        esp_wifi_ap_get_sta_list(
-            &station_list
+        const esp_err_t station_result =
+            esp_wifi_ap_get_sta_list(
+                &station_list
+            );
+
+        if (station_result != ESP_OK) {
+            wifi_service_unlock();
+
+            return station_result;
+        }
+
+        size_t client_count =
+            station_list.num;
+
+        if (client_count >
+            WIFI_SERVICE_MAX_CLIENT_COUNT) {
+
+            client_count =
+                WIFI_SERVICE_MAX_CLIENT_COUNT;
+        }
+
+        for (size_t index = 0U;
+             index < client_count;
+             ++index) {
+
+            memcpy(
+                info->clients[index].mac,
+                station_list.sta[index].mac,
+                sizeof(info->clients[index].mac)
+            );
+
+            info->clients[index].rssi =
+                station_list.sta[index].rssi;
+
+            info->clients[index]
+                .ip_address[0] = '\0';
+        }
+
+        info->client_count =
+            client_count;
+    }
+
+    if (info->sta_connected &&
+        (s_sta_netif != NULL)) {
+
+        esp_netif_ip_info_t ip_info = {0};
+
+        esp_err_t result =
+            esp_netif_get_ip_info(
+                s_sta_netif,
+                &ip_info
+            );
+
+        if (result != ESP_OK) {
+            wifi_service_unlock();
+
+            return result;
+        }
+
+        (void)snprintf(
+            info->sta_ip_address,
+            sizeof(info->sta_ip_address),
+            IPSTR,
+            IP2STR(&ip_info.ip)
         );
 
-    if (station_result != ESP_OK) {
-        wifi_service_unlock();
-
-        return station_result;
-    }
-
-    size_t client_count =
-        station_list.num;
-
-    if (client_count >
-        WIFI_SERVICE_MAX_CLIENT_COUNT) {
-
-        client_count =
-            WIFI_SERVICE_MAX_CLIENT_COUNT;
-    }
-
-    for (size_t index = 0U;
-         index < client_count;
-         ++index) {
-
-        memcpy(
-            info->clients[index].mac,
-            station_list.sta[index].mac,
-            sizeof(info->clients[index].mac)
+        (void)snprintf(
+            info->sta_netmask,
+            sizeof(info->sta_netmask),
+            IPSTR,
+            IP2STR(&ip_info.netmask)
         );
 
-        info->clients[index].rssi =
-            station_list.sta[index].rssi;
+        (void)snprintf(
+            info->sta_gateway,
+            sizeof(info->sta_gateway),
+            IPSTR,
+            IP2STR(&ip_info.gw)
+        );
 
-        /*
-         * esp_wifi_ap_get_sta_list() provides MAC and RSSI but does
-         * not provide the DHCP-assigned IPv4 address.
-         */
-        info->clients[index].ip_address[0] =
-            '\0';
+        esp_netif_dns_info_t dns_info = {0};
+
+        result =
+            esp_netif_get_dns_info(
+                s_sta_netif,
+                ESP_NETIF_DNS_MAIN,
+                &dns_info
+            );
+
+        if (result == ESP_OK &&
+            (dns_info.ip.type ==
+             ESP_IPADDR_TYPE_V4)) {
+
+            (void)snprintf(
+                info->sta_dns_address,
+                sizeof(info->sta_dns_address),
+                IPSTR,
+                IP2STR(
+                    &dns_info.ip.u_addr.ip4
+                )
+            );
+        }
+
+        wifi_ap_record_t ap_record = {0};
+
+        result =
+            esp_wifi_sta_get_ap_info(
+                &ap_record
+            );
+
+        if (result == ESP_OK) {
+            info->sta_rssi =
+                ap_record.rssi;
+
+        } else if (result ==
+                   ESP_ERR_WIFI_NOT_CONNECT) {
+
+            /*
+             * Connection state changed while the snapshot was being
+             * collected. Return an internally consistent snapshot.
+             */
+            info->sta_connected = false;
+
+            info->sta_ip_address[0] = '\0';
+            info->sta_netmask[0] = '\0';
+            info->sta_gateway[0] = '\0';
+            info->sta_dns_address[0] = '\0';
+
+        } else {
+            wifi_service_unlock();
+
+            return result;
+        }
     }
-
-    info->client_count =
-        client_count;
 
     wifi_service_unlock();
 
     return ESP_OK;
+}
+
+static esp_err_t wifi_service_set_interface_enabled_locked(
+    bool station,
+    bool enabled
+)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    atomic_bool *state =
+        station
+            ? &s_sta_enabled
+            : &s_ap_enabled;
+
+    const bool previous_enabled =
+        atomic_load(state);
+
+    if (previous_enabled == enabled) {
+        return ESP_OK;
+    }
+
+    if (station &&
+        enabled &&
+        (s_sta_ssid[0] == '\0')) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const bool was_started =
+        s_started;
+
+    if (was_started) {
+        atomic_store(
+            &s_reconnect_allowed,
+            false
+        );
+    }
+
+    /*
+     * Update the requested state before calculating the new mode.
+     */
+    atomic_store(
+        state,
+        enabled
+    );
+
+    const wifi_mode_t new_mode =
+        wifi_service_get_mode();
+
+    esp_err_t result = ESP_OK;
+
+    if ((new_mode == WIFI_MODE_NULL) &&
+        was_started) {
+
+        result =
+            esp_wifi_stop();
+
+        if (result == ESP_OK) {
+            s_started = false;
+
+            atomic_store(
+                &s_sta_connected,
+                false
+            );
+        }
+
+    } else {
+        result =
+            wifi_service_apply_mode();
+
+        if (result == ESP_OK &&
+            enabled) {
+
+            result =
+                station
+                    ? wifi_service_configure_sta()
+                    : wifi_service_configure_ap();
+        }
+    }
+
+    if (result != ESP_OK) {
+        /*
+         * Restore the requested interface state and previous mode.
+         */
+        atomic_store(
+            state,
+            previous_enabled
+        );
+
+        if (was_started) {
+            const esp_err_t restore_result =
+                wifi_service_apply_mode();
+
+            if (restore_result != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to restore previous Wi-Fi mode: %s",
+                    esp_err_to_name(restore_result)
+                );
+            }
+        }
+
+        atomic_store(
+            &s_reconnect_allowed,
+            was_started &&
+            atomic_load(&s_sta_enabled)
+        );
+
+        return result;
+    }
+
+    atomic_store(
+        &s_reconnect_allowed,
+        s_started &&
+        atomic_load(&s_sta_enabled)
+    );
+
+    if (station) {
+        if (!enabled) {
+            atomic_store(
+                &s_sta_connected,
+                false
+            );
+
+        } else if (s_started) {
+            result =
+                esp_wifi_connect();
+
+            if (result != ESP_OK) {
+                /*
+                 * Keep Station enabled. The event handler will retry
+                 * after a later disconnect/start event.
+                 */
+                ESP_LOGW(
+                    TAG,
+                    "Initial Station connection failed: %s",
+                    esp_err_to_name(result)
+                );
+            }
+        }
+    }
+
+    ESP_LOGI(
+        TAG,
+        "%s interface %s",
+        station ? "Station" : "SoftAP",
+        enabled ? "enabled" : "disabled"
+    );
+
+    return result;
+}
+
+esp_err_t wifi_service_set_ap_enabled(
+    bool enabled
+)
+{
+    const esp_err_t lock_result =
+        wifi_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    const esp_err_t result =
+        wifi_service_set_interface_enabled_locked(
+            false,
+            enabled
+        );
+
+    wifi_service_unlock();
+
+    return result;
+}
+
+esp_err_t wifi_service_set_sta_enabled(
+    bool enabled
+)
+{
+    const esp_err_t lock_result =
+        wifi_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    const esp_err_t result =
+        wifi_service_set_interface_enabled_locked(
+            true,
+            enabled
+        );
+
+    wifi_service_unlock();
+
+    return result;
 }
 
 esp_err_t wifi_service_set_ap_credentials(
@@ -1254,7 +1956,13 @@ esp_err_t wifi_service_set_ap_credentials(
      * Before initialization, only store the configuration. It will be
      * applied by wifi_service_init().
      */
-    if (!s_initialized) {
+    if (!s_initialized ||
+        !atomic_load(&s_ap_enabled)) {
+
+        /*
+         * Store the credentials. They will be applied when SoftAP is
+         * initialized or enabled.
+         */
         wifi_service_unlock();
 
         return ESP_OK;
@@ -1307,4 +2015,224 @@ esp_err_t wifi_service_set_ap_credentials(
     wifi_service_unlock();
 
     return ESP_OK;
+}
+
+esp_err_t wifi_service_set_sta_credentials(
+    const char *ssid,
+    const char *password
+)
+{
+    if ((ssid == NULL) ||
+        (password == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t ssid_length =
+        strlen(ssid);
+
+    const size_t password_length =
+        strlen(password);
+
+    if ((ssid_length == 0U) ||
+        (ssid_length >=
+         WIFI_SERVICE_STA_SSID_MAX_LENGTH)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if (password_length >=
+        WIFI_SERVICE_STA_PASSWORD_MAX_LENGTH) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if ((password_length != 0U) &&
+        (password_length <
+         WIFI_SERVICE_STA_PASSWORD_MIN_LENGTH)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /*
+     * Credentials may be configured before service initialization.
+     */
+    if (s_state_mutex == NULL) {
+        s_state_mutex =
+            xSemaphoreCreateMutex();
+
+        if (s_state_mutex == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    esp_err_t result =
+        wifi_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if ((strcmp(s_sta_ssid, ssid) == 0) &&
+        (strcmp(s_sta_password, password) == 0)) {
+
+        wifi_service_unlock();
+
+        return ESP_OK;
+    }
+
+    char previous_ssid[
+        WIFI_SERVICE_STA_SSID_MAX_LENGTH
+    ];
+
+    char previous_password[
+        WIFI_SERVICE_STA_PASSWORD_MAX_LENGTH
+    ];
+
+    (void)strlcpy(
+        previous_ssid,
+        s_sta_ssid,
+        sizeof(previous_ssid)
+    );
+
+    (void)strlcpy(
+        previous_password,
+        s_sta_password,
+        sizeof(previous_password)
+    );
+
+    (void)strlcpy(
+        s_sta_ssid,
+        ssid,
+        sizeof(s_sta_ssid)
+    );
+
+    (void)strlcpy(
+        s_sta_password,
+        password,
+        sizeof(s_sta_password)
+    );
+
+    /*
+     * Store credentials without touching the driver when the service
+     * or Station interface is inactive.
+     */
+    if (!s_initialized ||
+        !atomic_load(&s_sta_enabled)) {
+
+        wifi_service_unlock();
+
+        return ESP_OK;
+    }
+
+    const bool reconnect_was_allowed =
+        atomic_load(&s_reconnect_allowed);
+
+    atomic_store(
+        &s_reconnect_allowed,
+        false
+    );
+
+    if (s_started) {
+        result =
+            esp_wifi_disconnect();
+
+        if ((result != ESP_OK) &&
+            (result !=
+             ESP_ERR_WIFI_NOT_CONNECT)) {
+
+            goto restore;
+        }
+
+        atomic_store(
+            &s_sta_connected,
+            false
+        );
+    }
+
+    result =
+        wifi_service_configure_sta();
+
+    if (result != ESP_OK) {
+        goto restore;
+    }
+
+    atomic_store(
+        &s_reconnect_allowed,
+        reconnect_was_allowed
+    );
+
+    if (s_started) {
+        result =
+            esp_wifi_connect();
+
+        if (result != ESP_OK) {
+            goto restore;
+        }
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Station credentials updated: SSID=%s",
+        s_sta_ssid
+    );
+
+    wifi_service_unlock();
+
+    return ESP_OK;
+
+restore:
+    {
+        const esp_err_t original_result =
+            result;
+
+        (void)strlcpy(
+            s_sta_ssid,
+            previous_ssid,
+            sizeof(s_sta_ssid)
+        );
+
+        (void)strlcpy(
+            s_sta_password,
+            previous_password,
+            sizeof(s_sta_password)
+        );
+
+        const esp_err_t restore_result =
+            wifi_service_configure_sta();
+
+        if (restore_result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to restore previous Station configuration: %s",
+                esp_err_to_name(restore_result)
+            );
+        }
+
+        atomic_store(
+            &s_reconnect_allowed,
+            reconnect_was_allowed
+        );
+
+        if (s_started &&
+            reconnect_was_allowed &&
+            (restore_result == ESP_OK)) {
+
+            const esp_err_t connect_result =
+                esp_wifi_connect();
+
+            if (connect_result != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to reconnect using previous Station "
+                    "configuration: %s",
+                    esp_err_to_name(connect_result)
+                );
+            }
+        }
+
+        wifi_service_unlock();
+
+        return original_result;
+    }
 }

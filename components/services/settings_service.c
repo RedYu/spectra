@@ -17,6 +17,7 @@
 #include "storage_service.h"
 #include "logging_service.h"
 #include "wifi_service.h"
+#include "wifi_credentials_service.h"
 #include "usb_network_service.h"
 
 static const char *TAG = "settings_service";
@@ -47,8 +48,20 @@ static void settings_service_unlock(void);
 static esp_err_t settings_service_reload_internal(void);
 static esp_err_t settings_service_save_internal(void);
 
-static esp_err_t settings_service_apply_wifi_enabled(
-    bool enabled
+static void settings_service_clear_sensitive_data(
+    void *data,
+    size_t size
+);
+
+static esp_err_t settings_service_load_sta_credentials(
+    const app_settings_t *settings,
+    wifi_sta_credentials_t *credentials,
+    bool *matching
+);
+
+static esp_err_t settings_service_apply_wifi_states(
+    bool ap_enabled,
+    bool sta_enabled
 );
 
 static esp_err_t settings_service_set_brightness_internal(
@@ -89,6 +102,79 @@ static void settings_service_unlock(void)
     (void)xSemaphoreGive(
         s_mutex
     );
+}
+
+static void settings_service_clear_sensitive_data(
+    void *data,
+    size_t size
+)
+{
+    if (data == NULL) {
+        return;
+    }
+
+    volatile uint8_t *bytes =
+        (volatile uint8_t *)data;
+
+    while (size > 0U) {
+        *bytes = 0U;
+
+        ++bytes;
+        --size;
+    }
+}
+
+static esp_err_t settings_service_load_sta_credentials(
+    const app_settings_t *settings,
+    wifi_sta_credentials_t *credentials,
+    bool *matching
+)
+{
+    if ((settings == NULL) ||
+        (credentials == NULL) ||
+        (matching == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        credentials,
+        0,
+        sizeof(*credentials)
+    );
+
+    *matching = false;
+
+    if ((settings->wifi_sta.ssid[0] == '\0') ||
+        (settings->wifi_sta.credential_id[0] == '\0')) {
+
+        return ESP_OK;
+    }
+
+    const esp_err_t result =
+        wifi_credentials_service_get(
+            credentials
+        );
+
+    if (result == ESP_ERR_NOT_FOUND) {
+        return ESP_OK;
+    }
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    *matching =
+        (strcmp(
+            settings->wifi_sta.ssid,
+            credentials->ssid
+        ) == 0) &&
+        (strcmp(
+            settings->wifi_sta.credential_id,
+            credentials->credential_id
+        ) == 0);
+
+    return ESP_OK;
 }
 
 static esp_err_t parse_config(
@@ -489,28 +575,130 @@ static esp_err_t parse_config(
         goto cleanup;
     }
 
-    const size_t ssid_length =
-        strlen(wifi_ssid->valuestring);
+    const size_t ap_ssid_length =
+        strlen(
+            wifi_ssid->valuestring
+        );
 
-    const size_t password_length =
-        strlen(wifi_password->valuestring);
+    const size_t ap_password_length =
+        strlen(
+            wifi_password->valuestring
+        );
 
-    if ((ssid_length == 0U) ||
-        (ssid_length >=
-        SETTINGS_WIFI_SSID_MAX_LENGTH) ||
-        (password_length >=
+    if ((ap_ssid_length == 0U) ||
+        (ap_ssid_length >=
+        SETTINGS_WIFI_AP_SSID_MAX_LENGTH) ||
+        (ap_password_length >=
         SETTINGS_WIFI_PASSWORD_MAX_LENGTH)) {
 
         result = ESP_ERR_INVALID_SIZE;
         goto cleanup;
     }
 
-    if ((password_length != 0U) &&
-        (password_length <
+    if ((ap_password_length != 0U) &&
+        (ap_password_length <
         SETTINGS_WIFI_PASSWORD_MIN_LENGTH)) {
 
         result = ESP_ERR_INVALID_ARG;
         goto cleanup;
+    }
+
+    const cJSON *wifi_sta =
+        cJSON_GetObjectItemCaseSensitive(
+            network,
+            "wifi_sta"
+        );
+
+    /*
+    * wifi_sta is optional while schema version 1 is still under
+    * development. Missing values retain their defaults.
+    */
+    if (wifi_sta != NULL) {
+        if (!cJSON_IsObject(wifi_sta)) {
+            result = ESP_ERR_INVALID_RESPONSE;
+            goto cleanup;
+        }
+
+        const cJSON *sta_enabled =
+            cJSON_GetObjectItemCaseSensitive(
+                wifi_sta,
+                "enabled"
+            );
+
+        const cJSON *sta_ssid =
+            cJSON_GetObjectItemCaseSensitive(
+                wifi_sta,
+                "ssid"
+            );
+
+        const cJSON *credential_id =
+            cJSON_GetObjectItemCaseSensitive(
+                wifi_sta,
+                "credential_id"
+            );
+
+        if (!cJSON_IsBool(sta_enabled) ||
+            !cJSON_IsString(sta_ssid) ||
+            (sta_ssid->valuestring == NULL) ||
+            !cJSON_IsString(credential_id) ||
+            (credential_id->valuestring == NULL)) {
+
+            result = ESP_ERR_INVALID_RESPONSE;
+            goto cleanup;
+        }
+
+        const bool sta_is_enabled =
+            cJSON_IsTrue(sta_enabled);
+
+        const size_t sta_ssid_length =
+            strlen(
+                sta_ssid->valuestring
+            );
+
+        const size_t credential_id_length =
+            strlen(
+                credential_id->valuestring
+            );
+
+        if ((sta_ssid_length >=
+            SETTINGS_WIFI_STA_SSID_MAX_LENGTH) ||
+            (credential_id_length >=
+            SETTINGS_WIFI_CREDENTIAL_ID_LENGTH)) {
+
+            result = ESP_ERR_INVALID_SIZE;
+            goto cleanup;
+        }
+
+        if (sta_is_enabled &&
+            ((sta_ssid_length == 0U) ||
+            (credential_id_length == 0U))) {
+
+            result = ESP_ERR_INVALID_ARG;
+            goto cleanup;
+        }
+
+        if ((credential_id_length != 0U) &&
+            (credential_id_length !=
+            (SETTINGS_WIFI_CREDENTIAL_ID_LENGTH - 1U))) {
+
+            result = ESP_ERR_INVALID_SIZE;
+            goto cleanup;
+        }
+
+        parsed_settings.wifi_sta.enabled =
+            sta_is_enabled;
+
+        (void)strlcpy(
+            parsed_settings.wifi_sta.ssid,
+            sta_ssid->valuestring,
+            sizeof(parsed_settings.wifi_sta.ssid)
+        );
+
+        (void)strlcpy(
+            parsed_settings.wifi_sta.credential_id,
+            credential_id->valuestring,
+            sizeof(parsed_settings.wifi_sta.credential_id)
+        );
     }
 
     const cJSON *usb_rndis =
@@ -743,6 +931,35 @@ static cJSON *settings_service_create_json(
         goto error;
     }
 
+    cJSON *wifi_sta =
+        cJSON_AddObjectToObject(
+            network,
+            "wifi_sta"
+        );
+
+    if (wifi_sta == NULL) {
+        goto error;
+    }
+
+    if ((cJSON_AddBoolToObject(
+            wifi_sta,
+            "enabled",
+            settings->wifi_sta.enabled
+        ) == NULL) ||
+        (cJSON_AddStringToObject(
+            wifi_sta,
+            "ssid",
+            settings->wifi_sta.ssid
+        ) == NULL) ||
+        (cJSON_AddStringToObject(
+            wifi_sta,
+            "credential_id",
+            settings->wifi_sta.credential_id
+        ) == NULL)) {
+
+        goto error;
+    }
+
     cJSON *usb_rndis =
         cJSON_AddObjectToObject(
             network,
@@ -925,18 +1142,16 @@ static esp_err_t settings_service_reload_internal(void)
     }
 
     if (result != ESP_OK) {
-        const esp_err_t read_result =
-            result;
-
         ESP_LOGE(
             TAG,
             "Failed to read configuration: %s",
-            esp_err_to_name(read_result)
+            esp_err_to_name(result)
         );
 
-        result = settings_model_set(
-            &settings
-        );
+        result =
+            settings_model_set(
+                &settings
+            );
 
         if (result != ESP_OK) {
             return result;
@@ -954,7 +1169,7 @@ static esp_err_t settings_service_reload_internal(void)
             "Default settings applied after read failure"
         );
 
-        return read_result;
+        return ESP_OK;
     }
 
     ESP_LOGI(
@@ -1289,8 +1504,9 @@ static esp_err_t settings_service_set_animations_enabled_internal(
     return ESP_OK;
 }
 
-static esp_err_t settings_service_apply_wifi_enabled(
-    bool enabled
+static esp_err_t settings_service_apply_wifi_states(
+    bool ap_enabled,
+    bool sta_enabled
 )
 {
     wifi_service_info_t info;
@@ -1304,28 +1520,78 @@ static esp_err_t settings_service_apply_wifi_enabled(
         return result;
     }
 
-    if (enabled) {
-        if (!info.initialized) {
-            result =
-                wifi_service_init();
+    if (!info.initialized) {
+        result =
+            wifi_service_init();
 
-            if (result != ESP_OK) {
-                return result;
-            }
-
-            info.started = false;
+        if (result != ESP_OK) {
+            return result;
         }
+    }
 
+    /*
+     * Enable requested interfaces before disabling the others.
+     * This avoids stopping the Wi-Fi driver when switching between
+     * AP, STA and APSTA modes.
+     */
+    if (ap_enabled) {
+        result =
+            wifi_service_set_ap_enabled(
+                true
+            );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+    }
+
+    if (sta_enabled) {
+        result =
+            wifi_service_set_sta_enabled(
+                true
+            );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+    }
+
+    if (!ap_enabled) {
+        result =
+            wifi_service_set_ap_enabled(
+                false
+            );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+    }
+
+    if (!sta_enabled) {
+        result =
+            wifi_service_set_sta_enabled(
+                false
+            );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+    }
+
+    result =
+        wifi_service_get_info(
+            &info
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (ap_enabled || sta_enabled) {
         if (!info.started) {
             return wifi_service_start();
         }
-
-        return ESP_OK;
-    }
-
-    if (info.initialized &&
-        info.started) {
-
+    } else if (info.started) {
         return wifi_service_stop();
     }
 
@@ -1345,33 +1611,84 @@ static esp_err_t settings_service_apply_internal(void)
         return result;
     }
 
-    result = wifi_service_set_ap_credentials(
-        settings.wifi_ap.ssid,
-        settings.wifi_ap.password
-    );
+    result =
+        wifi_service_set_ap_credentials(
+            settings.wifi_ap.ssid,
+            settings.wifi_ap.password
+        );
 
     if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to apply Wi-Fi credentials: %s",
-            esp_err_to_name(result)
+        return result;
+    }
+
+    wifi_sta_credentials_t sta_credentials;
+    bool sta_credentials_match = false;
+
+    result =
+        settings_service_load_sta_credentials(
+            &settings,
+            &sta_credentials,
+            &sta_credentials_match
+        );
+
+    if (result != ESP_OK) {
+        settings_service_clear_sensitive_data(
+            &sta_credentials,
+            sizeof(sta_credentials)
         );
 
         return result;
     }
 
+    /*
+     * Do not copy the password into the Wi-Fi service until STA is
+     * actually requested.
+     */
+    if (settings.wifi_sta.enabled &&
+        sta_credentials_match) {
+
+        result =
+            wifi_service_set_sta_credentials(
+                sta_credentials.ssid,
+                sta_credentials.password
+            );
+
+        if (result != ESP_OK) {
+            settings_service_clear_sensitive_data(
+                &sta_credentials,
+                sizeof(sta_credentials)
+            );
+
+            return result;
+        }
+    }
+
+    const bool sta_runtime_enabled =
+        settings.wifi_sta.enabled &&
+        sta_credentials_match;
+
+    if (settings.wifi_sta.enabled &&
+        !sta_credentials_match) {
+
+        ESP_LOGW(
+            TAG,
+            "Wi-Fi STA credentials are missing or do not match "
+            "the current settings"
+        );
+    }
+
+    settings_service_clear_sensitive_data(
+        &sta_credentials,
+        sizeof(sta_credentials)
+    );
+
     result =
-        settings_service_apply_wifi_enabled(
-            settings.wifi_ap.enabled
+        settings_service_apply_wifi_states(
+            settings.wifi_ap.enabled,
+            sta_runtime_enabled
         );
 
     if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to apply Wi-Fi SoftAP state: %s",
-            esp_err_to_name(result)
-        );
-
         return result;
     }
 
@@ -1458,7 +1775,8 @@ static esp_err_t settings_service_apply_internal(void)
         TAG,
         "Settings applied: brightness=%u%%, "
         "SD logging=%s, animations=%s, "
-        "Wi-Fi AP=%s, USB RNDIS=%s",
+        "Wi-Fi AP=%s, Wi-Fi STA requested=%s, "
+        "USB RNDIS=%s",
         (unsigned int)settings.display.brightness,
         settings.logging.sd_enabled
             ? "enabled"
@@ -1467,6 +1785,9 @@ static esp_err_t settings_service_apply_internal(void)
             ? "enabled"
             : "disabled",
         settings.wifi_ap.enabled
+            ? "enabled"
+            : "disabled",
+        settings.wifi_sta.enabled
             ? "enabled"
             : "disabled",
         settings.usb_rndis.enabled
@@ -1615,6 +1936,415 @@ esp_err_t settings_service_apply(void)
     return result;
 }
 
+esp_err_t settings_service_set_wifi_sta_enabled(
+    bool enabled
+)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (!s_initialized) {
+        settings_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    app_settings_t previous;
+
+    esp_err_t result =
+        settings_model_get(
+            &previous
+        );
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+
+        return result;
+    }
+
+    wifi_sta_credentials_t credentials;
+    bool credentials_match = false;
+
+    result =
+        settings_service_load_sta_credentials(
+            &previous,
+            &credentials,
+            &credentials_match
+        );
+
+    if (result != ESP_OK) {
+        settings_service_clear_sensitive_data(
+            &credentials,
+            sizeof(credentials)
+        );
+
+        settings_service_unlock();
+
+        return result;
+    }
+
+    if (enabled &&
+        !credentials_match) {
+
+        settings_service_clear_sensitive_data(
+            &credentials,
+            sizeof(credentials)
+        );
+
+        settings_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (enabled) {
+        result =
+            wifi_service_set_sta_credentials(
+                credentials.ssid,
+                credentials.password
+            );
+
+        if (result != ESP_OK) {
+            settings_service_clear_sensitive_data(
+                &credentials,
+                sizeof(credentials)
+            );
+
+            settings_service_unlock();
+
+            return result;
+        }
+    }
+
+    settings_service_clear_sensitive_data(
+        &credentials,
+        sizeof(credentials)
+    );
+
+    app_settings_t updated =
+        previous;
+
+    updated.wifi_sta.enabled =
+        enabled;
+
+    result =
+        settings_model_set(
+            &updated
+        );
+
+    if (result == ESP_OK) {
+        result =
+            settings_service_apply_wifi_states(
+                previous.wifi_ap.enabled,
+                enabled
+            );
+    }
+
+    if (result != ESP_OK) {
+        (void)settings_model_set(
+            &previous
+        );
+
+        const esp_err_t restore_result =
+            settings_service_apply_wifi_states(
+                previous.wifi_ap.enabled,
+                previous.wifi_sta.enabled &&
+                credentials_match
+            );
+
+        if (restore_result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to restore previous Wi-Fi state: %s",
+                esp_err_to_name(restore_result)
+            );
+        }
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
+esp_err_t settings_service_set_wifi_sta_credentials(
+    const char *ssid,
+    const char *password
+)
+{
+    if ((ssid == NULL) ||
+        (password == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t ssid_length =
+        strlen(
+            ssid
+        );
+
+    const size_t password_length =
+        strlen(
+            password
+        );
+
+    if (ssid_length == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((ssid_length >=
+         SETTINGS_WIFI_STA_SSID_MAX_LENGTH) ||
+        (password_length >=
+         SETTINGS_WIFI_PASSWORD_MAX_LENGTH)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if ((password_length != 0U) &&
+        (password_length <
+         SETTINGS_WIFI_PASSWORD_MIN_LENGTH)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (!s_initialized) {
+        settings_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    app_settings_t previous;
+
+    esp_err_t result =
+        settings_model_get(
+            &previous
+        );
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+
+        return result;
+    }
+
+    char credential_id[
+        SETTINGS_WIFI_CREDENTIAL_ID_LENGTH
+    ];
+
+    memset(
+        credential_id,
+        0,
+        sizeof(credential_id)
+    );
+
+    result =
+        wifi_credentials_service_set(
+            ssid,
+            password,
+            credential_id,
+            sizeof(credential_id)
+        );
+
+    if (result != ESP_OK) {
+        settings_service_clear_sensitive_data(
+            credential_id,
+            sizeof(credential_id)
+        );
+
+        settings_service_unlock();
+
+        return result;
+    }
+
+    app_settings_t updated =
+        previous;
+
+    (void)strlcpy(
+        updated.wifi_sta.ssid,
+        ssid,
+        sizeof(updated.wifi_sta.ssid)
+    );
+
+    (void)strlcpy(
+        updated.wifi_sta.credential_id,
+        credential_id,
+        sizeof(updated.wifi_sta.credential_id)
+    );
+
+    settings_service_clear_sensitive_data(
+        credential_id,
+        sizeof(credential_id)
+    );
+
+    result =
+        settings_model_set(
+            &updated
+        );
+
+    /*
+     * Keep credentials only in NVS while STA is disabled. They will
+     * be loaded into the Wi-Fi service when STA is enabled.
+     */
+    if ((result == ESP_OK) &&
+        updated.wifi_sta.enabled) {
+
+        result =
+            wifi_service_set_sta_credentials(
+                ssid,
+                password
+            );
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
+/*
+ * TODO:
+ * Add wifi_service_clear_sta_credentials() and call it after disabling
+ * STA and removing its credentials from NVS. Currently, the credentials
+ * are removed from persistent storage, but the Wi-Fi service may retain
+ * a copy of the previous SSID and password in RAM until it is
+ * reconfigured, deinitialized or the device is restarted.
+ */
+esp_err_t settings_service_clear_wifi_sta_credentials(void)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (!s_initialized) {
+        settings_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    app_settings_t settings;
+
+    esp_err_t result =
+        settings_model_get(
+            &settings
+        );
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+
+        return result;
+    }
+
+    result =
+        settings_service_apply_wifi_states(
+            settings.wifi_ap.enabled,
+            false
+        );
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+
+        return result;
+    }
+
+    result =
+        wifi_credentials_service_clear();
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+
+        return result;
+    }
+
+    settings.wifi_sta.enabled =
+        false;
+
+    settings.wifi_sta.ssid[0] =
+        '\0';
+
+    settings.wifi_sta.credential_id[0] =
+        '\0';
+
+    result =
+        settings_model_set(
+            &settings
+        );
+
+    settings_service_unlock();
+
+    return result;
+}
+
+esp_err_t settings_service_get_wifi_sta_credentials_configured(
+    bool *configured
+)
+{
+    if (configured == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *configured = false;
+
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (!s_initialized) {
+        settings_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    app_settings_t settings;
+
+    esp_err_t result =
+        settings_model_get(
+            &settings
+        );
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+
+        return result;
+    }
+
+    wifi_sta_credentials_t credentials;
+    bool matching = false;
+
+    result =
+        settings_service_load_sta_credentials(
+            &settings,
+            &credentials,
+            &matching
+        );
+
+    settings_service_clear_sensitive_data(
+        &credentials,
+        sizeof(credentials)
+    );
+
+    if (result == ESP_OK) {
+        *configured =
+            matching;
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
 esp_err_t settings_service_set_wifi_ap_enabled(
     bool enabled
 )
@@ -1647,8 +2377,9 @@ esp_err_t settings_service_set_wifi_ap_enabled(
 
     if (previous.wifi_ap.enabled == enabled) {
         result =
-            settings_service_apply_wifi_enabled(
-                enabled
+            settings_service_apply_wifi_states(
+                enabled,
+                previous.wifi_sta.enabled
             );
 
         settings_service_unlock();
@@ -1669,8 +2400,9 @@ esp_err_t settings_service_set_wifi_ap_enabled(
 
     if (result == ESP_OK) {
         result =
-            settings_service_apply_wifi_enabled(
-                enabled
+            settings_service_apply_wifi_states(
+                enabled,
+                previous.wifi_sta.enabled
             );
     }
 
@@ -1679,12 +2411,10 @@ esp_err_t settings_service_set_wifi_ap_enabled(
             &previous
         );
 
-        /*
-         * Attempt to restore the previous runtime state.
-         */
         const esp_err_t restore_result =
-            settings_service_apply_wifi_enabled(
-                previous.wifi_ap.enabled
+            settings_service_apply_wifi_states(
+                previous.wifi_ap.enabled,
+                previous.wifi_sta.enabled
             );
 
         if (restore_result != ESP_OK) {
@@ -1740,7 +2470,7 @@ esp_err_t settings_service_set_usb_rndis_enabled(
     return result;
 }
 
-esp_err_t settings_service_set_wifi_credentials(
+esp_err_t settings_service_set_wifi_ap_credentials(
     const char *ssid,
     const char *password
 )
@@ -1759,7 +2489,7 @@ esp_err_t settings_service_set_wifi_credentials(
 
     if ((ssid_length == 0U) ||
         (ssid_length >=
-         SETTINGS_WIFI_SSID_MAX_LENGTH) ||
+         SETTINGS_WIFI_AP_SSID_MAX_LENGTH) ||
         (password_length >=
          SETTINGS_WIFI_PASSWORD_MAX_LENGTH)) {
 

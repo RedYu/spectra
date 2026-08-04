@@ -16,6 +16,7 @@
 #include "storage_sd_service.h"
 #include "settings_model.h"
 #include "settings_service.h"
+#include "wifi_credentials_service.h"
 #include "gui_service.h"
 #include "logging_service.h"
 #include "network_service.h"
@@ -327,6 +328,30 @@ static void startup_task(
         (void)gui_service_set_boot_progress(
             20U,
             "Network initialization failed"
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    (void)gui_service_set_boot_progress(
+        25U,
+        "Initializing Wi-Fi credentials"
+    );
+
+    result =
+        wifi_credentials_service_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize Wi-Fi credentials service: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)gui_service_set_boot_progress(
+            25U,
+            "Wi-Fi credentials initialization failed"
         );
 
         vTaskDelete(NULL);
