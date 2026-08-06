@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -60,6 +61,21 @@ static SemaphoreHandle_t
 static esp_netif_t *s_ap_netif = NULL;
 static esp_netif_t *s_sta_netif = NULL;
 
+static SemaphoreHandle_t s_scan_mutex = NULL;
+
+static wifi_service_scan_info_t s_scan_info = {
+    .state = WIFI_SERVICE_SCAN_STATE_IDLE,
+    .result_count = 0U,
+    .truncated = false,
+    .last_error = ESP_OK,
+};
+
+static wifi_service_scan_result_t s_scan_results[
+    WIFI_SERVICE_SCAN_MAX_RESULT_COUNT
+];
+
+static bool s_scan_temporary_sta = false;
+
 static esp_event_handler_instance_t
     s_wifi_event_instance = NULL;
 
@@ -100,6 +116,20 @@ static char s_sta_ssid[
 static char s_sta_password[
     WIFI_SERVICE_STA_PASSWORD_MAX_LENGTH
 ] = "";
+
+static esp_err_t wifi_service_scan_lock(void);
+
+static void wifi_service_scan_unlock(void);
+
+static void wifi_service_handle_scan_done(
+    const wifi_event_sta_scan_done_t *event
+);
+
+static void wifi_service_sort_scan_results(void);
+
+static void wifi_service_reset_scan_locked(void);
+
+static bool wifi_service_scan_is_running(void);
 
 static esp_err_t wifi_service_configure_dns(
     esp_netif_t *netif,
@@ -148,6 +178,337 @@ static void wifi_service_unlock(void)
     if (s_state_mutex != NULL) {
         (void)xSemaphoreGive(
             s_state_mutex
+        );
+    }
+}
+
+static esp_err_t wifi_service_scan_lock(void)
+{
+    if (s_scan_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(
+            s_scan_mutex,
+            pdMS_TO_TICKS(
+                WIFI_SERVICE_LOCK_TIMEOUT_MS
+            )
+        ) != pdTRUE) {
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+    return ESP_OK;
+}
+
+static void wifi_service_scan_unlock(void)
+{
+    if (s_scan_mutex != NULL) {
+        (void)xSemaphoreGive(
+            s_scan_mutex
+        );
+    }
+}
+
+static void wifi_service_reset_scan_locked(void)
+{
+    memset(
+        s_scan_results,
+        0,
+        sizeof(s_scan_results)
+    );
+
+    s_scan_info.state =
+        WIFI_SERVICE_SCAN_STATE_IDLE;
+
+    s_scan_info.result_count = 0U;
+    s_scan_info.truncated = false;
+    s_scan_info.last_error = ESP_OK;
+
+    s_scan_temporary_sta = false;
+}
+
+static bool wifi_service_scan_is_running(void)
+{
+    if (wifi_service_scan_lock() != ESP_OK) {
+        /*
+         * Conservatively reject mode changes when the scan state
+         * cannot be inspected.
+         */
+        return true;
+    }
+
+    const bool running =
+        s_scan_info.state ==
+        WIFI_SERVICE_SCAN_STATE_RUNNING;
+
+    wifi_service_scan_unlock();
+
+    return running;
+}
+
+static void wifi_service_sort_scan_results(void)
+{
+    for (size_t index = 1U;
+         index < s_scan_info.result_count;
+         ++index) {
+
+        const wifi_service_scan_result_t current =
+            s_scan_results[index];
+
+        size_t position = index;
+
+        while ((position > 0U) &&
+               (s_scan_results[position - 1U].rssi <
+                current.rssi)) {
+
+            s_scan_results[position] =
+                s_scan_results[position - 1U];
+
+            --position;
+        }
+
+        s_scan_results[position] =
+            current;
+    }
+}
+
+static void wifi_service_handle_scan_done(
+    const wifi_event_sta_scan_done_t *event
+)
+{
+    if (wifi_service_scan_lock() != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to lock completed scan"
+        );
+
+        return;
+    }
+
+    if (s_scan_info.state !=
+        WIFI_SERVICE_SCAN_STATE_RUNNING) {
+
+        wifi_service_scan_unlock();
+
+        (void)esp_wifi_clear_ap_list();
+
+        return;
+    }
+
+    if ((event == NULL) ||
+        (event->status != 0U)) {
+
+        (void)esp_wifi_clear_ap_list();
+
+        s_scan_info.state =
+            WIFI_SERVICE_SCAN_STATE_ERROR;
+
+        s_scan_info.result_count = 0U;
+        s_scan_info.truncated = false;
+        s_scan_info.last_error = ESP_FAIL;
+
+        goto restore_mode;
+    }
+
+    uint16_t discovered_count = 0U;
+
+    esp_err_t result =
+        esp_wifi_scan_get_ap_num(
+            &discovered_count
+        );
+
+    if (result != ESP_OK) {
+        s_scan_info.state =
+            WIFI_SERVICE_SCAN_STATE_ERROR;
+
+        s_scan_info.last_error = result;
+
+        goto restore_mode;
+    }
+
+    uint16_t requested_count =
+        discovered_count;
+
+    if (requested_count >
+        WIFI_SERVICE_SCAN_MAX_RESULT_COUNT) {
+
+        requested_count =
+            WIFI_SERVICE_SCAN_MAX_RESULT_COUNT;
+    }
+
+    wifi_ap_record_t *records = NULL;
+
+    if (requested_count > 0U) {
+        /*
+         * Scan records are temporary and do not require DMA-capable
+         * memory, so prefer PSRAM to preserve internal heap.
+         */
+        records = heap_caps_calloc(
+            requested_count,
+            sizeof(*records),
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
+
+        if (records == NULL) {
+            records = calloc(
+                requested_count,
+                sizeof(*records)
+            );
+        }
+
+        if (records == NULL) {
+            (void)esp_wifi_clear_ap_list();
+
+            s_scan_info.state =
+                WIFI_SERVICE_SCAN_STATE_ERROR;
+
+            s_scan_info.last_error =
+                ESP_ERR_NO_MEM;
+
+            goto restore_mode;
+        }
+
+        result =
+            esp_wifi_scan_get_ap_records(
+                &requested_count,
+                records
+            );
+
+        if (result != ESP_OK) {
+            free(records);
+
+            s_scan_info.state =
+                WIFI_SERVICE_SCAN_STATE_ERROR;
+
+            s_scan_info.last_error = result;
+
+            goto restore_mode;
+        }
+    } else {
+        /*
+         * Explicitly release the driver's empty scan list.
+         */
+        (void)esp_wifi_clear_ap_list();
+    }
+
+    memset(
+        s_scan_results,
+        0,
+        sizeof(s_scan_results)
+    );
+
+    for (size_t index = 0U;
+         index < requested_count;
+         ++index) {
+
+        wifi_service_scan_result_t *destination =
+            &s_scan_results[index];
+
+        const wifi_ap_record_t *source =
+            &records[index];
+
+        size_t ssid_length =
+            strnlen(
+                (const char *)source->ssid,
+                sizeof(source->ssid)
+            );
+
+        if (ssid_length >=
+            sizeof(destination->ssid)) {
+
+            ssid_length =
+                sizeof(destination->ssid) - 1U;
+        }
+
+        memcpy(
+            destination->ssid,
+            source->ssid,
+            ssid_length
+        );
+
+        destination->ssid[ssid_length] = '\0';
+
+        memcpy(
+            destination->bssid,
+            source->bssid,
+            sizeof(destination->bssid)
+        );
+
+        destination->rssi =
+            source->rssi;
+
+        destination->channel =
+            source->primary;
+
+        destination->password_required =
+            source->authmode != WIFI_AUTH_OPEN;
+    }
+
+    free(records);
+
+    s_scan_info.result_count =
+        requested_count;
+
+    s_scan_info.truncated =
+        discovered_count > requested_count;
+
+    s_scan_info.state =
+        WIFI_SERVICE_SCAN_STATE_COMPLETE;
+
+    s_scan_info.last_error = ESP_OK;
+
+    wifi_service_sort_scan_results();
+
+restore_mode:
+    if (s_scan_temporary_sta) {
+        const esp_err_t restore_result =
+            esp_wifi_set_mode(
+                WIFI_MODE_AP
+            );
+
+        if (restore_result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to restore AP mode after scan: %s",
+                esp_err_to_name(restore_result)
+            );
+
+            s_scan_info.state =
+                WIFI_SERVICE_SCAN_STATE_ERROR;
+
+            s_scan_info.last_error =
+                restore_result;
+        }
+
+        s_scan_temporary_sta = false;
+    }
+
+    const wifi_service_scan_state_t final_state =
+        s_scan_info.state;
+
+    const size_t result_count =
+        s_scan_info.result_count;
+
+    const esp_err_t scan_error =
+        s_scan_info.last_error;
+
+    wifi_service_scan_unlock();
+
+    if (final_state ==
+        WIFI_SERVICE_SCAN_STATE_COMPLETE) {
+
+        ESP_LOGI(
+            TAG,
+            "Wi-Fi scan completed: %u network(s)",
+            (unsigned int)result_count
+        );
+    } else {
+        ESP_LOGE(
+            TAG,
+            "Wi-Fi scan failed: %s",
+            esp_err_to_name(scan_error)
         );
     }
 }
@@ -240,6 +601,15 @@ static void wifi_service_event_handler(
 {
     (void)argument;
     (void)event_base;
+
+    if (event_id == WIFI_EVENT_SCAN_DONE) {
+        wifi_service_handle_scan_done(
+            (const wifi_event_sta_scan_done_t *)
+                event_data
+        );
+
+        return;
+    }
 
     if ((event_id == WIFI_EVENT_AP_START) ||
         (event_id == WIFI_EVENT_STA_START)) {
@@ -695,6 +1065,15 @@ esp_err_t wifi_service_init(void)
         }
     }
 
+    if (s_scan_mutex == NULL) {
+        s_scan_mutex =
+            xSemaphoreCreateMutex();
+
+        if (s_scan_mutex == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
     esp_err_t result =
         wifi_service_lock();
 
@@ -707,6 +1086,19 @@ esp_err_t wifi_service_init(void)
 
         return ESP_ERR_INVALID_STATE;
     }
+
+    result =
+        wifi_service_scan_lock();
+
+    if (result != ESP_OK) {
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    wifi_service_reset_scan_locked();
+
+    wifi_service_scan_unlock();
 
     bool network_initialized = false;
 
@@ -1135,14 +1527,45 @@ esp_err_t wifi_service_stop(void)
         return ESP_OK;
     }
 
+    result =
+        wifi_service_scan_lock();
+
+    if (result != ESP_OK) {
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    if (s_scan_info.state ==
+        WIFI_SERVICE_SCAN_STATE_RUNNING) {
+
+        const esp_err_t stop_scan_result =
+            esp_wifi_scan_stop();
+
+        if ((stop_scan_result != ESP_OK) &&
+            (stop_scan_result !=
+            ESP_ERR_WIFI_NOT_STARTED)) {
+
+            wifi_service_scan_unlock();
+            wifi_service_unlock();
+
+            return stop_scan_result;
+        }
+    }
+
+    wifi_service_reset_scan_locked();
+
+    wifi_service_scan_unlock();
+
     /*
      * Prevent the disconnect event from starting a new connection
      * while the driver is being stopped intentionally.
      */
-    atomic_store(
-        &s_reconnect_allowed,
-        false
-    );
+    const bool reconnect_was_allowed =
+        atomic_exchange(
+            &s_reconnect_allowed,
+            false
+        );
 
     result =
         esp_wifi_stop();
@@ -1150,7 +1573,7 @@ esp_err_t wifi_service_stop(void)
     if (result != ESP_OK) {
         atomic_store(
             &s_reconnect_allowed,
-            true
+            reconnect_was_allowed
         );
 
         wifi_service_unlock();
@@ -1190,10 +1613,41 @@ esp_err_t wifi_service_deinit(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    atomic_store(
-        &s_reconnect_allowed,
-        false
-    );
+    result =
+        wifi_service_scan_lock();
+
+    if (result != ESP_OK) {
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    if (s_scan_info.state ==
+        WIFI_SERVICE_SCAN_STATE_RUNNING) {
+
+        const esp_err_t stop_scan_result =
+            esp_wifi_scan_stop();
+
+        if ((stop_scan_result != ESP_OK) &&
+            (stop_scan_result !=
+            ESP_ERR_WIFI_NOT_STARTED)) {
+
+            wifi_service_scan_unlock();
+            wifi_service_unlock();
+
+            return stop_scan_result;
+        }
+    }
+
+    wifi_service_reset_scan_locked();
+
+    wifi_service_scan_unlock();
+
+    const bool reconnect_was_allowed =
+        atomic_exchange(
+            &s_reconnect_allowed,
+            false
+        );
 
     if (s_started) {
         result =
@@ -1202,7 +1656,7 @@ esp_err_t wifi_service_deinit(void)
         if (result != ESP_OK) {
             atomic_store(
                 &s_reconnect_allowed,
-                true
+                reconnect_was_allowed
             );
 
             wifi_service_unlock();
@@ -1215,6 +1669,11 @@ esp_err_t wifi_service_deinit(void)
 
     atomic_store(
         &s_sta_connected,
+        false
+    );
+
+    atomic_store(
+        &s_reconnect_allowed,
         false
     );
 
@@ -1624,6 +2083,10 @@ static esp_err_t wifi_service_set_interface_enabled_locked(
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (wifi_service_scan_is_running()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     atomic_bool *state =
         station
             ? &s_sta_enabled
@@ -1863,6 +2326,14 @@ esp_err_t wifi_service_set_ap_credentials(
     if (result != ESP_OK) {
         return result;
     }
+    
+    if (s_initialized &&
+        wifi_service_scan_is_running()) {
+
+        wifi_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
 
     if ((strcmp(s_ap_ssid_base, ssid) == 0) &&
         (strcmp(s_ap_password, password) == 0)) {
@@ -2073,6 +2544,14 @@ esp_err_t wifi_service_set_sta_credentials(
         return result;
     }
 
+    if (s_initialized &&
+        wifi_service_scan_is_running()) {
+
+        wifi_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if ((strcmp(s_sta_ssid, ssid) == 0) &&
         (strcmp(s_sta_password, password) == 0)) {
 
@@ -2235,4 +2714,291 @@ restore:
 
         return original_result;
     }
+}
+
+esp_err_t wifi_service_start_scan(void)
+{
+    esp_err_t result =
+        wifi_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!s_initialized ||
+        !s_started) {
+
+        wifi_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    result =
+        wifi_service_scan_lock();
+
+    if (result != ESP_OK) {
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    if (s_scan_info.state ==
+        WIFI_SERVICE_SCAN_STATE_RUNNING) {
+
+        wifi_service_scan_unlock();
+        wifi_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    memset(
+        s_scan_results,
+        0,
+        sizeof(s_scan_results)
+    );
+
+    s_scan_info.state =
+        WIFI_SERVICE_SCAN_STATE_RUNNING;
+
+    s_scan_info.result_count = 0U;
+    s_scan_info.truncated = false;
+    s_scan_info.last_error = ESP_OK;
+
+    s_scan_temporary_sta = false;
+
+    const wifi_mode_t requested_mode =
+        wifi_service_get_mode();
+
+    if (requested_mode == WIFI_MODE_AP) {
+        result =
+            esp_wifi_set_mode(
+                WIFI_MODE_APSTA
+            );
+
+        if (result != ESP_OK) {
+            s_scan_info.state =
+                WIFI_SERVICE_SCAN_STATE_ERROR;
+
+            s_scan_info.last_error = result;
+
+            wifi_service_scan_unlock();
+            wifi_service_unlock();
+
+            return result;
+        }
+
+        s_scan_temporary_sta = true;
+    }
+
+    const wifi_scan_config_t scan_config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0U,
+        .show_hidden = true,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+    };
+
+    result =
+        esp_wifi_scan_start(
+            &scan_config,
+            false
+        );
+
+    if (result != ESP_OK) {
+        if (s_scan_temporary_sta) {
+            const esp_err_t restore_result =
+                esp_wifi_set_mode(
+                    WIFI_MODE_AP
+                );
+
+            if (restore_result != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to restore AP mode: %s",
+                    esp_err_to_name(restore_result)
+                );
+            }
+
+            s_scan_temporary_sta = false;
+        }
+
+        s_scan_info.state =
+            WIFI_SERVICE_SCAN_STATE_ERROR;
+
+        s_scan_info.last_error = result;
+
+        wifi_service_scan_unlock();
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    wifi_service_scan_unlock();
+    wifi_service_unlock();
+
+    ESP_LOGI(
+        TAG,
+        "Asynchronous Wi-Fi scan started"
+    );
+
+    return ESP_OK;
+}
+
+esp_err_t wifi_service_get_scan_info(
+    wifi_service_scan_info_t *info
+)
+{
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        info,
+        0,
+        sizeof(*info)
+    );
+
+    esp_err_t result =
+        wifi_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!s_initialized) {
+        wifi_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    result =
+        wifi_service_scan_lock();
+
+    if (result == ESP_OK) {
+        *info = s_scan_info;
+
+        wifi_service_scan_unlock();
+    }
+
+    wifi_service_unlock();
+
+    return result;
+}
+
+esp_err_t wifi_service_get_scan_results(
+    wifi_service_scan_result_t *results,
+    size_t capacity,
+    size_t *out_count
+)
+{
+    if ((results == NULL) ||
+        (out_count == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *out_count = 0U;
+
+    if (capacity == 0U) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    esp_err_t result =
+        wifi_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!s_initialized) {
+        wifi_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    result =
+        wifi_service_scan_lock();
+
+    if (result != ESP_OK) {
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    if (s_scan_info.state !=
+        WIFI_SERVICE_SCAN_STATE_COMPLETE) {
+
+        wifi_service_scan_unlock();
+        wifi_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    size_t count =
+        s_scan_info.result_count;
+
+    if (count > capacity) {
+        count = capacity;
+    }
+
+    memcpy(
+        results,
+        s_scan_results,
+        count * sizeof(*results)
+    );
+
+    *out_count = count;
+
+    wifi_service_scan_unlock();
+    wifi_service_unlock();
+
+    return ESP_OK;
+}
+
+esp_err_t wifi_service_clear_scan_results(void)
+{
+    esp_err_t result =
+        wifi_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!s_initialized) {
+        wifi_service_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    result =
+        wifi_service_scan_lock();
+
+    if (result != ESP_OK) {
+        wifi_service_unlock();
+
+        return result;
+    }
+
+    memset(
+        s_scan_results,
+        0,
+        sizeof(s_scan_results)
+    );
+
+    s_scan_info.result_count = 0U;
+    s_scan_info.truncated = false;
+
+    if (s_scan_info.state !=
+        WIFI_SERVICE_SCAN_STATE_RUNNING) {
+
+        s_scan_info.state =
+            WIFI_SERVICE_SCAN_STATE_IDLE;
+
+        s_scan_info.last_error = ESP_OK;
+    }
+
+    wifi_service_scan_unlock();
+    wifi_service_unlock();
+
+    return ESP_OK;
 }

@@ -10,17 +10,74 @@
 extern "C" {
 #endif
 
-#define WIFI_SERVICE_AP_SSID_MAX_LENGTH       (33U)
-#define WIFI_SERVICE_AP_PASSWORD_MIN_LENGTH   (8U)
-#define WIFI_SERVICE_AP_PASSWORD_MAX_LENGTH   (64U)
+#define WIFI_SERVICE_AP_SSID_MAX_LENGTH          (33U)
+#define WIFI_SERVICE_AP_PASSWORD_MIN_LENGTH      (8U)
+#define WIFI_SERVICE_AP_PASSWORD_MAX_LENGTH      (64U)
 
-#define WIFI_SERVICE_STA_SSID_MAX_LENGTH       (33U)
-#define WIFI_SERVICE_STA_PASSWORD_MIN_LENGTH   (8U)
-#define WIFI_SERVICE_STA_PASSWORD_MAX_LENGTH   (64U)
+#define WIFI_SERVICE_STA_SSID_MAX_LENGTH         (33U)
+#define WIFI_SERVICE_STA_PASSWORD_MIN_LENGTH     (8U)
+#define WIFI_SERVICE_STA_PASSWORD_MAX_LENGTH     (64U)
 
-#define WIFI_SERVICE_IPV4_ADDRESS_MAX_LENGTH  (16U)
-#define WIFI_SERVICE_MAC_ADDRESS_LENGTH       (6U)
-#define WIFI_SERVICE_MAX_CLIENT_COUNT         (2U)
+#define WIFI_SERVICE_IPV4_ADDRESS_MAX_LENGTH     (16U)
+#define WIFI_SERVICE_MAC_ADDRESS_LENGTH          (6U)
+#define WIFI_SERVICE_MAX_CLIENT_COUNT            (2U)
+
+#define WIFI_SERVICE_SCAN_MAX_RESULT_COUNT       (20U)
+
+/**
+ * @brief Wi-Fi network scan state.
+ */
+typedef enum
+{
+    WIFI_SERVICE_SCAN_STATE_IDLE = 0,
+    WIFI_SERVICE_SCAN_STATE_RUNNING,
+    WIFI_SERVICE_SCAN_STATE_COMPLETE,
+    WIFI_SERVICE_SCAN_STATE_ERROR
+
+} wifi_service_scan_state_t;
+
+/**
+ * @brief Information about a discovered Wi-Fi access point.
+ */
+typedef struct
+{
+    char ssid[
+        WIFI_SERVICE_STA_SSID_MAX_LENGTH
+    ];
+
+    uint8_t bssid[
+        WIFI_SERVICE_MAC_ADDRESS_LENGTH
+    ];
+
+    int8_t rssi;
+    uint8_t channel;
+
+    bool password_required;
+
+} wifi_service_scan_result_t;
+
+/**
+ * @brief Current Wi-Fi scan information.
+ */
+typedef struct
+{
+    wifi_service_scan_state_t state;
+
+    /*
+     * Number of results currently stored in the service cache.
+     */
+    size_t result_count;
+
+    /*
+     * True when additional access points were discovered but could not
+     * be stored because the internal result limit was reached.
+     */
+    bool truncated;
+
+    esp_err_t last_error;
+
+} wifi_service_scan_info_t;
+
 /**
  * @brief Information about a connected Wi-Fi station.
  */
@@ -325,6 +382,77 @@ esp_err_t wifi_service_set_sta_credentials(
     const char *ssid,
     const char *password
 );
+
+/**
+ * @brief Start an asynchronous Wi-Fi network scan.
+ *
+ * The function starts scanning and returns immediately. Scan completion
+ * is handled through WIFI_EVENT_SCAN_DONE. Use
+ * wifi_service_get_scan_info() to monitor the operation and
+ * wifi_service_get_scan_results() to retrieve completed results.
+ *
+ * When only SoftAP is active, the service may temporarily switch to
+ * APSTA mode for the duration of the scan. The previously requested
+ * interface mode must be restored after the scan completes.
+ *
+ * @return ESP_OK when scanning starts, ESP_ERR_INVALID_STATE if the
+ * service is not initialized, Wi-Fi is not running or another scan is
+ * already active, ESP_ERR_NO_MEM if required memory cannot be
+ * allocated, ESP_ERR_TIMEOUT if a required lock cannot be acquired,
+ * otherwise an ESP-IDF error code.
+ */
+esp_err_t wifi_service_start_scan(void);
+
+/**
+ * @brief Get the current Wi-Fi scan state.
+ *
+ * @param[out] info Destination scan information.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if info is NULL,
+ * ESP_ERR_INVALID_STATE if the service is not initialized,
+ * ESP_ERR_TIMEOUT if the service lock cannot be acquired, otherwise an
+ * ESP-IDF error code.
+ */
+esp_err_t wifi_service_get_scan_info(
+    wifi_service_scan_info_t *info
+);
+
+/**
+ * @brief Copy the latest completed Wi-Fi scan results.
+ *
+ * Results are sorted by signal strength, with the strongest access
+ * point first. Multiple access points with the same SSID may appear
+ * when they have different BSSIDs.
+ *
+ * If capacity is smaller than the number of cached results, only the
+ * first capacity entries are copied.
+ *
+ * @param[out] results Destination result array.
+ * @param[in] capacity Number of entries available in results.
+ * @param[out] out_count Number of entries copied.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if an argument is
+ * invalid, ESP_ERR_INVALID_STATE if the service is not initialized or
+ * no completed scan is available, ESP_ERR_INVALID_SIZE if capacity is
+ * zero, ESP_ERR_TIMEOUT if the scan lock cannot be acquired, otherwise
+ * an ESP-IDF error code.
+ */
+esp_err_t wifi_service_get_scan_results(
+    wifi_service_scan_result_t *results,
+    size_t capacity,
+    size_t *out_count
+);
+
+/**
+ * @brief Clear cached Wi-Fi scan results.
+ *
+ * An active scan is not cancelled.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not initialized, ESP_ERR_TIMEOUT if the service lock cannot be
+ * acquired, otherwise an ESP-IDF error code.
+ */
+esp_err_t wifi_service_clear_scan_results(void);
 
 #ifdef __cplusplus
 }
