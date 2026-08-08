@@ -22,6 +22,7 @@
 #include "network_service.h"
 #include "usb_network_service.h"
 #include "web_service.h"
+#include "mdns_service.h"
 #include "internet_service.h"
 #include "crash_dump_service.h"
 
@@ -554,6 +555,22 @@ static void startup_task(
         (void)gui_service_set_boot_progress(
             95U,
             "Web interface ready"
+        );
+    }
+
+    result = start_service(
+        "mDNS",
+        mdns_service_start,
+        SERVICE_OPTIONAL
+    );
+
+    if (result != ESP_OK) {
+        startup_warning = true;
+
+        ESP_LOGW(
+            TAG,
+            "Local mDNS discovery is unavailable: %s",
+            esp_err_to_name(result)
         );
     }
 

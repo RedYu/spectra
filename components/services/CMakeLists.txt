@@ -13,6 +13,7 @@ idf_component_register(
         "wifi_service.c"
         "wifi_credentials_service.c"
         "internet_service.c"
+        "mdns_service.c"
 
     INCLUDE_DIRS
         "include"
@@ -44,6 +45,7 @@ idf_component_register(
         nvs_flash
         espcoredump
         spi_flash
+        mdns
 )
 
 spiffs_create_partition_image(
