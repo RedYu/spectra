@@ -1,14 +1,17 @@
 #include "internet_service.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include "esp_crt_bundle.h"
+#include "esp_event.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_wifi.h"
 
 #include "system_model.h"
 #include "wifi_service.h"
@@ -16,71 +19,204 @@
 #define INTERNET_SERVICE_URL \
     ("https://api.spectra.ridel.com.ua/health")
 
-#define INTERNET_SERVICE_CHECK_INTERVAL_MS  (30000U)
-#define INTERNET_SERVICE_TIMEOUT_MS         (20000U)
-#define INTERNET_SERVICE_TASK_STACK_SIZE    (6144U)
-#define INTERNET_SERVICE_TASK_PRIORITY      (4U)
+#define INTERNET_SERVICE_TIMEOUT_MS      (20000U)
+#define INTERNET_SERVICE_TASK_STACK_SIZE (6144U)
+#define INTERNET_SERVICE_TASK_PRIORITY   (2U)
+
+#define INTERNET_SERVICE_NOTIFY_CHECK \
+    (1UL << 0U)
+
+#define INTERNET_SERVICE_NOTIFY_UNAVAILABLE \
+    (1UL << 1U)
+
+#define INTERNET_SERVICE_NOTIFY_STOP \
+    (1UL << 2U)
 
 static const char *TAG =
     "internet_service";
 
 static TaskHandle_t s_task = NULL;
 
-static bool internet_service_is_network_ready(void)
+static esp_event_handler_instance_t
+    s_ip_event_instance = NULL;
+
+static esp_event_handler_instance_t
+    s_wifi_event_instance = NULL;
+
+static bool internet_service_network_ready(void)
 {
-    wifi_service_info_t wifi_info = {0};
+    wifi_service_info_t info = {0};
 
     const esp_err_t result =
         wifi_service_get_info(
-            &wifi_info
+            &info
         );
 
     if (result != ESP_OK) {
         return false;
     }
 
-    return wifi_info.sta_connected &&
-           (wifi_info.sta_ip_address[0] != '\0') &&
-           (strcmp(
-                wifi_info.sta_ip_address,
-                "0.0.0.0"
-            ) != 0);
+    if (!info.sta_enabled ||
+        !info.sta_connected) {
+
+        return false;
+    }
+
+    if ((info.sta_ip_address[0] == '\0') ||
+        (strcmp(
+            info.sta_ip_address,
+            "0.0.0.0"
+        ) == 0)) {
+
+        return false;
+    }
+
+    return true;
 }
 
-static bool internet_service_check(
-    esp_http_client_handle_t client
-)
+static bool internet_service_check(void)
 {
+    const esp_http_client_config_t config = {
+        .url = INTERNET_SERVICE_URL,
+        .method = HTTP_METHOD_GET,
+
+        .timeout_ms =
+            INTERNET_SERVICE_TIMEOUT_MS,
+
+        /*
+         * Verify the backend certificate using the ESP-IDF trusted
+         * root certificate bundle.
+         */
+        .crt_bundle_attach =
+            esp_crt_bundle_attach,
+
+        .tls_version =
+            ESP_HTTP_CLIENT_TLS_VER_TLS_1_2,
+
+        /*
+         * Release the TLS connection after the check to preserve heap
+         * memory while the service is idle.
+         */
+        .keep_alive_enable = false,
+    };
+
+    esp_http_client_handle_t client =
+        esp_http_client_init(
+            &config
+        );
+
     if (client == NULL) {
+        ESP_LOGW(
+            TAG,
+            "Failed to create HTTP client"
+        );
+
         return false;
     }
 
     const esp_err_t result =
-        esp_http_client_perform(client);
+        esp_http_client_perform(
+            client
+        );
 
-    if (result != ESP_OK) {
-        /*
-         * Discard a failed persistent connection. The next perform()
-         * call will establish a new connection.
-         */
-        (void)esp_http_client_close(client);
+    bool available = false;
 
+    if (result == ESP_OK) {
+        const int status_code =
+            esp_http_client_get_status_code(
+                client
+            );
+
+        available =
+            (status_code >= 200) &&
+            (status_code < 300);
+
+        if (!available) {
+            ESP_LOGD(
+                TAG,
+                "Backend returned HTTP status %d",
+                status_code
+            );
+        }
+    } else {
         ESP_LOGD(
             TAG,
             "Backend availability check failed: %s",
             esp_err_to_name(result)
         );
-
-        return false;
     }
 
-    const int status_code =
-        esp_http_client_get_status_code(
-            client
+    esp_http_client_cleanup(
+        client
+    );
+
+    return available;
+}
+
+static void internet_service_event_handler(
+    void *argument,
+    esp_event_base_t event_base,
+    int32_t event_id,
+    void *event_data
+)
+{
+    (void)argument;
+    (void)event_data;
+
+    TaskHandle_t task =
+        s_task;
+
+    if (task == NULL) {
+        return;
+    }
+
+    if ((event_base == IP_EVENT) &&
+        (event_id == IP_EVENT_STA_GOT_IP)) {
+
+        (void)xTaskNotify(
+            task,
+            INTERNET_SERVICE_NOTIFY_CHECK,
+            eSetBits
         );
 
-    return (status_code >= 200) &&
-           (status_code < 300);
+        return;
+    }
+
+    if (((event_base == IP_EVENT) &&
+         (event_id == IP_EVENT_STA_LOST_IP)) ||
+        ((event_base == WIFI_EVENT) &&
+         (event_id ==
+          WIFI_EVENT_STA_DISCONNECTED))) {
+
+        (void)xTaskNotify(
+            task,
+            INTERNET_SERVICE_NOTIFY_UNAVAILABLE,
+            eSetBits
+        );
+    }
+}
+
+static void internet_service_unregister_handlers(void)
+{
+    if (s_wifi_event_instance != NULL) {
+        (void)esp_event_handler_instance_unregister(
+            WIFI_EVENT,
+            WIFI_EVENT_STA_DISCONNECTED,
+            s_wifi_event_instance
+        );
+
+        s_wifi_event_instance = NULL;
+    }
+
+    if (s_ip_event_instance != NULL) {
+        (void)esp_event_handler_instance_unregister(
+            IP_EVENT,
+            ESP_EVENT_ANY_ID,
+            s_ip_event_instance
+        );
+
+        s_ip_event_instance = NULL;
+    }
 }
 
 static void internet_service_task(
@@ -89,84 +225,69 @@ static void internet_service_task(
 {
     (void)argument;
 
-    const esp_http_client_config_t config = {
-        .url = INTERNET_SERVICE_URL,
-        .method = HTTP_METHOD_GET,
-
-        .timeout_ms =
-            INTERNET_SERVICE_TIMEOUT_MS,
-
-        .crt_bundle_attach =
-            esp_crt_bundle_attach,
-
-        .tls_version =
-            ESP_HTTP_CLIENT_TLS_VER_TLS_1_2,
-
-        .keep_alive_enable = true,
-
-        .keep_alive_idle = 10,
-        .keep_alive_interval = 5,
-        .keep_alive_count = 3,
-    };
-
-    esp_http_client_handle_t client =
-        esp_http_client_init(
-            &config
-        );
-
     bool previous_available = false;
     bool availability_known = false;
 
-    if (client == NULL) {
-        ESP_LOGE(
-            TAG,
-            "Failed to create HTTP client"
-        );
-
-        (void)system_model_set_internet_available(
-            false
-        );
-
-        s_task = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
-
     while (true) {
-        bool available = false;
+        uint32_t notification = 0U;
 
-        if (internet_service_is_network_ready()) {
-            available =
-                internet_service_check(
-                    client
-                );
-        } else {
-            /*
-             * Release a persistent connection when the Station
-             * interface is no longer available. A new connection will
-             * be established after the Station reconnects.
-             */
-            (void)esp_http_client_close(
-                client
+        const BaseType_t notified =
+            xTaskNotifyWait(
+                0U,
+                UINT32_MAX,
+                &notification,
+                portMAX_DELAY
             );
+
+        if (notified != pdTRUE) {
+            continue;
         }
 
-        const esp_err_t model_result =
+        if ((notification &
+             INTERNET_SERVICE_NOTIFY_STOP) != 0U) {
+
+            break;
+        }
+
+        bool update_required = false;
+        bool available =
+            previous_available;
+
+        if ((notification &
+             INTERNET_SERVICE_NOTIFY_UNAVAILABLE) != 0U) {
+
+            available = false;
+            update_required = true;
+        }
+
+        if ((notification &
+             INTERNET_SERVICE_NOTIFY_CHECK) != 0U) {
+
+            available =
+                internet_service_network_ready()
+                    ? internet_service_check()
+                    : false;
+
+            update_required = true;
+        }
+
+        if (!update_required) {
+            continue;
+        }
+
+        const esp_err_t result =
             system_model_set_internet_available(
                 available
             );
 
-        if (model_result != ESP_OK) {
+        if (result != ESP_OK) {
             ESP_LOGW(
                 TAG,
                 "Failed to update Internet state: %s",
-                esp_err_to_name(model_result)
+                esp_err_to_name(result)
             );
         }
 
-        /*
-         * Log the initial result and all subsequent state transitions.
-         */
         if (!availability_known ||
             (available != previous_available)) {
 
@@ -184,25 +305,13 @@ static void internet_service_task(
             availability_known =
                 true;
         }
-
-        if (ulTaskNotifyTake(
-                pdTRUE,
-                pdMS_TO_TICKS(
-                    INTERNET_SERVICE_CHECK_INTERVAL_MS
-                )
-            ) > 0U) {
-
-            break;
-        }
     }
 
     (void)system_model_set_internet_available(
         false
     );
 
-    (void)esp_http_client_cleanup(
-        client
-    );
+    internet_service_unregister_handlers();
 
     s_task = NULL;
 
@@ -211,20 +320,56 @@ static void internet_service_task(
 
 esp_err_t internet_service_start(void)
 {
-    if (s_task != NULL) {
+    if ((s_task != NULL) ||
+        (s_ip_event_instance != NULL) ||
+        (s_wifi_event_instance != NULL)) {
+
         return ESP_ERR_INVALID_STATE;
     }
 
-    const esp_err_t model_result =
+    esp_err_t result =
         system_model_set_internet_available(
             false
         );
 
-    if (model_result != ESP_OK) {
-        return model_result;
+    if (result != ESP_OK) {
+        return result;
     }
 
-    const BaseType_t result =
+    /*
+     * Register handlers before creating the task. If a network event
+     * occurs before the task exists, the initial state check below
+     * will recover the current state.
+     */
+    result =
+        esp_event_handler_instance_register(
+            IP_EVENT,
+            ESP_EVENT_ANY_ID,
+            internet_service_event_handler,
+            NULL,
+            &s_ip_event_instance
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        esp_event_handler_instance_register(
+            WIFI_EVENT,
+            WIFI_EVENT_STA_DISCONNECTED,
+            internet_service_event_handler,
+            NULL,
+            &s_wifi_event_instance
+        );
+
+    if (result != ESP_OK) {
+        internet_service_unregister_handlers();
+
+        return result;
+    }
+
+    const BaseType_t task_result =
         xTaskCreate(
             internet_service_task,
             "internet_service",
@@ -234,9 +379,24 @@ esp_err_t internet_service_start(void)
             &s_task
         );
 
-    if (result != pdPASS) {
+    if (task_result != pdPASS) {
         s_task = NULL;
+
+        internet_service_unregister_handlers();
+
         return ESP_ERR_NO_MEM;
+    }
+
+    /*
+     * Handle the case where the Station obtained an address before
+     * this service was started.
+     */
+    if (internet_service_network_ready()) {
+        (void)xTaskNotify(
+            s_task,
+            INTERNET_SERVICE_NOTIFY_CHECK,
+            eSetBits
+        );
     }
 
     return ESP_OK;
@@ -244,9 +404,14 @@ esp_err_t internet_service_start(void)
 
 void internet_service_stop(void)
 {
-    if (s_task != NULL) {
-        xTaskNotifyGive(
-            s_task
+    TaskHandle_t task =
+        s_task;
+
+    if (task != NULL) {
+        (void)xTaskNotify(
+            task,
+            INTERNET_SERVICE_NOTIFY_STOP,
+            eSetBits
         );
     }
 }

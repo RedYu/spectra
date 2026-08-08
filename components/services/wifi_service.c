@@ -143,6 +143,8 @@ static esp_err_t wifi_service_apply_mode(void);
 
 static esp_err_t wifi_service_configure_sta(void);
 
+static esp_err_t wifi_service_start_dhcp_server(void);
+
 static void wifi_service_ip_event_handler(
     void *argument,
     esp_event_base_t event_base,
@@ -612,14 +614,24 @@ static void wifi_service_event_handler(
         return;
     }
 
-    if ((event_id == WIFI_EVENT_AP_START) ||
-        (event_id == WIFI_EVENT_STA_START)) {
+    /*
+     * When SoftAP is enabled, wait specifically for AP_START because
+     * its DHCP server is checked immediately after this notification.
+     * In Station-only mode, STA_START is sufficient.
+     */
+    const bool startup_completed =
+        (atomic_load(&s_ap_enabled) &&
+         (event_id == WIFI_EVENT_AP_START)) ||
+        (!atomic_load(&s_ap_enabled) &&
+         atomic_load(&s_sta_enabled) &&
+         (event_id == WIFI_EVENT_STA_START));
 
-        if (s_started_semaphore != NULL) {
-            (void)xSemaphoreGive(
-                s_started_semaphore
-            );
-        }
+    if (startup_completed &&
+        (s_started_semaphore != NULL)) {
+
+        (void)xSemaphoreGive(
+            s_started_semaphore
+        );
     }
 
     if (event_id == WIFI_EVENT_STA_START) {
@@ -641,13 +653,33 @@ static void wifi_service_event_handler(
     }
 
     if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        const wifi_event_sta_disconnected_t *event =
+            event_data;
+
         atomic_store(
             &s_sta_connected,
             false
         );
 
+        if (event != NULL) {
+            ESP_LOGW(
+                TAG,
+                "Station disconnected: "
+                "reason=%u, RSSI=%d, BSSID=" MACSTR,
+                (unsigned int)event->reason,
+                (int)event->rssi,
+                MAC2STR(event->bssid)
+            );
+        } else {
+            ESP_LOGW(
+                TAG,
+                "Station disconnected without event data"
+            );
+        }
+
         if (atomic_load(&s_sta_enabled) &&
             atomic_load(&s_reconnect_allowed)) {
+
             const esp_err_t result =
                 esp_wifi_connect();
 
@@ -881,9 +913,62 @@ static esp_err_t wifi_service_configure_ip(void)
         return result;
     }
 
-    return esp_netif_dhcps_start(
-        s_ap_netif
-    );
+    return ESP_OK;
+}
+
+static esp_err_t wifi_service_start_dhcp_server(void)
+{
+    if (s_ap_netif == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_netif_dhcp_status_t status =
+        ESP_NETIF_DHCP_INIT;
+
+    esp_err_t result =
+        esp_netif_dhcps_get_status(
+            s_ap_netif,
+            &status
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to get DHCP server state: %s (0x%04X)",
+            esp_err_to_name(result),
+            (unsigned int)result
+        );
+
+        return result;
+    }
+
+    if (status == ESP_NETIF_DHCP_STARTED) {
+        return ESP_OK;
+    }
+
+    result =
+        esp_netif_dhcps_start(
+            s_ap_netif
+        );
+
+    if (result ==
+        ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+
+        return ESP_OK;
+    }
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to start DHCP server: %s (0x%04X)",
+            esp_err_to_name(result),
+            (unsigned int)result
+        );
+
+        return result;
+    }
+
+    return ESP_OK;
 }
 
 static esp_err_t wifi_service_configure_ap(void)
@@ -992,10 +1077,13 @@ static esp_err_t wifi_service_configure_sta(void)
             s_sta_password,
             password_length
         );
-    }
 
-    config.sta.threshold.authmode =
-        WIFI_AUTH_OPEN;
+        config.sta.threshold.authmode =
+            WIFI_AUTH_WPA2_PSK;
+    } else {
+        config.sta.threshold.authmode =
+            WIFI_AUTH_OPEN;
+    }
 
     config.sta.pmf_cfg.capable = true;
     config.sta.pmf_cfg.required = false;
@@ -1531,48 +1619,39 @@ esp_err_t wifi_service_start(void)
     }
 
     /*
-     * The DHCP server is relevant only when SoftAP is enabled.
+     * AP_START confirms that the SoftAP network interface is ready.
+     * Start DHCP explicitly if the default ESP-NETIF handler has not
+     * already started it.
      */
     if (atomic_load(&s_ap_enabled)) {
-        esp_netif_dhcp_status_t dhcp_status =
-            ESP_NETIF_DHCP_INIT;
-
         result =
-            esp_netif_dhcps_get_status(
-                s_ap_netif,
-                &dhcp_status
-            );
+            wifi_service_start_dhcp_server();
 
         if (result != ESP_OK) {
             atomic_store(
                 &s_reconnect_allowed,
                 false
             );
-            (void)esp_wifi_stop();
+
+            const esp_err_t stop_result =
+                esp_wifi_stop();
+
+            if (stop_result != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to stop Wi-Fi after DHCP error: %s",
+                    esp_err_to_name(stop_result)
+                );
+            }
+
+            atomic_store(
+                &s_sta_connected,
+                false
+            );
 
             wifi_service_unlock();
 
             return result;
-        }
-
-        if (dhcp_status !=
-            ESP_NETIF_DHCP_STARTED) {
-
-            ESP_LOGE(
-                TAG,
-                "Wi-Fi DHCP server did not start"
-            );
-
-            atomic_store(
-                &s_reconnect_allowed,
-                false
-            );
-
-            (void)esp_wifi_stop();
-
-            wifi_service_unlock();
-
-            return ESP_FAIL;
         }
     }
 

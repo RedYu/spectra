@@ -187,6 +187,11 @@ esp_err_t logging_service_init(void)
         ESP_LOG_WARN
     );
 
+    esp_log_level_set(
+        "esp-x509-crt-bundle",
+        ESP_LOG_WARN
+    );
+
     const BaseType_t task_result = xTaskCreate(
         logging_service_task,
         LOGGING_TASK_NAME,

@@ -1,36 +1,29 @@
 {
     "schema_version": 1,
-
     "device": {
         "target": "spectra",
         "name": "Modern Automotive CAN Analyzer"
     },
-
     "display": {
         "brightness": 80
     },
-
     "logging": {
         "sd_enabled": true
     },
-
     "ui": {
         "animations_enabled": false
     },
-
     "network": {
         "wifi_ap": {
             "enabled": true,
             "ssid": "Spectra",
             "password": "spectra123"
         },
-
         "wifi_sta": {
-            "enabled": false,
-            "ssid": "",
-            "credential_id": ""
+            "enabled": true,
+            "ssid": "PLAY_Swiatlowod_49A8",
+            "credential_id": "626eb54c164270d2"
         },
-
         "usb_rndis": {
             "enabled": false
         }
