@@ -11,6 +11,7 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
+#include "esp_netif_ip_addr.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -705,18 +706,73 @@ static void wifi_service_ip_event_handler(
         const ip_event_got_ip_t *event =
             event_data;
 
-        atomic_store(
-            &s_sta_connected,
-            true
-        );
-
         if (event != NULL) {
             ESP_LOGI(
                 TAG,
                 "Station connected, IP=" IPSTR,
-                IP2STR(&event->ip_info.ip)
+                IP2STR(
+                    &event->ip_info.ip
+                )
             );
         }
+
+        bool network_ready = false;
+
+        if (s_sta_netif != NULL) {
+            const esp_err_t default_result =
+                esp_netif_set_default_netif(
+                    s_sta_netif
+                );
+
+            if (default_result != ESP_OK) {
+                ESP_LOGW(
+                    TAG,
+                    "Failed to select Station as default interface: %s",
+                    esp_err_to_name(default_result)
+                );
+            } else {
+                network_ready = true;
+            }
+
+            esp_netif_dns_info_t dns_info = {0};
+
+            const esp_err_t dns_result =
+                esp_netif_get_dns_info(
+                    s_sta_netif,
+                    ESP_NETIF_DNS_MAIN,
+                    &dns_info
+                );
+
+            if ((dns_result == ESP_OK) &&
+                (dns_info.ip.type ==
+                 ESP_IPADDR_TYPE_V4) &&
+                (dns_info.ip.u_addr.ip4.addr != 0U)) {
+
+                ESP_LOGI(
+                    TAG,
+                    "Station DNS: " IPSTR,
+                    IP2STR(
+                        &dns_info.ip.u_addr.ip4
+                    )
+                );
+            } else if (dns_result != ESP_OK) {
+                ESP_LOGW(
+                    TAG,
+                    "Failed to get Station DNS: %s",
+                    esp_err_to_name(dns_result)
+                );
+            } else {
+                ESP_LOGW(
+                    TAG,
+                    "Station did not receive a valid IPv4 DNS server"
+                );
+            }
+        }
+
+        atomic_store(
+            &s_sta_connected,
+            network_ready
+        );
 
         return;
     }
@@ -1166,6 +1222,37 @@ esp_err_t wifi_service_init(void)
         return ESP_ERR_NO_MEM;
     }
 
+    esp_netif_dns_info_t fallback_dns = {
+        .ip = {
+            .u_addr = {
+                .ip4 = {
+                    .addr = ESP_IP4TOADDR(
+                        1U,
+                        1U,
+                        1U,
+                        1U
+                    ),
+                },
+            },
+            .type = ESP_IPADDR_TYPE_V4,
+        },
+    };
+
+    const esp_err_t dns_result =
+        esp_netif_set_dns_info(
+            s_sta_netif,
+            ESP_NETIF_DNS_FALLBACK,
+            &fallback_dns
+        );
+
+    if (dns_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to configure fallback DNS: %s",
+            esp_err_to_name(dns_result)
+        );
+    }
+
     wifi_init_config_t wifi_config =
         WIFI_INIT_CONFIG_DEFAULT();
 
@@ -1400,6 +1487,19 @@ esp_err_t wifi_service_start(void)
         wifi_service_unlock();
 
         return result;
+    }
+
+    const esp_err_t ps_result =
+        esp_wifi_set_ps(
+            WIFI_PS_NONE
+        );
+
+    if (ps_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to disable Wi-Fi power saving: %s",
+            esp_err_to_name(ps_result)
+        );
     }
 
     /*

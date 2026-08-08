@@ -22,6 +22,7 @@
 #include "network_service.h"
 #include "usb_network_service.h"
 #include "web_service.h"
+#include "internet_service.h"
 #include "crash_dump_service.h"
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
@@ -553,6 +554,31 @@ static void startup_task(
         (void)gui_service_set_boot_progress(
             95U,
             "Web interface ready"
+        );
+    }
+
+    (void)gui_service_set_boot_progress(
+        97U,
+        "Starting connectivity monitor"
+    );
+
+    result = start_service(
+        "Internet connectivity",
+        internet_service_start,
+        SERVICE_OPTIONAL
+    );
+
+    if (result != ESP_OK) {
+        startup_warning = true;
+
+        (void)gui_service_set_boot_progress(
+            97U,
+            "Connectivity monitor unavailable"
+        );
+    } else {
+        (void)gui_service_set_boot_progress(
+            97U,
+            "Connectivity monitor ready"
         );
     }
 

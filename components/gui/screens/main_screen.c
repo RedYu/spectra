@@ -397,24 +397,9 @@ static void main_screen_update(void)
             wifi_info.client_count
         );
 
-        /*
-         * Temporarily treat an established Station connection with
-         * an assigned IPv4 address as Internet availability.
-         *
-         * TODO: Replace this condition with the result of a periodic
-         * connectivity check against the application backend.
-         */
-        const bool internet_available =
-            wifi_info.sta_connected &&
-            (wifi_info.sta_ip_address[0] != '\0') &&
-            (strcmp(
-                wifi_info.sta_ip_address,
-                "0.0.0.0"
-            ) != 0);
-
         toolbar_set_internet_available(
             &s_context.toolbar,
-            internet_available
+            model.internet_available
         );
     } else {
         toolbar_set_wifi_status(

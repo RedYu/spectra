@@ -195,6 +195,25 @@ esp_err_t system_model_set_ota_available(
     return ESP_OK;
 }
 
+esp_err_t system_model_set_internet_available(
+    bool available
+)
+{
+    const esp_err_t result =
+        system_model_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    s_model.internet_available =
+        available;
+
+    system_model_unlock();
+
+    return ESP_OK;
+}
+
 esp_err_t system_model_set_runtime(
     uint32_t uptime_sec,
     uint32_t free_heap,

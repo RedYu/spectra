@@ -33,6 +33,8 @@ typedef struct
     bool sd_card_mounted;
     bool ota_available;
 
+    bool internet_available;
+
 } system_model_t;
 
 /**
@@ -108,6 +110,22 @@ esp_err_t system_model_set_sd_card_mounted(
  * not initialized, or ESP_ERR_TIMEOUT if the lock cannot be acquired.
  */
 esp_err_t system_model_set_ota_available(
+    bool available
+);
+
+/**
+ * @brief Set the confirmed Internet availability state.
+ *
+ * Internet availability means that communication with the configured
+ * Spectra backend has completed successfully. A local Wi-Fi connection
+ * alone does not make this state available.
+ *
+ * @param[in] available True when the Spectra backend is reachable.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the model is
+ * not initialized, or ESP_ERR_TIMEOUT if the lock cannot be acquired.
+ */
+esp_err_t system_model_set_internet_available(
     bool available
 );
 

@@ -12,6 +12,7 @@ idf_component_register(
         "network_service.c"
         "wifi_service.c"
         "wifi_credentials_service.c"
+        "internet_service.c"
 
     INCLUDE_DIRS
         "include"
@@ -36,6 +37,8 @@ idf_component_register(
         lwip
         dns_server
         esp_http_server
+        esp_http_client
+        mbedtls
         esp_wifi
         esp_event
         nvs_flash
