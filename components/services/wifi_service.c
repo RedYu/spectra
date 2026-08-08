@@ -12,6 +12,7 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 #include "esp_netif_ip_addr.h"
+#include "esp_timer.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -45,6 +46,8 @@
 #define WIFI_SERVICE_AP_SSID_BASE_MAX_LENGTH \
     (WIFI_SERVICE_AP_SSID_MAX_LENGTH -      \
      WIFI_SERVICE_AP_SSID_SUFFIX_LENGTH - 1U)
+
+#define WIFI_SERVICE_RECONNECT_DELAY_MS  (5000U)
 
 static const char *TAG = "wifi_service";
 
@@ -82,6 +85,9 @@ static esp_event_handler_instance_t
 
 static esp_event_handler_instance_t
     s_ip_event_instance = NULL;
+
+static esp_timer_handle_t
+    s_reconnect_timer = NULL;
 
 static bool s_initialized = false;
 static bool s_started = false;
@@ -156,6 +162,14 @@ static esp_err_t wifi_service_set_interface_enabled_locked(
     bool station,
     bool enabled
 );
+
+static void wifi_service_reconnect_timer_cb(
+    void *argument
+);
+
+static esp_err_t wifi_service_schedule_reconnect(void);
+
+static void wifi_service_cancel_reconnect(void);
 
 static esp_err_t wifi_service_lock(void)
 {
@@ -595,6 +609,86 @@ static esp_err_t wifi_service_apply_mode(void)
     );
 }
 
+static void wifi_service_reconnect_timer_cb(
+    void *argument
+)
+{
+    (void)argument;
+
+    if (!atomic_load(&s_sta_enabled) ||
+        !atomic_load(&s_reconnect_allowed) ||
+        atomic_load(&s_sta_connected)) {
+
+        return;
+    }
+
+    const esp_err_t result =
+        esp_wifi_connect();
+
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Delayed Station reconnect failed: %s",
+            esp_err_to_name(result)
+        );
+    }
+}
+
+static esp_err_t wifi_service_schedule_reconnect(void)
+{
+    if (s_reconnect_timer == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /*
+     * Restart the one-shot timer so repeated disconnect events do not
+     * produce multiple simultaneous connection attempts.
+     */
+    (void)esp_timer_stop(
+        s_reconnect_timer
+    );
+
+    const esp_err_t result =
+        esp_timer_start_once(
+            s_reconnect_timer,
+            (uint64_t)
+                WIFI_SERVICE_RECONNECT_DELAY_MS *
+                1000ULL
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to schedule Station reconnect: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    return result;
+}
+
+static void wifi_service_cancel_reconnect(void)
+{
+    if (s_reconnect_timer == NULL) {
+        return;
+    }
+
+    const esp_err_t result =
+        esp_timer_stop(
+            s_reconnect_timer
+        );
+
+    if ((result != ESP_OK) &&
+        (result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGW(
+            TAG,
+            "Failed to cancel Station reconnect: %s",
+            esp_err_to_name(result)
+        );
+    }
+}
+
 static void wifi_service_event_handler(
     void *argument,
     esp_event_base_t event_base,
@@ -680,16 +774,7 @@ static void wifi_service_event_handler(
         if (atomic_load(&s_sta_enabled) &&
             atomic_load(&s_reconnect_allowed)) {
 
-            const esp_err_t result =
-                esp_wifi_connect();
-
-            if (result != ESP_OK) {
-                ESP_LOGW(
-                    TAG,
-                    "Failed to reconnect Station: %s",
-                    esp_err_to_name(result)
-                );
-            }
+            (void)wifi_service_schedule_reconnect();
         }
 
         return;
@@ -735,6 +820,8 @@ static void wifi_service_ip_event_handler(
     (void)event_base;
 
     if (event_id == IP_EVENT_STA_GOT_IP) {
+        wifi_service_cancel_reconnect();
+
         const ip_event_got_ip_t *event =
             event_data;
 
@@ -1160,6 +1247,27 @@ static void wifi_service_cleanup(void)
         s_wifi_event_instance = NULL;
     }
 
+    if (s_reconnect_timer != NULL) {
+        (void)esp_timer_stop(
+            s_reconnect_timer
+        );
+
+        const esp_err_t result =
+            esp_timer_delete(
+                s_reconnect_timer
+            );
+
+        if (result == ESP_OK) {
+            s_reconnect_timer = NULL;
+        } else {
+            ESP_LOGW(
+                TAG,
+                "Failed to delete reconnect timer: %s",
+                esp_err_to_name(result)
+            );
+        }
+    }
+
     if (s_started_semaphore != NULL) {
         vSemaphoreDelete(
             s_started_semaphore
@@ -1278,6 +1386,35 @@ esp_err_t wifi_service_init(void)
     if (s_started_semaphore == NULL) {
         wifi_service_unlock();
         return ESP_ERR_NO_MEM;
+    }
+
+    if (s_reconnect_timer == NULL) {
+        const esp_timer_create_args_t timer_args = {
+            .callback =
+                wifi_service_reconnect_timer_cb,
+
+            .arg = NULL,
+            .dispatch_method =
+                ESP_TIMER_TASK,
+
+            .name =
+                "wifi_reconnect",
+
+            .skip_unhandled_events = true,
+        };
+
+        result =
+            esp_timer_create(
+                &timer_args,
+                &s_reconnect_timer
+            );
+
+        if (result != ESP_OK) {
+            wifi_service_cleanup();
+            wifi_service_unlock();
+
+            return result;
+        }
     }
 
     result =
@@ -1746,6 +1883,8 @@ esp_err_t wifi_service_stop(void)
             false
         );
 
+    wifi_service_cancel_reconnect();
+
     result =
         esp_wifi_stop();
 
@@ -1827,6 +1966,8 @@ esp_err_t wifi_service_deinit(void)
             &s_reconnect_allowed,
             false
         );
+
+    wifi_service_cancel_reconnect();
 
     if (s_started) {
         result =
@@ -2293,6 +2434,8 @@ static esp_err_t wifi_service_set_interface_enabled_locked(
             &s_reconnect_allowed,
             false
         );
+
+        wifi_service_cancel_reconnect();
     }
 
     /*
@@ -2365,6 +2508,13 @@ static esp_err_t wifi_service_set_interface_enabled_locked(
             atomic_load(&s_sta_enabled)
         );
 
+        if (was_started &&
+            atomic_load(&s_sta_enabled) &&
+            !atomic_load(&s_sta_connected)) {
+
+            (void)wifi_service_schedule_reconnect();
+        }
+
         return result;
     }
 
@@ -2374,8 +2524,22 @@ static esp_err_t wifi_service_set_interface_enabled_locked(
         atomic_load(&s_sta_enabled)
     );
 
+    /*
+     * A mode transition may occur before STA_START observes the restored
+     * reconnect state. Ensure that a disconnected enabled Station gets
+     * another connection attempt.
+     */
+    if (s_started &&
+        atomic_load(&s_sta_enabled) &&
+        !atomic_load(&s_sta_connected)) {
+
+        (void)wifi_service_schedule_reconnect();
+    }
+
     if (station &&
         !enabled) {
+
+        wifi_service_cancel_reconnect();
 
         atomic_store(
             &s_sta_connected,
@@ -2384,9 +2548,8 @@ static esp_err_t wifi_service_set_interface_enabled_locked(
     }
 
     /*
-     * WIFI_EVENT_STA_START initiates the Station connection after the
-     * driver starts. Do not call esp_wifi_connect() here as well because
-     * that would race with the event handler.
+     * The delayed reconnect also covers mode transitions where STA_START
+     * occurred before reconnect handling was enabled.
      */
 
     ESP_LOGI(
