@@ -29,6 +29,10 @@
 #define TOOLBAR_STATUS_COLOR_WARNING   0xF4B400
 #define TOOLBAR_STATUS_COLOR_CRITICAL  0xE05252
 
+#define TOOLBAR_INTERNET_INDICATOR_SIZE   (10)
+#define TOOLBAR_INTERNET_INDICATOR_GAP    (8)
+#define TOOLBAR_INTERNET_COLOR_AVAILABLE  (0x39C56B)
+
 typedef struct
 {
     lv_obj_t *image;
@@ -530,10 +534,84 @@ toolbar_t toolbar_create(
     }
 
     /*
-     * Toolbar title.
+     * Title container with an optional Internet connectivity
+     * indicator.
      */
+    lv_obj_t *title_container =
+        lv_obj_create(toolbar);
+
+    if (title_container == NULL) {
+        lv_obj_delete(toolbar);
+
+        toolbar_t empty = {0};
+        return empty;
+    }
+
+    lv_obj_set_size(
+        title_container,
+        LV_SIZE_CONTENT,
+        LV_SIZE_CONTENT
+    );
+
+    lv_obj_align(
+        title_container,
+        LV_ALIGN_LEFT_MID,
+        config->left_icon != NULL
+            ? 60
+            : 12,
+        0
+    );
+
+    lv_obj_remove_flag(
+        title_container,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    lv_obj_set_style_border_width(
+        title_container,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        title_container,
+        LV_OPA_TRANSP,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_all(
+        title_container,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_column(
+        title_container,
+        TOOLBAR_INTERNET_INDICATOR_GAP,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_flex_flow(
+        title_container,
+        LV_FLEX_FLOW_ROW
+    );
+
+    lv_obj_set_flex_align(
+        title_container,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_CENTER,
+        LV_FLEX_ALIGN_CENTER
+    );
+
     lv_obj_t *title =
-        lv_label_create(toolbar);
+        lv_label_create(title_container);
+
+    if (title == NULL) {
+        lv_obj_delete(toolbar);
+
+        toolbar_t empty = {0};
+        return empty;
+    }
 
     lv_label_set_text(
         title,
@@ -554,14 +632,69 @@ toolbar_t toolbar_create(
         LV_PART_MAIN
     );
 
-    lv_obj_align(
-        title,
-        LV_ALIGN_LEFT_MID,
-        config->left_icon != NULL
-            ? 60
-            : 12,
-        0
-    );
+    if (config->show_internet_status) {
+        result.internet_indicator =
+            lv_obj_create(title_container);
+
+        if (result.internet_indicator != NULL) {
+            lv_obj_set_size(
+                result.internet_indicator,
+                TOOLBAR_INTERNET_INDICATOR_SIZE,
+                TOOLBAR_INTERNET_INDICATOR_SIZE
+            );
+
+            lv_obj_set_style_radius(
+                result.internet_indicator,
+                LV_RADIUS_CIRCLE,
+                LV_PART_MAIN
+            );
+
+            lv_obj_set_style_bg_color(
+                result.internet_indicator,
+                lv_color_hex(
+                    TOOLBAR_INTERNET_COLOR_AVAILABLE
+                ),
+                LV_PART_MAIN
+            );
+
+            lv_obj_set_style_bg_opa(
+                result.internet_indicator,
+                LV_OPA_COVER,
+                LV_PART_MAIN
+            );
+
+            lv_obj_set_style_border_width(
+                result.internet_indicator,
+                0,
+                LV_PART_MAIN
+            );
+
+            lv_obj_set_style_pad_all(
+                result.internet_indicator,
+                0,
+                LV_PART_MAIN
+            );
+
+            lv_obj_remove_flag(
+                result.internet_indicator,
+                LV_OBJ_FLAG_SCROLLABLE
+            );
+
+            lv_obj_remove_flag(
+                result.internet_indicator,
+                LV_OBJ_FLAG_CLICKABLE
+            );
+
+            /*
+             * Keep the indicator hidden until Internet access has
+             * actually been confirmed.
+             */
+            lv_obj_add_flag(
+                result.internet_indicator,
+                LV_OBJ_FLAG_HIDDEN
+            );
+        }
+    }
 
     /*
      * Right-side status container.
@@ -881,4 +1014,28 @@ void toolbar_set_cpu_usage(
         toolbar->cpu_label,
         color
     );
+}
+
+void toolbar_set_internet_available(
+    toolbar_t *toolbar,
+    bool available
+)
+{
+    if ((toolbar == NULL) ||
+        (toolbar->internet_indicator == NULL)) {
+
+        return;
+    }
+
+    if (available) {
+        lv_obj_remove_flag(
+            toolbar->internet_indicator,
+            LV_OBJ_FLAG_HIDDEN
+        );
+    } else {
+        lv_obj_add_flag(
+            toolbar->internet_indicator,
+            LV_OBJ_FLAG_HIDDEN
+        );
+    }
 }
