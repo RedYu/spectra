@@ -10,6 +10,7 @@ idf_component_register(
         "widgets/toolbar.c"
         "widgets/modal_dialog.c"
         "widgets/sd_card_modal.c"
+        "widgets/wifi_credentials_dialog.c"
 
         "assets/dev_logo.c"
         "assets/icons8_alarm_clock_32.c"

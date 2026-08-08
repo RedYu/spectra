@@ -54,6 +54,8 @@ typedef struct
     bool show_ota_status;
     toolbar_action_cb_t ota_action;
 
+    bool show_internet_status;
+
 } toolbar_config_t;
 
 /**
@@ -77,6 +79,8 @@ typedef struct
 
     lv_obj_t *sd_button;
     lv_obj_t *ota_button;
+
+    lv_obj_t *internet_indicator;
 
 } toolbar_t;
 
@@ -154,6 +158,20 @@ void toolbar_set_wifi_status(
 void toolbar_set_cpu_usage(
     toolbar_t *toolbar,
     uint8_t cpu_usage
+);
+
+/**
+ * @brief Update the Internet connectivity indicator.
+ *
+ * The indicator is visible and green when Internet access has been
+ * confirmed. It is hidden when Internet access is unavailable.
+ *
+ * @param[in,out] toolbar Toolbar instance.
+ * @param[in] available True when Internet access is available.
+ */
+void toolbar_set_internet_available(
+    toolbar_t *toolbar,
+    bool available
 );
 
 #ifdef __cplusplus

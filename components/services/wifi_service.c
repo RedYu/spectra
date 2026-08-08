@@ -2195,30 +2195,20 @@ static esp_err_t wifi_service_set_interface_enabled_locked(
         atomic_load(&s_sta_enabled)
     );
 
-    if (station) {
-        if (!enabled) {
-            atomic_store(
-                &s_sta_connected,
-                false
-            );
+    if (station &&
+        !enabled) {
 
-        } else if (s_started) {
-            result =
-                esp_wifi_connect();
-
-            if (result != ESP_OK) {
-                /*
-                 * Keep Station enabled. The event handler will retry
-                 * after a later disconnect/start event.
-                 */
-                ESP_LOGW(
-                    TAG,
-                    "Initial Station connection failed: %s",
-                    esp_err_to_name(result)
-                );
-            }
-        }
+        atomic_store(
+            &s_sta_connected,
+            false
+        );
     }
+
+    /*
+     * WIFI_EVENT_STA_START initiates the Station connection after the
+     * driver starts. Do not call esp_wifi_connect() here as well because
+     * that would race with the event handler.
+     */
 
     ESP_LOGI(
         TAG,

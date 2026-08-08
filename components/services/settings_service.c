@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -20,6 +21,10 @@
 #include "wifi_credentials_service.h"
 #include "usb_network_service.h"
 
+#define SETTINGS_JSON_INDENT_SPACES  (4U)
+
+#define SETTINGS_SERVICE_LOCK_TIMEOUT_MS  (1000U)
+
 static const char *TAG = "settings_service";
 
 static const char *CONFIG_FILE_PATH =
@@ -27,8 +32,6 @@ static const char *CONFIG_FILE_PATH =
 
 static const char *CONFIG_FILE_PATH_TMP =
     "/storage/device_config.json.tmp";
-
-#define SETTINGS_SERVICE_LOCK_TIMEOUT_MS  (1000U)
 
 static bool s_initialized = false;
 static SemaphoreHandle_t s_mutex = NULL;
@@ -102,6 +105,76 @@ static void settings_service_unlock(void)
     (void)xSemaphoreGive(
         s_mutex
     );
+}
+
+static char *settings_service_format_json_spaces(
+    const char *json
+)
+{
+    if (json == NULL) {
+        return NULL;
+    }
+
+    const size_t input_length =
+        strlen(json);
+
+    size_t tab_count = 0U;
+
+    for (size_t index = 0U;
+         index < input_length;
+         ++index) {
+
+        if (json[index] == '\t') {
+            ++tab_count;
+        }
+    }
+
+    const size_t output_length =
+        input_length +
+        (tab_count *
+         (SETTINGS_JSON_INDENT_SPACES - 1U));
+
+    char *formatted =
+        heap_caps_malloc(
+            output_length + 1U,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
+
+    if (formatted == NULL) {
+        formatted =
+            malloc(
+                output_length + 1U
+            );
+    }
+
+    if (formatted == NULL) {
+        return NULL;
+    }
+
+    size_t output_index = 0U;
+
+    for (size_t input_index = 0U;
+         input_index < input_length;
+         ++input_index) {
+
+        if (json[input_index] == '\t') {
+            for (size_t space = 0U;
+                 space <
+                 SETTINGS_JSON_INDENT_SPACES;
+                 ++space) {
+
+                formatted[output_index++] = ' ';
+            }
+        } else {
+            formatted[output_index++] =
+                json[input_index];
+        }
+    }
+
+    formatted[output_index] = '\0';
+
+    return formatted;
 }
 
 static void settings_service_clear_sensitive_data(
@@ -1008,10 +1081,23 @@ static esp_err_t settings_service_save_internal(void)
         return ESP_ERR_NO_MEM;
     }
 
-    char *json_text =
+    char *json_with_tabs =
         cJSON_Print(root);
 
     cJSON_Delete(root);
+
+    if (json_with_tabs == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    char *json_text =
+        settings_service_format_json_spaces(
+            json_with_tabs
+        );
+
+    cJSON_free(
+        json_with_tabs
+    );
 
     if (json_text == NULL) {
         return ESP_ERR_NO_MEM;
@@ -1023,7 +1109,7 @@ static esp_err_t settings_service_save_internal(void)
     );
 
     if (file == NULL) {
-        cJSON_free(json_text);
+        free(json_text);
         return ESP_FAIL;
     }
 
@@ -1053,7 +1139,7 @@ static esp_err_t settings_service_save_internal(void)
 
     file = NULL;
 
-    cJSON_free(json_text);
+    free(json_text);
     json_text = NULL;
 
     if (result != ESP_OK) {
