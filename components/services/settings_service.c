@@ -1,5 +1,7 @@
 #include "settings_service.h"
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -115,64 +117,73 @@ static char *settings_service_format_json_spaces(
         return NULL;
     }
 
-    const size_t input_length =
+    const size_t source_length =
         strlen(json);
 
-    size_t tab_count = 0U;
+    if (source_length >
+        ((SIZE_MAX - 1U) /
+         SETTINGS_JSON_INDENT_SPACES)) {
 
-    for (size_t index = 0U;
-         index < input_length;
-         ++index) {
-
-        if (json[index] == '\t') {
-            ++tab_count;
-        }
+        return NULL;
     }
 
-    const size_t output_length =
-        input_length +
-        (tab_count *
-         (SETTINGS_JSON_INDENT_SPACES - 1U));
+    const size_t output_capacity =
+        (source_length *
+         SETTINGS_JSON_INDENT_SPACES) + 1U;
 
     char *formatted =
         heap_caps_malloc(
-            output_length + 1U,
+            output_capacity,
             MALLOC_CAP_SPIRAM |
             MALLOC_CAP_8BIT
         );
 
     if (formatted == NULL) {
         formatted =
-            malloc(
-                output_length + 1U
-            );
+            malloc(output_capacity);
     }
 
     if (formatted == NULL) {
         return NULL;
     }
 
-    size_t output_index = 0U;
+    const char *source = json;
+    char *destination = formatted;
 
-    for (size_t input_index = 0U;
-         input_index < input_length;
-         ++input_index) {
+    bool line_start = true;
 
-        if (json[input_index] == '\t') {
-            for (size_t space = 0U;
-                 space <
-                 SETTINGS_JSON_INDENT_SPACES;
-                 ++space) {
+    while (*source != '\0') {
+        if (*source == '\t') {
+            const size_t space_count =
+                line_start
+                    ? SETTINGS_JSON_INDENT_SPACES
+                    : 1U;
 
-                formatted[output_index++] = ' ';
+            for (size_t index = 0U;
+                 index < space_count;
+                 ++index) {
+
+                *destination++ = ' ';
             }
-        } else {
-            formatted[output_index++] =
-                json[input_index];
+
+            ++source;
+            continue;
         }
+
+        *destination++ = *source;
+
+        if (*source == '\n') {
+            line_start = true;
+        } else if ((*source != ' ') &&
+                   (*source != '\r')) {
+
+            line_start = false;
+        }
+
+        ++source;
     }
 
-    formatted[output_index] = '\0';
+    *destination = '\0';
 
     return formatted;
 }
