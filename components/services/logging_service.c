@@ -3,7 +3,11 @@
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <ctype.h>
+#include <string.h>
+#include <stdlib.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 
 #include "freertos/FreeRTOS.h"
@@ -23,6 +27,9 @@
 #define LOGGING_TASK_PRIORITY              (4U)
 
 #define LOGGING_FLUSH_INTERVAL_MS          (5000U)
+
+#define LOGGING_TAG_LIST_MAX_LENGTH        (256U)
+#define LOGGING_TAG_MAX_LENGTH             (64U)
 
 typedef enum
 {
@@ -68,6 +75,40 @@ static atomic_uint_fast32_t s_dropped_messages =
 
 static atomic_uint_fast32_t s_pending_dropped_messages =
     ATOMIC_VAR_INIT(0U);
+
+typedef struct
+{
+    char warning_tags[
+        LOGGING_TAG_LIST_MAX_LENGTH
+    ];
+
+    char info_tags[
+        LOGGING_TAG_LIST_MAX_LENGTH
+    ];
+
+    char debug_tags[
+        LOGGING_TAG_LIST_MAX_LENGTH
+    ];
+
+    char disabled_tags[
+        LOGGING_TAG_LIST_MAX_LENGTH
+    ];
+
+} logging_tag_levels_t;
+
+static logging_tag_levels_t *s_tag_levels =
+    NULL;
+
+static esp_err_t logging_service_validate_tag_list(
+    const char *list
+);
+
+static void logging_service_apply_tag_list(
+    const char *list,
+    esp_log_level_t level
+);
+
+static void logging_service_restore_tag_levels(void);
 
 static int logging_service_vprintf(
     const char *format,
@@ -137,6 +178,34 @@ esp_err_t logging_service_init(void)
         return ESP_ERR_NO_MEM;
     }
 
+    s_tag_levels =
+        heap_caps_calloc(
+            1U,
+            sizeof(*s_tag_levels),
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
+
+    if (s_tag_levels == NULL) {
+        vSemaphoreDelete(
+            s_command_done
+        );
+
+        vSemaphoreDelete(
+            s_control_mutex
+        );
+
+        vQueueDelete(
+            s_log_queue
+        );
+
+        s_command_done = NULL;
+        s_control_mutex = NULL;
+        s_log_queue = NULL;
+
+        return ESP_ERR_NO_MEM;
+    }
+
     atomic_store(
         &s_file_open,
         false
@@ -162,36 +231,6 @@ esp_err_t logging_service_init(void)
         0U
     );
 
-    esp_log_level_set(
-        "tusb_desc",
-        ESP_LOG_WARN
-    );
-
-    /*esp_log_level_set(
-        "memory",
-        ESP_LOG_WARN
-    );*/
-
-    esp_log_level_set(
-        "dns_redirect_server",
-        ESP_LOG_WARN
-    );
-
-    esp_log_level_set(
-        "wifi",
-        ESP_LOG_WARN
-    );
-    
-    esp_log_level_set(
-        "wifi_init",
-        ESP_LOG_WARN
-    );
-
-    esp_log_level_set(
-        "esp-x509-crt-bundle",
-        ESP_LOG_WARN
-    );
-
     const BaseType_t task_result = xTaskCreate(
         logging_service_task,
         LOGGING_TASK_NAME,
@@ -202,13 +241,26 @@ esp_err_t logging_service_init(void)
     );
 
     if (task_result != pdPASS) {
-        vSemaphoreDelete(s_command_done);
-        vSemaphoreDelete(s_control_mutex);
-        vQueueDelete(s_log_queue);
+        vSemaphoreDelete(
+            s_command_done
+        );
+
+        vSemaphoreDelete(
+            s_control_mutex
+        );
+
+        vQueueDelete(
+            s_log_queue
+        );
+
+        free(
+            s_tag_levels
+        );
 
         s_command_done = NULL;
         s_control_mutex = NULL;
         s_log_queue = NULL;
+        s_tag_levels = NULL;
 
         return ESP_ERR_NO_MEM;
     }
@@ -403,6 +455,127 @@ esp_err_t logging_service_reset_dropped_count(void)
         &s_pending_dropped_messages,
         0U
     );
+
+    return ESP_OK;
+}
+
+esp_err_t logging_service_set_tag_levels(
+    const char *warning_tags,
+    const char *info_tags,
+    const char *debug_tags,
+    const char *disabled_tags
+)
+{
+    if ((warning_tags == NULL) ||
+        (info_tags == NULL) ||
+        (debug_tags == NULL) ||
+        (disabled_tags == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!atomic_load(&s_initialized)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (s_tag_levels == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t result =
+        logging_service_validate_tag_list(
+            warning_tags
+        );
+
+    if (result == ESP_OK) {
+        result =
+            logging_service_validate_tag_list(
+                info_tags
+            );
+    }
+
+    if (result == ESP_OK) {
+        result =
+            logging_service_validate_tag_list(
+                debug_tags
+            );
+    }
+
+    if (result == ESP_OK) {
+        result =
+            logging_service_validate_tag_list(
+                disabled_tags
+            );
+    }
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        logging_service_control_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    /*
+     * Restore every previously managed tag before applying the new
+     * configuration. This ensures that removing a tag from all lists
+     * restores its default ESP-IDF log level.
+     */
+    logging_service_restore_tag_levels();
+
+    /*
+     * Apply levels from least restrictive to most restrictive.
+     * If a tag appears in several lists, the final matching list wins.
+     * Consequently, the disabled list has the highest priority.
+     */
+    logging_service_apply_tag_list(
+        warning_tags,
+        ESP_LOG_WARN
+    );
+
+    logging_service_apply_tag_list(
+        info_tags,
+        ESP_LOG_INFO
+    );
+
+    logging_service_apply_tag_list(
+        debug_tags,
+        ESP_LOG_DEBUG
+    );
+
+    logging_service_apply_tag_list(
+        disabled_tags,
+        ESP_LOG_NONE
+    );
+
+    (void)strlcpy(
+        s_tag_levels->warning_tags,
+        warning_tags,
+        sizeof(s_tag_levels->warning_tags)
+    );
+
+    (void)strlcpy(
+        s_tag_levels->info_tags,
+        info_tags,
+        sizeof(s_tag_levels->info_tags)
+    );
+
+    (void)strlcpy(
+        s_tag_levels->debug_tags,
+        debug_tags,
+        sizeof(s_tag_levels->debug_tags)
+    );
+
+    (void)strlcpy(
+        s_tag_levels->disabled_tags,
+        disabled_tags,
+        sizeof(s_tag_levels->disabled_tags)
+    );
+
+    logging_service_control_unlock();
 
     return ESP_OK;
 }
@@ -928,3 +1101,188 @@ static esp_err_t logging_service_close_file(
 
     return result;
 }
+
+static esp_err_t logging_service_validate_tag_list(
+    const char *list
+)
+{
+    if (list == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t list_length =
+        strlen(list);
+
+    if (list_length >=
+        LOGGING_TAG_LIST_MAX_LENGTH) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    size_t position = 0U;
+
+    while (position < list_length) {
+        while ((position < list_length) &&
+               ((list[position] == ',') ||
+                isspace(
+                    (unsigned char)list[position]
+                ))) {
+
+            ++position;
+        }
+
+        const size_t tag_start =
+            position;
+
+        while ((position < list_length) &&
+               (list[position] != ',')) {
+
+            if (iscntrl(
+                    (unsigned char)list[position]
+                )) {
+
+                return ESP_ERR_INVALID_ARG;
+            }
+
+            ++position;
+        }
+
+        size_t tag_end =
+            position;
+
+        while ((tag_end > tag_start) &&
+               isspace(
+                   (unsigned char)
+                       list[tag_end - 1U]
+               )) {
+
+            --tag_end;
+        }
+
+        const size_t tag_length =
+            tag_end - tag_start;
+
+        if (tag_length >=
+            LOGGING_TAG_MAX_LENGTH) {
+
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        if ((position < list_length) &&
+            (list[position] == ',')) {
+
+            ++position;
+        }
+    }
+
+    return ESP_OK;
+}
+
+static void logging_service_apply_tag_list(
+    const char *list,
+    esp_log_level_t level
+)
+{
+    if (list == NULL) {
+        return;
+    }
+
+    const size_t list_length =
+        strlen(list);
+
+    size_t position = 0U;
+
+    while (position < list_length) {
+        while ((position < list_length) &&
+               ((list[position] == ',') ||
+                isspace(
+                    (unsigned char)list[position]
+                ))) {
+
+            ++position;
+        }
+
+        const size_t tag_start =
+            position;
+
+        while ((position < list_length) &&
+               (list[position] != ',')) {
+
+            ++position;
+        }
+
+        size_t tag_end =
+            position;
+
+        while ((tag_end > tag_start) &&
+               isspace(
+                   (unsigned char)
+                       list[tag_end - 1U]
+               )) {
+
+            --tag_end;
+        }
+
+        const size_t tag_length =
+            tag_end - tag_start;
+
+        if ((tag_length > 0U) &&
+            (tag_length <
+             LOGGING_TAG_MAX_LENGTH)) {
+
+            char tag[
+                LOGGING_TAG_MAX_LENGTH
+            ];
+
+            memcpy(
+                tag,
+                &list[tag_start],
+                tag_length
+            );
+
+            tag[tag_length] = '\0';
+
+            esp_log_level_set(
+                tag,
+                level
+            );
+        }
+
+        if ((position < list_length) &&
+            (list[position] == ',')) {
+
+            ++position;
+        }
+    }
+}
+
+static void logging_service_restore_tag_levels(void)
+{
+    if (s_tag_levels == NULL) {
+        return;
+    }
+
+    const esp_log_level_t default_level =
+        esp_log_get_default_level();
+
+    logging_service_apply_tag_list(
+        s_tag_levels->warning_tags,
+        default_level
+    );
+
+    logging_service_apply_tag_list(
+        s_tag_levels->info_tags,
+        default_level
+    );
+
+    logging_service_apply_tag_list(
+        s_tag_levels->debug_tags,
+        default_level
+    );
+
+    logging_service_apply_tag_list(
+        s_tag_levels->disabled_tags,
+        default_level
+    );
+}
+

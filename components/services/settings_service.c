@@ -50,6 +50,13 @@ static SemaphoreHandle_t s_mutex = NULL;
 static esp_err_t settings_service_lock(void);
 static void settings_service_unlock(void);
 
+static esp_err_t settings_service_set_log_tag_levels_internal(
+    const char *warning_tags,
+    const char *info_tags,
+    const char *debug_tags,
+    const char *disabled_tags
+);
+
 static esp_err_t settings_service_reload_internal(void);
 static esp_err_t settings_service_save_internal(void);
 
@@ -107,6 +114,19 @@ static void settings_service_unlock(void)
     (void)xSemaphoreGive(
         s_mutex
     );
+}
+
+static app_settings_t *settings_service_allocate_settings(void)
+{
+    app_settings_t *settings =
+        heap_caps_calloc(
+            1U,
+            sizeof(*settings),
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
+
+    return settings;
 }
 
 static char *settings_service_format_json_spaces(
@@ -261,6 +281,62 @@ static esp_err_t settings_service_load_sta_credentials(
     return ESP_OK;
 }
 
+static esp_err_t settings_service_parse_log_tag_list(
+    const cJSON *object,
+    const char *name,
+    char *destination,
+    size_t destination_size
+)
+{
+    if ((object == NULL) ||
+        (name == NULL) ||
+        (destination == NULL) ||
+        (destination_size == 0U)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const cJSON *value =
+        cJSON_GetObjectItemCaseSensitive(
+            object,
+            name
+        );
+
+    if (!cJSON_IsString(value) ||
+        (value->valuestring == NULL)) {
+
+        ESP_LOGE(
+            TAG,
+            "Missing or invalid logging.tag_levels.%s",
+            name
+        );
+
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    if (strnlen(
+            value->valuestring,
+            destination_size
+        ) >= destination_size) {
+
+        ESP_LOGE(
+            TAG,
+            "logging.tag_levels.%s is too long",
+            name
+        );
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    (void)strlcpy(
+        destination,
+        value->valuestring,
+        destination_size
+    );
+
+    return ESP_OK;
+}
+
 static esp_err_t parse_config(
     const char *json_text,
     app_settings_t *settings
@@ -271,6 +347,8 @@ static esp_err_t parse_config(
     }
 
     esp_err_t result = ESP_OK;
+
+    app_settings_t *parsed_settings = NULL;
 
     cJSON *root =
         cJSON_Parse(json_text);
@@ -304,11 +382,18 @@ static esp_err_t parse_config(
      * Parse into a temporary object so the current settings remain
      * unchanged if validation fails.
      */
-    app_settings_t parsed_settings;
+    parsed_settings =
+        settings_service_allocate_settings();
 
-    result = settings_model_set_defaults(
-        &parsed_settings
-    );
+    if (parsed_settings == NULL) {
+        result = ESP_ERR_NO_MEM;
+        goto cleanup;
+    }
+
+    result =
+        settings_model_set_defaults(
+            parsed_settings
+        );
 
     if (result != ESP_OK) {
         goto cleanup;
@@ -515,22 +600,22 @@ static esp_err_t parse_config(
         goto cleanup;
     }
 
-    parsed_settings.schema_version =
+    parsed_settings->schema_version =
         version;
 
     strlcpy(
-        parsed_settings.device.target,
+        parsed_settings->device.target,
         device_target->valuestring,
-        sizeof(parsed_settings.device.target)
+        sizeof(parsed_settings->device.target)
     );
 
     strlcpy(
-        parsed_settings.device.name,
+        parsed_settings->device.name,
         device_name->valuestring,
-        sizeof(parsed_settings.device.name)
+        sizeof(parsed_settings->device.name)
     );
 
-    parsed_settings.display.brightness =
+    parsed_settings->display.brightness =
         (uint8_t)brightness->valueint;
 
     /*
@@ -568,8 +653,87 @@ static esp_err_t parse_config(
         goto cleanup;
     }
 
-    parsed_settings.logging.sd_enabled =
+    parsed_settings->logging.sd_enabled =
         cJSON_IsTrue(sd_enabled);
+
+    /*
+     * Log-level configuration is optional for compatibility with
+     * configuration files created before this feature was added.
+     * Default values remain active when the object is missing.
+     */
+    const cJSON *tag_levels =
+        cJSON_GetObjectItemCaseSensitive(
+            logging,
+            "tag_levels"
+        );
+
+    if (tag_levels != NULL) {
+        if (!cJSON_IsObject(tag_levels)) {
+            ESP_LOGE(
+                TAG,
+                "Invalid logging.tag_levels configuration"
+            );
+
+            result = ESP_ERR_INVALID_RESPONSE;
+            goto cleanup;
+        }
+
+        result =
+            settings_service_parse_log_tag_list(
+                tag_levels,
+                "warning",
+                parsed_settings->logging.warning_tags,
+                sizeof(
+                    parsed_settings->logging.warning_tags
+                )
+            );
+
+        if (result != ESP_OK) {
+            goto cleanup;
+        }
+
+        result =
+            settings_service_parse_log_tag_list(
+                tag_levels,
+                "info",
+                parsed_settings->logging.info_tags,
+                sizeof(
+                    parsed_settings->logging.info_tags
+                )
+            );
+
+        if (result != ESP_OK) {
+            goto cleanup;
+        }
+
+        result =
+            settings_service_parse_log_tag_list(
+                tag_levels,
+                "debug",
+                parsed_settings->logging.debug_tags,
+                sizeof(
+                    parsed_settings->logging.debug_tags
+                )
+            );
+
+        if (result != ESP_OK) {
+            goto cleanup;
+        }
+
+        result =
+            settings_service_parse_log_tag_list(
+                tag_levels,
+                "disabled",
+                parsed_settings->logging.disabled_tags,
+                sizeof(
+                    parsed_settings->logging.disabled_tags
+                )
+            );
+
+        if (result != ESP_OK) {
+            goto cleanup;
+        }
+    }
 
     /*
      * Validate UI configuration.
@@ -606,7 +770,7 @@ static esp_err_t parse_config(
         goto cleanup;
     }
 
-    parsed_settings.ui.animations_enabled =
+    parsed_settings->ui.animations_enabled =
         cJSON_IsTrue(animations_enabled);
 
     const cJSON *network =
@@ -769,19 +933,19 @@ static esp_err_t parse_config(
             goto cleanup;
         }
 
-        parsed_settings.wifi_sta.enabled =
+        parsed_settings->wifi_sta.enabled =
             sta_is_enabled;
 
         (void)strlcpy(
-            parsed_settings.wifi_sta.ssid,
+            parsed_settings->wifi_sta.ssid,
             sta_ssid->valuestring,
-            sizeof(parsed_settings.wifi_sta.ssid)
+            sizeof(parsed_settings->wifi_sta.ssid)
         );
 
         (void)strlcpy(
-            parsed_settings.wifi_sta.credential_id,
+            parsed_settings->wifi_sta.credential_id,
             credential_id->valuestring,
-            sizeof(parsed_settings.wifi_sta.credential_id)
+            sizeof(parsed_settings->wifi_sta.credential_id)
         );
     }
 
@@ -807,22 +971,22 @@ static esp_err_t parse_config(
         goto cleanup;
     }
 
-    parsed_settings.wifi_ap.enabled =
+    parsed_settings->wifi_ap.enabled =
         cJSON_IsTrue(wifi_enabled);
 
     (void)strlcpy(
-        parsed_settings.wifi_ap.ssid,
+        parsed_settings->wifi_ap.ssid,
         wifi_ssid->valuestring,
-        sizeof(parsed_settings.wifi_ap.ssid)
+        sizeof(parsed_settings->wifi_ap.ssid)
     );
 
     (void)strlcpy(
-        parsed_settings.wifi_ap.password,
+        parsed_settings->wifi_ap.password,
         wifi_password->valuestring,
-        sizeof(parsed_settings.wifi_ap.password)
+        sizeof(parsed_settings->wifi_ap.password)
     );
 
-    parsed_settings.usb_rndis.enabled =
+    parsed_settings->usb_rndis.enabled =
         cJSON_IsTrue(usb_enabled);
 
     /*
@@ -831,24 +995,24 @@ static esp_err_t parse_config(
      * Apply the fully validated configuration.
      */
     *settings =
-        parsed_settings;
+        *parsed_settings;
 
     ESP_LOGI(
         TAG,
         "Configuration validated for target: %s",
-        parsed_settings.device.target
+        parsed_settings->device.target
     );
 
     ESP_LOGD(
         TAG,
         "Display brightness: %u%%",
-        parsed_settings.display.brightness
+        parsed_settings->display.brightness
     );
 
     ESP_LOGD(
         TAG,
         "SD card logging: %s",
-        parsed_settings.logging.sd_enabled
+        parsed_settings->logging.sd_enabled
             ? "enabled"
             : "disabled"
     );
@@ -856,12 +1020,16 @@ static esp_err_t parse_config(
     ESP_LOGD(
         TAG,
         "UI animations: %s",
-        parsed_settings.ui.animations_enabled
+        parsed_settings->ui.animations_enabled
             ? "enabled"
             : "disabled"
     );
 
 cleanup:
+    heap_caps_free(
+        parsed_settings
+    );
+
     cJSON_Delete(root);
 
     return result;
@@ -952,6 +1120,52 @@ static cJSON *settings_service_create_json(
             logging,
             "sd_enabled",
             settings->logging.sd_enabled
+        ) == NULL) {
+
+        goto error;
+    }
+
+    cJSON *tag_levels =
+        cJSON_AddObjectToObject(
+            logging,
+            "tag_levels"
+        );
+
+    if (tag_levels == NULL) {
+        goto error;
+    }
+
+    if (cJSON_AddStringToObject(
+            tag_levels,
+            "warning",
+            settings->logging.warning_tags
+        ) == NULL) {
+
+        goto error;
+    }
+
+    if (cJSON_AddStringToObject(
+            tag_levels,
+            "info",
+            settings->logging.info_tags
+        ) == NULL) {
+
+        goto error;
+    }
+
+    if (cJSON_AddStringToObject(
+            tag_levels,
+            "debug",
+            settings->logging.debug_tags
+        ) == NULL) {
+
+        goto error;
+    }
+
+    if (cJSON_AddStringToObject(
+            tag_levels,
+            "disabled",
+            settings->logging.disabled_tags
         ) == NULL) {
 
         goto error;
@@ -1072,21 +1286,30 @@ error:
 
 static esp_err_t settings_service_save_internal(void)
 {
-    app_settings_t settings;
+    app_settings_t *settings =
+        settings_service_allocate_settings();
+
+    if (settings == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
 
     esp_err_t result =
         settings_model_get(
-            &settings
+            settings
         );
 
     if (result != ESP_OK) {
+        heap_caps_free(settings);
         return result;
     }
 
     cJSON *root =
         settings_service_create_json(
-            &settings
+            settings
         );
+
+    heap_caps_free(settings);
+    settings = NULL;
 
     if (root == NULL) {
         return ESP_ERR_NO_MEM;
@@ -1201,25 +1424,31 @@ static esp_err_t settings_service_save_internal(void)
 
 static esp_err_t settings_service_reload_internal(void)
 {
-    app_settings_t settings;
+    app_settings_t *settings =
+        settings_service_allocate_settings();
+
+    if (settings == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
 
     esp_err_t result =
         settings_model_set_defaults(
-            &settings
+            settings
         );
 
     if (result != ESP_OK) {
-        return result;
+        goto cleanup;
     }
 
     char *file_data = NULL;
     size_t file_size = 0U;
 
-    result = storage_service_read_file(
-        CONFIG_FILE_PATH,
-        &file_data,
-        &file_size
-    );
+    result =
+        storage_service_read_file(
+            CONFIG_FILE_PATH,
+            &file_data,
+            &file_size
+        );
 
     if (result == ESP_ERR_NOT_FOUND) {
         ESP_LOGW(
@@ -1227,15 +1456,17 @@ static esp_err_t settings_service_reload_internal(void)
             "Configuration file not found, using defaults"
         );
 
-        result = settings_model_set(
-            &settings
-        );
+        result =
+            settings_model_set(
+                settings
+            );
 
-        if (result != ESP_OK) {
-            return result;
+        if (result == ESP_OK) {
+            result =
+                settings_service_apply_internal();
         }
 
-        return settings_service_apply_internal();
+        goto cleanup;
     }
 
     if (result != ESP_OK) {
@@ -1247,26 +1478,22 @@ static esp_err_t settings_service_reload_internal(void)
 
         result =
             settings_model_set(
-                &settings
+                settings
             );
 
-        if (result != ESP_OK) {
-            return result;
+        if (result == ESP_OK) {
+            result =
+                settings_service_apply_internal();
         }
 
-        result =
-            settings_service_apply_internal();
-
-        if (result != ESP_OK) {
-            return result;
+        if (result == ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Default settings applied after read failure"
+            );
         }
 
-        ESP_LOGW(
-            TAG,
-            "Default settings applied after read failure"
-        );
-
-        return ESP_OK;
+        goto cleanup;
     }
 
     ESP_LOGI(
@@ -1275,10 +1502,11 @@ static esp_err_t settings_service_reload_internal(void)
         (unsigned int)file_size
     );
 
-    result = parse_config(
-        file_data,
-        &settings
-    );
+    result =
+        parse_config(
+            file_data,
+            settings
+        );
 
     free(file_data);
     file_data = NULL;
@@ -1289,58 +1517,58 @@ static esp_err_t settings_service_reload_internal(void)
             "Invalid configuration, using defaults"
         );
 
-        const esp_err_t defaults_result =
+        result =
             settings_model_set_defaults(
-                &settings
+                settings
             );
 
-        if (defaults_result != ESP_OK) {
-            return defaults_result;
+        if (result == ESP_OK) {
+            result =
+                settings_model_set(
+                    settings
+                );
         }
 
-        const esp_err_t model_result =
-            settings_model_set(
-                &settings
+        if (result == ESP_OK) {
+            result =
+                settings_service_apply_internal();
+        }
+
+        if (result == ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Default settings applied after validation failure"
             );
-
-        if (model_result != ESP_OK) {
-            return model_result;
         }
 
-        result = settings_service_apply_internal();
+        goto cleanup;
+    }
 
-        if (result != ESP_OK) {
-            return result;
-        }
-
-        ESP_LOGW(
-            TAG,
-            "Default settings applied after validation failure"
+    result =
+        settings_model_set(
+            settings
         );
 
-        return ESP_OK;
+    if (result == ESP_OK) {
+        result =
+            settings_service_apply_internal();
     }
 
-    result = settings_model_set(
-        &settings
+    if (result == ESP_OK) {
+        ESP_LOGI(
+            TAG,
+            "Configuration applied successfully"
+        );
+    }
+
+cleanup:
+    free(file_data);
+
+    heap_caps_free(
+        settings
     );
 
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    result = settings_service_apply_internal();
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    ESP_LOGI(
-        TAG,
-        "Configuration applied successfully"
-    );
-
-    return ESP_OK;
+    return result;
 }
 
 esp_err_t settings_service_init(void)
@@ -1697,25 +1925,48 @@ static esp_err_t settings_service_apply_wifi_states(
 
 static esp_err_t settings_service_apply_internal(void)
 {
-    app_settings_t settings;
+    app_settings_t *settings =
+        settings_service_allocate_settings();
+
+    if (settings == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
 
     esp_err_t result =
         settings_model_get(
-            &settings
+            settings
         );
 
     if (result != ESP_OK) {
-        return result;
+        goto cleanup;
+    }
+
+    result =
+        logging_service_set_tag_levels(
+            settings->logging.warning_tags,
+            settings->logging.info_tags,
+            settings->logging.debug_tags,
+            settings->logging.disabled_tags
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply log tag levels: %s",
+            esp_err_to_name(result)
+        );
+
+        goto cleanup;
     }
 
     result =
         wifi_service_set_ap_credentials(
-            settings.wifi_ap.ssid,
-            settings.wifi_ap.password
+            settings->wifi_ap.ssid,
+            settings->wifi_ap.password
         );
 
     if (result != ESP_OK) {
-        return result;
+        goto cleanup;
     }
 
     wifi_sta_credentials_t sta_credentials;
@@ -1723,7 +1974,7 @@ static esp_err_t settings_service_apply_internal(void)
 
     result =
         settings_service_load_sta_credentials(
-            &settings,
+            settings,
             &sta_credentials,
             &sta_credentials_match
         );
@@ -1734,14 +1985,14 @@ static esp_err_t settings_service_apply_internal(void)
             sizeof(sta_credentials)
         );
 
-        return result;
+        goto cleanup;
     }
 
     /*
      * Do not copy the password into the Wi-Fi service until STA is
      * actually requested.
      */
-    if (settings.wifi_sta.enabled &&
+    if (settings->wifi_sta.enabled &&
         sta_credentials_match) {
 
         result =
@@ -1756,15 +2007,15 @@ static esp_err_t settings_service_apply_internal(void)
                 sizeof(sta_credentials)
             );
 
-            return result;
+            goto cleanup;
         }
     }
 
     const bool sta_runtime_enabled =
-        settings.wifi_sta.enabled &&
+        settings->wifi_sta.enabled &&
         sta_credentials_match;
 
-    if (settings.wifi_sta.enabled &&
+    if (settings->wifi_sta.enabled &&
         !sta_credentials_match) {
 
         ESP_LOGW(
@@ -1781,16 +2032,16 @@ static esp_err_t settings_service_apply_internal(void)
 
     result =
         settings_service_apply_wifi_states(
-            settings.wifi_ap.enabled,
+            settings->wifi_ap.enabled,
             sta_runtime_enabled
         );
 
     if (result != ESP_OK) {
-        return result;
+        goto cleanup;
     }
 
     result = display_backlight_set_brightness(
-        settings.display.brightness
+        settings->display.brightness
     );
 
     if (result != ESP_OK) {
@@ -1800,11 +2051,11 @@ static esp_err_t settings_service_apply_internal(void)
             esp_err_to_name(result)
         );
 
-        return result;
+        goto cleanup;
     }
 
     gui_config_set_animations_enabled(
-        settings.ui.animations_enabled
+        settings->ui.animations_enabled
     );
 
     bool file_enabled = false;
@@ -1814,16 +2065,16 @@ static esp_err_t settings_service_apply_internal(void)
     );
 
     if (result != ESP_OK) {
-        return result;
+        goto cleanup;
     }
 
-    if (!settings.logging.sd_enabled) {
+    if (!settings->logging.sd_enabled) {
         if (file_enabled) {
             result =
                 logging_service_disable_file();
 
             if (result != ESP_OK) {
-                return result;
+                goto cleanup;
             }
         }
     } else {
@@ -1840,23 +2091,22 @@ static esp_err_t settings_service_apply_internal(void)
                 "SD logging will be applied later"
             );
 
-            return ESP_OK;
-        }
+            result = ESP_OK;
 
-        if (result != ESP_OK) {
-            return result;
-        }
+        } else if (result != ESP_OK) {
+            goto cleanup;
 
-        if ((storage_state ==
-             STORAGE_SD_STATE_MOUNTED) &&
-            !file_enabled) {
+        } else if ((storage_state ==
+                    STORAGE_SD_STATE_MOUNTED) &&
+                   !file_enabled) {
 
             result =
                 logging_service_enable_file();
 
             if (result != ESP_OK) {
-                return result;
+                goto cleanup;
             }
+
         } else if (storage_state !=
                    STORAGE_SD_STATE_MOUNTED) {
 
@@ -1870,29 +2120,53 @@ static esp_err_t settings_service_apply_internal(void)
 
     ESP_LOGI(
         TAG,
-        "Settings applied: brightness=%u%%, "
-        "SD logging=%s, animations=%s, "
-        "Wi-Fi AP=%s, Wi-Fi STA requested=%s, "
-        "USB RNDIS=%s",
-        (unsigned int)settings.display.brightness,
-        settings.logging.sd_enabled
-            ? "enabled"
-            : "disabled",
-        settings.ui.animations_enabled
-            ? "enabled"
-            : "disabled",
-        settings.wifi_ap.enabled
-            ? "enabled"
-            : "disabled",
-        settings.wifi_sta.enabled
-            ? "enabled"
-            : "disabled",
-        settings.usb_rndis.enabled
+        "Settings applied"
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Display: brightness=%u%%, animations=%s",
+        (unsigned int)settings->display.brightness,
+        settings->ui.animations_enabled
             ? "enabled"
             : "disabled"
     );
 
-    return ESP_OK;
+    ESP_LOGI(
+        TAG,
+        "Logging: SD=%s",
+        settings->logging.sd_enabled
+            ? "enabled"
+            : "disabled"
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Network: Wi-Fi AP=%s, Wi-Fi STA=%s",
+        settings->wifi_ap.enabled
+            ? "enabled"
+            : "disabled",
+        settings->wifi_sta.enabled
+            ? "enabled"
+            : "disabled"
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Network: USB RNDIS=%s",
+        settings->usb_rndis.enabled
+            ? "enabled"
+            : "disabled"
+    );
+
+    result = ESP_OK;
+
+cleanup:
+    heap_caps_free(
+        settings
+    );
+
+    return result;
 }
 
 esp_err_t settings_service_reload(void)
@@ -2750,6 +3024,170 @@ esp_err_t settings_service_get_restart_required(
         *restart_required =
             settings.usb_rndis.enabled !=
             usb_active;
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
+static esp_err_t settings_service_set_log_tag_levels_internal(
+    const char *warning_tags,
+    const char *info_tags,
+    const char *debug_tags,
+    const char *disabled_tags
+)
+{
+    if ((warning_tags == NULL) ||
+        (info_tags == NULL) ||
+        (debug_tags == NULL) ||
+        (disabled_tags == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((strnlen(
+            warning_tags,
+            SETTINGS_LOG_TAG_LIST_MAX_LENGTH
+        ) >= SETTINGS_LOG_TAG_LIST_MAX_LENGTH) ||
+        (strnlen(
+            info_tags,
+            SETTINGS_LOG_TAG_LIST_MAX_LENGTH
+        ) >= SETTINGS_LOG_TAG_LIST_MAX_LENGTH) ||
+        (strnlen(
+            debug_tags,
+            SETTINGS_LOG_TAG_LIST_MAX_LENGTH
+        ) >= SETTINGS_LOG_TAG_LIST_MAX_LENGTH) ||
+        (strnlen(
+            disabled_tags,
+            SETTINGS_LOG_TAG_LIST_MAX_LENGTH
+        ) >= SETTINGS_LOG_TAG_LIST_MAX_LENGTH)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    typedef struct
+    {
+        app_settings_t previous;
+        app_settings_t updated;
+
+    } settings_update_context_t;
+
+    settings_update_context_t *context =
+        heap_caps_calloc(
+            1U,
+            sizeof(*context),
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
+
+    if (context == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t result =
+        settings_model_get(
+            &context->previous
+        );
+
+    if (result != ESP_OK) {
+        heap_caps_free(context);
+        return result;
+    }
+
+    context->updated =
+        context->previous;
+
+    (void)strlcpy(
+        context->updated.logging.warning_tags,
+        warning_tags,
+        sizeof(
+            context->updated.logging.warning_tags
+        )
+    );
+
+    (void)strlcpy(
+        context->updated.logging.info_tags,
+        info_tags,
+        sizeof(
+            context->updated.logging.info_tags
+        )
+    );
+
+    (void)strlcpy(
+        context->updated.logging.debug_tags,
+        debug_tags,
+        sizeof(
+            context->updated.logging.debug_tags
+        )
+    );
+
+    (void)strlcpy(
+        context->updated.logging.disabled_tags,
+        disabled_tags,
+        sizeof(
+            context->updated.logging.disabled_tags
+        )
+    );
+
+    result =
+        settings_model_set(
+            &context->updated
+        );
+
+    if (result == ESP_OK) {
+        result =
+            logging_service_set_tag_levels(
+                context->updated.logging.warning_tags,
+                context->updated.logging.info_tags,
+                context->updated.logging.debug_tags,
+                context->updated.logging.disabled_tags
+            );
+    }
+
+    if (result != ESP_OK) {
+        (void)settings_model_set(
+            &context->previous
+        );
+
+        (void)logging_service_set_tag_levels(
+            context->previous.logging.warning_tags,
+            context->previous.logging.info_tags,
+            context->previous.logging.debug_tags,
+            context->previous.logging.disabled_tags
+        );
+    }
+
+    heap_caps_free(context);
+
+    return result;
+}
+
+esp_err_t settings_service_set_log_tag_levels(
+    const char *warning_tags,
+    const char *info_tags,
+    const char *debug_tags,
+    const char *disabled_tags
+)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result =
+        ESP_ERR_INVALID_STATE;
+
+    if (s_initialized) {
+        result =
+            settings_service_set_log_tag_levels_internal(
+                warning_tags,
+                info_tags,
+                debug_tags,
+                disabled_tags
+            );
     }
 
     settings_service_unlock();

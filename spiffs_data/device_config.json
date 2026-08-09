@@ -8,7 +8,14 @@
         "brightness": 80
     },
     "logging": {
-        "sd_enabled": true
+        "sd_enabled": true,
+
+        "tag_levels": {
+            "warning": "tusb_desc,dns_redirect_server,wifi,wifi_init,esp-x509-crt-bundle",
+            "info": "",
+            "debug": "",
+            "disabled": "memory"
+        }
     },
     "ui": {
         "animations_enabled": false

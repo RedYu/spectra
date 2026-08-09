@@ -48,6 +48,16 @@ extern "C" {
 
 #define SETTINGS_USB_RNDIS_ENABLED_DEFAULT         (true)
 
+#define SETTINGS_LOG_TAG_LIST_MAX_LENGTH  (256U)
+
+#define SETTINGS_LOG_WARNING_TAGS_DEFAULT \
+    ("tusb_desc,dns_redirect_server,wifi,wifi_init," \
+     "settings_service,esp-x509-crt-bundle")
+
+#define SETTINGS_LOG_INFO_TAGS_DEFAULT      ("")
+#define SETTINGS_LOG_DEBUG_TAGS_DEFAULT     ("")
+#define SETTINGS_LOG_DISABLED_TAGS_DEFAULT  ("")
+
 typedef struct
 {
     char target[SETTINGS_DEVICE_TARGET_MAX_LENGTH];
@@ -64,6 +74,22 @@ typedef struct
 typedef struct
 {
     bool sd_enabled;
+
+    char warning_tags[
+        SETTINGS_LOG_TAG_LIST_MAX_LENGTH
+    ];
+
+    char info_tags[
+        SETTINGS_LOG_TAG_LIST_MAX_LENGTH
+    ];
+
+    char debug_tags[
+        SETTINGS_LOG_TAG_LIST_MAX_LENGTH
+    ];
+
+    char disabled_tags[
+        SETTINGS_LOG_TAG_LIST_MAX_LENGTH
+    ];
 
 } logging_settings_t;
 

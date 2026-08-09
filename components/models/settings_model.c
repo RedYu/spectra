@@ -50,6 +50,22 @@ static esp_err_t settings_model_validate(
         SETTINGS_WIFI_CREDENTIAL_ID_LENGTH - 1U
     ] = '\0';
 
+    settings->logging.warning_tags[
+        SETTINGS_LOG_TAG_LIST_MAX_LENGTH - 1U
+    ] = '\0';
+
+    settings->logging.info_tags[
+        SETTINGS_LOG_TAG_LIST_MAX_LENGTH - 1U
+    ] = '\0';
+
+    settings->logging.debug_tags[
+        SETTINGS_LOG_TAG_LIST_MAX_LENGTH - 1U
+    ] = '\0';
+
+    settings->logging.disabled_tags[
+        SETTINGS_LOG_TAG_LIST_MAX_LENGTH - 1U
+    ] = '\0';
+
     if (settings->display.brightness <
         SETTINGS_DISPLAY_BRIGHTNESS_MIN) {
 
@@ -220,6 +236,30 @@ esp_err_t settings_model_set_defaults(
 
     settings->logging.sd_enabled =
         SETTINGS_LOGGING_SD_ENABLED_DEFAULT;
+
+    (void)strlcpy(
+        settings->logging.warning_tags,
+        SETTINGS_LOG_WARNING_TAGS_DEFAULT,
+        sizeof(settings->logging.warning_tags)
+    );
+
+    (void)strlcpy(
+        settings->logging.info_tags,
+        SETTINGS_LOG_INFO_TAGS_DEFAULT,
+        sizeof(settings->logging.info_tags)
+    );
+
+    (void)strlcpy(
+        settings->logging.debug_tags,
+        SETTINGS_LOG_DEBUG_TAGS_DEFAULT,
+        sizeof(settings->logging.debug_tags)
+    );
+
+    (void)strlcpy(
+        settings->logging.disabled_tags,
+        SETTINGS_LOG_DISABLED_TAGS_DEFAULT,
+        sizeof(settings->logging.disabled_tags)
+    );
 
     settings->ui.animations_enabled =
         SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT;

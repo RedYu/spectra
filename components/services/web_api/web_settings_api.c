@@ -3,19 +3,32 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 #include "settings_model.h"
 #include "settings_service.h"
 #include "web_api_common.h"
 
-#define WEB_SETTINGS_API_BODY_MAX_SIZE  (1024U)
+#define WEB_SETTINGS_API_BODY_MAX_SIZE  (2048U)
 
 static const char *TAG =
     "web_settings_api";
+
+static app_settings_t *web_settings_api_allocate_settings(void)
+{
+    app_settings_t *settings =
+        heap_caps_calloc(
+            1U,
+            sizeof(*settings),
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
+
+    return settings;
+}
 
 static esp_err_t web_settings_api_receive_body(
     httpd_req_t *request,
@@ -38,9 +51,11 @@ static esp_err_t web_settings_api_receive_body(
     }
 
     char *body =
-        calloc(
+        heap_caps_calloc(
             request->content_len + 1U,
-            sizeof(char)
+            sizeof(char),
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
         );
 
     if (body == NULL) {
@@ -62,7 +77,7 @@ static esp_err_t web_settings_api_receive_body(
         }
 
         if (result <= 0) {
-            free(body);
+            heap_caps_free(body);
             return ESP_FAIL;
         }
 
@@ -85,11 +100,21 @@ static esp_err_t web_settings_api_get_handler(
         return ESP_ERR_INVALID_ARG;
     }
 
-    app_settings_t settings = {0};
+    app_settings_t *settings =
+        web_settings_api_allocate_settings();
+
+    if (settings == NULL) {
+        return web_api_send_message(
+            request,
+            "500 Internal Server Error",
+            false,
+            "Failed to allocate settings snapshot"
+        );
+    }
 
     esp_err_t result =
         settings_model_get(
-            &settings
+            settings
         );
 
     if (result != ESP_OK) {
@@ -98,6 +123,8 @@ static esp_err_t web_settings_api_get_handler(
             "Failed to get settings: %s",
             esp_err_to_name(result)
         );
+
+        heap_caps_free(settings);
 
         return web_api_send_message(
             request,
@@ -141,6 +168,7 @@ static esp_err_t web_settings_api_get_handler(
         cJSON_CreateObject();
 
     if (response == NULL) {
+        heap_caps_free(settings);
         return ESP_ERR_NO_MEM;
     }
 
@@ -161,6 +189,14 @@ static esp_err_t web_settings_api_get_handler(
             response,
             "logging"
         );
+
+    cJSON *tag_levels =
+        logging != NULL
+            ? cJSON_AddObjectToObject(
+                logging,
+                "tag_levels"
+            )
+            : NULL;
 
     cJSON *ui =
         cJSON_AddObjectToObject(
@@ -202,6 +238,7 @@ static esp_err_t web_settings_api_get_handler(
         (device != NULL) &&
         (display != NULL) &&
         (logging != NULL) &&
+        (tag_levels != NULL) &&
         (ui != NULL) &&
         (network != NULL) &&
         (wifi_ap != NULL) &&
@@ -212,7 +249,7 @@ static esp_err_t web_settings_api_get_handler(
         (cJSON_AddNumberToObject(
             response,
             "schema_version",
-            settings.schema_version
+            settings->schema_version
         ) != NULL);
 
     valid = valid &&
@@ -226,70 +263,98 @@ static esp_err_t web_settings_api_get_handler(
         (cJSON_AddStringToObject(
             device,
             "target",
-            settings.device.target
+            settings->device.target
         ) != NULL);
 
     valid = valid &&
         (cJSON_AddStringToObject(
             device,
             "name",
-            settings.device.name
+            settings->device.name
         ) != NULL);
 
     valid = valid &&
         (cJSON_AddNumberToObject(
             display,
             "brightness",
-            settings.display.brightness
+            settings->display.brightness
         ) != NULL);
 
     valid = valid &&
         (cJSON_AddBoolToObject(
             logging,
             "sd_enabled",
-            settings.logging.sd_enabled
+            settings->logging.sd_enabled
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddStringToObject(
+            tag_levels,
+            "warning",
+            settings->logging.warning_tags
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddStringToObject(
+            tag_levels,
+            "info",
+            settings->logging.info_tags
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddStringToObject(
+            tag_levels,
+            "debug",
+            settings->logging.debug_tags
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddStringToObject(
+            tag_levels,
+            "disabled",
+            settings->logging.disabled_tags
         ) != NULL);
 
     valid = valid &&
         (cJSON_AddBoolToObject(
             ui,
             "animations_enabled",
-            settings.ui.animations_enabled
+            settings->ui.animations_enabled
         ) != NULL);
 
     valid = valid &&
         (cJSON_AddBoolToObject(
             wifi_ap,
             "enabled",
-            settings.wifi_ap.enabled
+            settings->wifi_ap.enabled
         ) != NULL);
 
     valid = valid &&
         (cJSON_AddStringToObject(
             wifi_ap,
             "ssid",
-            settings.wifi_ap.ssid
+            settings->wifi_ap.ssid
         ) != NULL);
 
     valid = valid &&
         (cJSON_AddStringToObject(
             wifi_ap,
             "password",
-            settings.wifi_ap.password
+            settings->wifi_ap.password
         ) != NULL);
 
     valid = valid &&
         (cJSON_AddBoolToObject(
             wifi_sta,
             "enabled",
-            settings.wifi_sta.enabled
+            settings->wifi_sta.enabled
         ) != NULL);
 
     valid = valid &&
         (cJSON_AddStringToObject(
             wifi_sta,
             "ssid",
-            settings.wifi_sta.ssid
+            settings->wifi_sta.ssid
         ) != NULL);
 
     valid = valid &&
@@ -307,15 +372,22 @@ static esp_err_t web_settings_api_get_handler(
         (cJSON_AddStringToObject(
             wifi_sta,
             "credential_id",
-            settings.wifi_sta.credential_id
+            settings->wifi_sta.credential_id
         ) != NULL);
 
     valid = valid &&
         (cJSON_AddBoolToObject(
             usb_rndis,
             "enabled",
-            settings.usb_rndis.enabled
+            settings->usb_rndis.enabled
         ) != NULL);
+
+    /*
+     * cJSON_AddStringToObject() copies all string values, so the
+     * settings snapshot is no longer required.
+     */
+    heap_caps_free(settings);
+    settings = NULL;
 
     if (!valid) {
         cJSON_Delete(response);
@@ -404,7 +476,7 @@ static esp_err_t web_settings_api_put_handler(
     cJSON *root =
         cJSON_Parse(body);
 
-    free(body);
+    heap_caps_free(body);
 
     if (!cJSON_IsObject(root)) {
         cJSON_Delete(root);
@@ -485,6 +557,135 @@ static esp_err_t web_settings_api_put_handler(
                 settings_service_set_sd_logging_enabled(
                     cJSON_IsTrue(sd_enabled)
                 );
+
+            if (result != ESP_OK) {
+                goto apply_failed;
+            }
+
+            applied = true;
+        }
+
+        const cJSON *tag_levels =
+            cJSON_GetObjectItemCaseSensitive(
+                logging,
+                "tag_levels"
+            );
+
+        if (tag_levels != NULL) {
+            if (!cJSON_IsObject(tag_levels)) {
+                goto invalid_settings;
+            }
+
+            const cJSON *warning =
+                cJSON_GetObjectItemCaseSensitive(
+                    tag_levels,
+                    "warning"
+                );
+
+            const cJSON *info =
+                cJSON_GetObjectItemCaseSensitive(
+                    tag_levels,
+                    "info"
+                );
+
+            const cJSON *debug =
+                cJSON_GetObjectItemCaseSensitive(
+                    tag_levels,
+                    "debug"
+                );
+
+            const cJSON *disabled =
+                cJSON_GetObjectItemCaseSensitive(
+                    tag_levels,
+                    "disabled"
+                );
+
+            const bool has_warning =
+                warning != NULL;
+
+            const bool has_info =
+                info != NULL;
+
+            const bool has_debug =
+                debug != NULL;
+
+            const bool has_disabled =
+                disabled != NULL;
+
+            if (!has_warning &&
+                !has_info &&
+                !has_debug &&
+                !has_disabled) {
+
+                goto invalid_settings;
+            }
+
+            if ((has_warning &&
+                 (!cJSON_IsString(warning) ||
+                  (warning->valuestring == NULL))) ||
+                (has_info &&
+                 (!cJSON_IsString(info) ||
+                  (info->valuestring == NULL))) ||
+                (has_debug &&
+                 (!cJSON_IsString(debug) ||
+                  (debug->valuestring == NULL))) ||
+                (has_disabled &&
+                 (!cJSON_IsString(disabled) ||
+                  (disabled->valuestring == NULL)))) {
+
+                goto invalid_settings;
+            }
+
+            /*
+             * Preserve lists omitted from this partial update.
+             */
+            app_settings_t *current_settings =
+                web_settings_api_allocate_settings();
+
+            if (current_settings == NULL) {
+                result = ESP_ERR_NO_MEM;
+                goto apply_failed;
+            }
+
+            result =
+                settings_model_get(
+                    current_settings
+                );
+
+            if (result != ESP_OK) {
+                heap_caps_free(
+                    current_settings
+                );
+
+                goto apply_failed;
+            }
+
+            result =
+                settings_service_set_log_tag_levels(
+                    has_warning
+                        ? warning->valuestring
+                        : current_settings->
+                            logging.warning_tags,
+
+                    has_info
+                        ? info->valuestring
+                        : current_settings->
+                            logging.info_tags,
+
+                    has_debug
+                        ? debug->valuestring
+                        : current_settings->
+                            logging.debug_tags,
+
+                    has_disabled
+                        ? disabled->valuestring
+                        : current_settings->
+                            logging.disabled_tags
+                );
+
+            heap_caps_free(
+                current_settings
+            );
 
             if (result != ESP_OK) {
                 goto apply_failed;

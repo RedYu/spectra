@@ -7,6 +7,7 @@
 #include "esp_log.h"
 
 #include "system_model.h"
+#include "storage_sd_service.h"
 #include "web_api_common.h"
 
 static const char *TAG =
@@ -102,6 +103,29 @@ static esp_err_t web_system_api_get_handler(
             false,
             "Failed to get system information"
         );
+    }
+
+    storage_sd_info_t sd_info = {0};
+    bool sd_info_available = false;
+
+    if (model.sd_card_mounted) {
+        const esp_err_t sd_result =
+            storage_sd_service_get_info(
+                &sd_info
+            );
+
+        if (sd_result == ESP_OK) {
+            sd_info_available = true;
+
+        } else if (sd_result !=
+                   ESP_ERR_INVALID_STATE) {
+
+            ESP_LOGW(
+                TAG,
+                "Failed to get SD-card information: %s",
+                esp_err_to_name(sd_result)
+            );
+        }
     }
 
     cJSON *response =
@@ -287,6 +311,49 @@ static esp_err_t web_system_api_get_handler(
             response,
             "sd_card_mounted",
             model.sd_card_mounted
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            response,
+            "sd_card_info_available",
+            sd_info_available
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddStringToObject(
+            response,
+            "sd_card_filesystem",
+            sd_info_available
+                ? sd_info.filesystem
+                : ""
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddNumberToObject(
+            response,
+            "sd_card_total_bytes",
+            sd_info_available
+                ? (double)sd_info.total_bytes
+                : 0.0
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddNumberToObject(
+            response,
+            "sd_card_used_bytes",
+            sd_info_available
+                ? (double)sd_info.used_bytes
+                : 0.0
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddNumberToObject(
+            response,
+            "sd_card_free_bytes",
+            sd_info_available
+                ? (double)sd_info.free_bytes
+                : 0.0
         ) != NULL);
 
     valid = valid &&

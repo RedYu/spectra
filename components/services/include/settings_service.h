@@ -260,8 +260,8 @@ esp_err_t settings_service_save(void);
 /**
  * @brief Apply the current settings to application services.
  *
- * Applies display brightness, SD-card logging, GUI animations and the
- * configured Wi-Fi SoftAP and Station states.
+ * Applies display brightness, SD-card logging, per-tag logging levels,
+ * GUI animations and the configured Wi-Fi SoftAP and Station states.
  *
  * STA credentials are loaded separately from NVS and must match the
  * SSID and credential identifier stored in the settings model.
@@ -291,6 +291,41 @@ esp_err_t settings_service_apply(void);
  */
 esp_err_t settings_service_get_restart_required(
     bool *restart_required
+);
+
+/**
+ * @brief Configure and apply per-tag logging levels.
+ *
+ * Each argument contains a comma-separated list of ESP-IDF log tags.
+ * Empty strings are accepted and clear the corresponding list.
+ *
+ * Tags previously managed by this setting are restored to the default
+ * application log level before the new configuration is applied.
+ *
+ * If the same tag appears in multiple lists, the last applied level
+ * takes precedence. The application order is warning, info, debug and
+ * disabled, so disabled has the highest precedence.
+ *
+ * The settings model is updated and the new levels are applied
+ * immediately. The setting is not automatically saved to persistent
+ * storage; call settings_service_save() after this function succeeds.
+ *
+ * @param[in] warning_tags Tags whose level is set to ESP_LOG_WARN.
+ * @param[in] info_tags Tags whose level is set to ESP_LOG_INFO.
+ * @param[in] debug_tags Tags whose level is set to ESP_LOG_DEBUG.
+ * @param[in] disabled_tags Tags whose logging is disabled.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if an argument or
+ * tag-list format is invalid, ESP_ERR_INVALID_SIZE if a list or tag
+ * is too long, ESP_ERR_INVALID_STATE if a required service is not
+ * initialized, ESP_ERR_TIMEOUT if a required lock cannot be acquired,
+ * otherwise an ESP-IDF error code.
+ */
+esp_err_t settings_service_set_log_tag_levels(
+    const char *warning_tags,
+    const char *info_tags,
+    const char *debug_tags,
+    const char *disabled_tags
 );
 
 #ifdef __cplusplus

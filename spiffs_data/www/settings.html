@@ -571,6 +571,42 @@
             overflow-y: auto;
         }
 
+        .device-summary {
+            display: grid;
+            grid-template-columns:
+                repeat(3, minmax(0, 1fr));
+            gap: 1px;
+            padding: 0;
+            background: var(--border);
+        }
+
+        .device-summary-item {
+            min-width: 0;
+            padding: 18px 20px;
+            background: var(--surface);
+        }
+
+        .device-summary-label {
+            margin-bottom: 7px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .device-summary-value {
+            overflow: hidden;
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 600;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        @media (max-width: 680px) {
+            .device-summary {
+                grid-template-columns: 1fr;
+            }
+        }
+
         @media (max-width: 700px) {
             .header-content {
                 align-items: flex-start;
@@ -697,41 +733,41 @@
                 </p>
             </header>
 
-            <div class="card-content">
-                <div class="setting-row">
-                    <div class="setting-label">
+            <div class="device-summary">
+                <div class="device-summary-item">
+                    <div class="device-summary-label">
                         Target
                     </div>
 
                     <div
                         id="device-target"
-                        class="readonly-value"
+                        class="device-summary-value"
                     >
                         -
                     </div>
                 </div>
 
-                <div class="setting-row">
-                    <div class="setting-label">
+                <div class="device-summary-item">
+                    <div class="device-summary-label">
                         Device name
                     </div>
 
                     <div
                         id="device-name"
-                        class="readonly-value"
+                        class="device-summary-value"
                     >
                         -
                     </div>
                 </div>
 
-                <div class="setting-row">
-                    <div class="setting-label">
+                <div class="device-summary-item">
+                    <div class="device-summary-label">
                         Schema version
                     </div>
 
                     <div
                         id="schema-version"
-                        class="readonly-value"
+                        class="device-summary-value"
                     >
                         -
                     </div>
@@ -835,6 +871,101 @@
 
                             <span class="switch-slider"></span>
                         </label>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Warning tags
+                        </div>
+
+                        <div class="setting-description">
+                            Comma-separated tags logged at warning level
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <input
+                            id="log-warning-tags"
+                            class="text-input"
+                            type="text"
+                            maxlength="255"
+                            autocomplete="off"
+                            spellcheck="false"
+                            placeholder="wifi,wifi_init,tusb_desc"
+                        >
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Info tags
+                        </div>
+
+                        <div class="setting-description">
+                            Comma-separated tags logged at information level
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <input
+                            id="log-info-tags"
+                            class="text-input"
+                            type="text"
+                            maxlength="255"
+                            autocomplete="off"
+                            spellcheck="false"
+                            placeholder="settings_service,web_service"
+                        >
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Debug tags
+                        </div>
+
+                        <div class="setting-description">
+                            Comma-separated tags with debug logging enabled
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <input
+                            id="log-debug-tags"
+                            class="text-input"
+                            type="text"
+                            maxlength="255"
+                            autocomplete="off"
+                            spellcheck="false"
+                            placeholder="web_settings_api"
+                        >
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Disabled tags
+                        </div>
+
+                        <div class="setting-description">
+                            Comma-separated tags whose output is disabled
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <input
+                            id="log-disabled-tags"
+                            class="text-input"
+                            type="text"
+                            maxlength="255"
+                            autocomplete="off"
+                            spellcheck="false"
+                            placeholder="memory,dns_redirect_server"
+                        >
                     </div>
                 </div>
             </div>
@@ -1220,6 +1351,26 @@
 
             sdLogging:
                 document.getElementById("sd-logging"),
+
+            logWarningTags:
+                document.getElementById(
+                    "log-warning-tags"
+                ),
+
+            logInfoTags:
+                document.getElementById(
+                    "log-info-tags"
+                ),
+
+            logDebugTags:
+                document.getElementById(
+                    "log-debug-tags"
+                ),
+
+            logDisabledTags:
+                document.getElementById(
+                    "log-disabled-tags"
+                ),
 
             wifiApEnabled:
                 document.getElementById("wifi-ap-enabled"),
@@ -1736,6 +1887,9 @@
             const logging =
                 settings.logging || {};
 
+            const tagLevels =
+                logging.tag_levels || {};
+
             const ui =
                 settings.ui || {};
 
@@ -1774,6 +1928,18 @@
 
             elements.sdLogging.checked =
                 logging.sd_enabled === true;
+
+            elements.logWarningTags.value =
+                tagLevels.warning ?? "";
+
+            elements.logInfoTags.value =
+                tagLevels.info ?? "";
+
+            elements.logDebugTags.value =
+                tagLevels.debug ?? "";
+
+            elements.logDisabledTags.value =
+                tagLevels.disabled ?? "";
 
             elements.wifiApEnabled.checked =
                 wifiAp.enabled === true;
@@ -1925,7 +2091,25 @@
 
                 logging: {
                     sd_enabled:
-                        elements.sdLogging.checked
+                        elements.sdLogging.checked,
+
+                    tag_levels: {
+                        warning:
+                            elements.logWarningTags
+                                .value.trim(),
+
+                        info:
+                            elements.logInfoTags
+                                .value.trim(),
+
+                        debug:
+                            elements.logDebugTags
+                                .value.trim(),
+
+                        disabled:
+                            elements.logDisabledTags
+                                .value.trim()
+                    }
                 },
 
                 ui: {

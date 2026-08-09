@@ -89,6 +89,33 @@ esp_err_t logging_service_get_dropped_count(
  */
 esp_err_t logging_service_reset_dropped_count(void);
 
+/**
+ * @brief Apply per-tag ESP-IDF log levels.
+ *
+ * Arguments contain comma-separated ESP-IDF log tags. Whitespace
+ * around tags is ignored. Tags removed from the configuration are
+ * restored to the default ESP-IDF log level.
+ *
+ * When a tag appears in multiple lists, the following priority is
+ * used: disabled, debug, info, warning.
+ *
+ * @param[in] warning_tags Tags assigned ESP_LOG_WARN.
+ * @param[in] info_tags Tags assigned ESP_LOG_INFO.
+ * @param[in] debug_tags Tags assigned ESP_LOG_DEBUG.
+ * @param[in] disabled_tags Tags assigned ESP_LOG_NONE.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if an argument or
+ * tag is invalid, ESP_ERR_INVALID_SIZE if a list or tag is too long,
+ * ESP_ERR_INVALID_STATE if the service is not initialized, otherwise
+ * an ESP-IDF error code.
+ */
+esp_err_t logging_service_set_tag_levels(
+    const char *warning_tags,
+    const char *info_tags,
+    const char *debug_tags,
+    const char *disabled_tags
+);
+
 #ifdef __cplusplus
 }
 #endif
