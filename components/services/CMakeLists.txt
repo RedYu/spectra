@@ -15,9 +15,19 @@ idf_component_register(
         "internet_service.c"
         "mdns_service.c"
         "power_service.c"
+        "web_content_service.c"
+
+        "web_api/web_api_common.c"
+        "web_api/web_system_api.c"
+        "web_api/web_power_api.c"
+        "web_api/web_settings_api.c"
+        "web_api/web_files_api.c"
+        "web_api/web_network_api.c"
 
     INCLUDE_DIRS
         "include"
+
+        "web_api/include"
 
     REQUIRES
         models

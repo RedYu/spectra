@@ -11,12 +11,31 @@ extern "C" {
 #define USB_NETWORK_INTERFACE_KEY  ("USB_RNDIS")
 #define WIFI_AP_INTERFACE_KEY      ("WIFI_AP_DEF")
 
+#define NETWORK_SERVICE_DNS_NAME_MAX_LENGTH  (64U)
+
+/**
+ * @brief Current local DNS service information.
+ *
+ * The local_name array includes space for the terminating null
+ * character.
+ */
+typedef struct
+{
+    bool started;
+
+    char local_name[
+        NETWORK_SERVICE_DNS_NAME_MAX_LENGTH
+    ];
+
+} network_service_dns_info_t;
+
 /**
  * @brief Initialize the global network stack.
  *
- * Initializes ESP-NETIF and creates the default ESP-IDF event loop.
- * This function is idempotent and may be called more than once.
+ * Initializes ESP-NETIF, creates the default ESP-IDF event loop and
+ * starts the local DNS service.
  *
+ * This function is idempotent and may be called more than once.
  * The network service must be initialized before creating USB,
  * Wi-Fi, Ethernet, or other ESP-NETIF interfaces.
  *
@@ -27,14 +46,31 @@ esp_err_t network_service_init(void);
 /**
  * @brief Get the global network-stack initialization state.
  *
- * @param[out] initialized Set to true when ESP-NETIF and the default
- * event loop are initialized.
+ * The returned state includes successful DNS-server initialization.
+ *
+ * @param[out] initialized Set to true when ESP-NETIF, the default
+ * event loop and the DNS server are initialized.
  *
  * @return ESP_OK on success or ESP_ERR_INVALID_ARG if initialized
  * is NULL.
  */
 esp_err_t network_service_get_initialized(
     bool *initialized
+);
+
+/**
+ * @brief Get the current local DNS service information.
+ *
+ * This function succeeds even when the DNS server is stopped. In that
+ * case, started is false while local_name still contains the configured
+ * local DNS name.
+ *
+ * @param[out] info Destination information structure.
+ *
+ * @return ESP_OK on success or ESP_ERR_INVALID_ARG if info is NULL.
+ */
+esp_err_t network_service_get_dns_info(
+    network_service_dns_info_t *info
 );
 
 #ifdef __cplusplus

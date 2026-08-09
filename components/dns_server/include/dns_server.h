@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "esp_netif_ip_addr.h"
@@ -42,7 +43,9 @@ extern "C" {
  * A rule matches both the requested DNS name and the source IPv4
  * network. A zero source netmask makes the rule apply to all clients.
  *
- * String pointers must remain valid during the DNS server lifetime.
+ * The DNS server copies this structure, but it does not copy strings.
+ * The name and if_key pointers must remain valid during the complete
+ * DNS server lifetime.
  */
 typedef struct
 {
@@ -80,7 +83,10 @@ typedef struct
 typedef struct
 {
     size_t num_of_entries;
-    dns_entry_pair_t item[DNS_SERVER_MAX_ITEMS];
+
+    dns_entry_pair_t item[
+        DNS_SERVER_MAX_ITEMS
+    ];
 
 } dns_server_config_t;
 
@@ -96,16 +102,41 @@ typedef struct dns_server_handle *dns_server_handle_t;
  * configuration entry matching both the queried name and the source
  * client network.
  *
+ * This function creates the server task asynchronously. A returned
+ * handle means that the task was created, but the UDP socket may not
+ * yet be bound. Use dns_server_get_started() to check readiness.
+ *
  * @param[in] config DNS server configuration.
  *
- * @return DNS server handle on success; otherwise NULL.
+ * @return DNS server handle when the task is created; otherwise NULL.
  */
 dns_server_handle_t start_dns_server(
     const dns_server_config_t *config
 );
 
 /**
+ * @brief Check whether the DNS server socket is ready.
+ *
+ * The handle must remain valid while this function is called.
+ *
+ * @param[in] handle DNS server handle. NULL is accepted.
+ *
+ * @return true when the server task has successfully bound its UDP
+ * socket to port 53; otherwise false.
+ */
+bool dns_server_get_started(
+    dns_server_handle_t handle
+);
+
+/**
  * @brief Stop the DNS server and release its resources.
+ *
+ * This function waits for the server task to terminate. The handle
+ * becomes invalid after this function returns.
+ *
+ * No other task may call dns_server_get_started() concurrently with
+ * this function unless access to the handle is synchronized by the
+ * caller.
  *
  * @param[in] handle DNS server handle. NULL is accepted.
  */

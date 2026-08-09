@@ -5,24 +5,19 @@
  */
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/param.h>
-#include <inttypes.h>
-#include <stdatomic.h>
 #include <strings.h>
 
 #include "esp_log.h"
-#include "esp_system.h"
-#include "esp_check.h"
 #include "esp_netif.h"
 
-#include "lwip/err.h"
 #include "lwip/sockets.h"
-#include "lwip/sys.h"
-#include "lwip/netdb.h"
+
 #include "dns_server.h"
 
 #include "freertos/FreeRTOS.h"
@@ -70,7 +65,8 @@ typedef struct __attribute__((__packed__))
 // DNS server handle
 struct dns_server_handle {
     atomic_bool started;
-    
+    atomic_bool ready;
+
     TaskHandle_t task;
     SemaphoreHandle_t stopped;
 
@@ -491,6 +487,11 @@ static void dns_server_task(
         return;
     }
 
+    atomic_store(
+        &handle->ready,
+        true
+    );
+
     while (atomic_load(
            &handle->started
        )) {
@@ -582,6 +583,11 @@ static void dns_server_task(
         }
     }
 
+    atomic_store(
+        &handle->ready,
+        false
+    );
+
     const int descriptor =
         atomic_exchange(
             &handle->socket_fd,
@@ -665,6 +671,11 @@ dns_server_handle_t start_dns_server(
     );
 
     atomic_init(
+        &handle->ready,
+        false
+    );
+
+    atomic_init(
         &handle->socket_fd,
         -1
     );
@@ -710,6 +721,11 @@ void stop_dns_server(
     }
 
     atomic_store(
+        &handle->ready,
+        false
+    );
+
+    atomic_store(
         &handle->started,
         false
     );
@@ -736,4 +752,17 @@ void stop_dns_server(
     );
 
     free(handle);
+}
+
+bool dns_server_get_started(
+    dns_server_handle_t handle
+)
+{
+    if (handle == NULL) {
+        return false;
+    }
+
+    return atomic_load(
+        &handle->ready
+    );
 }

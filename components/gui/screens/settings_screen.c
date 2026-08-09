@@ -295,7 +295,7 @@ static const char *settings_screen_reset_reason_to_string(
             return "Task watchdog";
 
         case ESP_RST_WDT:
-            return "Watchdog";
+            return "Other watchdog";
 
         case ESP_RST_DEEPSLEEP:
             return "Deep sleep";
@@ -304,7 +304,22 @@ static const char *settings_screen_reset_reason_to_string(
             return "Brownout";
 
         case ESP_RST_SDIO:
-            return "SDIO";
+            return "SDIO reset";
+
+        case ESP_RST_USB:
+            return "USB reset";
+
+        case ESP_RST_JTAG:
+            return "JTAG reset";
+
+        case ESP_RST_EFUSE:
+            return "eFuse error";
+
+        case ESP_RST_PWR_GLITCH:
+            return "Power glitch";
+
+        case ESP_RST_CPU_LOCKUP:
+            return "CPU lockup";
 
         case ESP_RST_UNKNOWN:
         default:

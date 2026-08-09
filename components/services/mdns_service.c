@@ -10,6 +10,14 @@
 
 #define MDNS_SERVICE_HTTP_PORT  (80U)
 
+#define MDNS_SERVICE_INSTANCE_NAME \
+    ("Spectra CAN Analyzer")
+
+#define MDNS_SERVICE_TYPE \
+    ("_http._tcp")
+
+#define MDNS_SERVICE_PROTOCOL  ("_tcp")
+
 static const char *TAG =
     "mdns_service";
 
@@ -87,7 +95,7 @@ esp_err_t mdns_service_start(void)
 
     result =
         mdns_instance_name_set(
-            "Spectra CAN Analyzer"
+            MDNS_SERVICE_INSTANCE_NAME
         );
 
     if (result != ESP_OK) {
@@ -112,7 +120,7 @@ esp_err_t mdns_service_start(void)
         mdns_service_add(
             "Spectra Web Interface",
             "_http",
-            "_tcp",
+            MDNS_SERVICE_PROTOCOL,
             MDNS_SERVICE_HTTP_PORT,
             text_records,
             sizeof(text_records) /
@@ -147,6 +155,11 @@ void mdns_service_stop(void)
 
     s_started = false;
     s_hostname[0] = '\0';
+
+    ESP_LOGI(
+        TAG,
+        "mDNS service stopped"
+    );
 }
 
 esp_err_t mdns_service_get_hostname(
@@ -178,6 +191,46 @@ esp_err_t mdns_service_get_hostname(
         s_hostname,
         hostname_size
     );
+
+    return ESP_OK;
+}
+
+esp_err_t mdns_service_get_info(
+    mdns_service_info_t *info
+)
+{
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        info,
+        0,
+        sizeof(*info)
+    );
+
+    info->started = s_started;
+    info->port = MDNS_SERVICE_HTTP_PORT;
+
+    (void)strlcpy(
+        info->instance_name,
+        MDNS_SERVICE_INSTANCE_NAME,
+        sizeof(info->instance_name)
+    );
+
+    (void)strlcpy(
+        info->service,
+        MDNS_SERVICE_TYPE,
+        sizeof(info->service)
+    );
+
+    if (s_started) {
+        (void)strlcpy(
+            info->hostname,
+            s_hostname,
+            sizeof(info->hostname)
+        );
+    }
 
     return ESP_OK;
 }

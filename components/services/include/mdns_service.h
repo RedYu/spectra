@@ -1,6 +1,8 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 
@@ -8,7 +10,35 @@
 extern "C" {
 #endif
 
-#define MDNS_SERVICE_HOSTNAME_MAX_LENGTH  (32U)
+#define MDNS_SERVICE_HOSTNAME_MAX_LENGTH       (32U)
+#define MDNS_SERVICE_INSTANCE_NAME_MAX_LENGTH  (64U)
+#define MDNS_SERVICE_TYPE_MAX_LENGTH           (32U)
+
+/**
+ * @brief Current mDNS service information.
+ *
+ * String-array sizes include space for the terminating null character.
+ * The hostname does not include the ".local" suffix.
+ */
+typedef struct
+{
+    bool started;
+
+    char hostname[
+        MDNS_SERVICE_HOSTNAME_MAX_LENGTH
+    ];
+
+    char instance_name[
+        MDNS_SERVICE_INSTANCE_NAME_MAX_LENGTH
+    ];
+
+    char service[
+        MDNS_SERVICE_TYPE_MAX_LENGTH
+    ];
+
+    uint16_t port;
+
+} mdns_service_info_t;
 
 /**
  * @brief Start local mDNS discovery.
@@ -33,7 +63,26 @@ esp_err_t mdns_service_start(void);
 void mdns_service_stop(void);
 
 /**
+ * @brief Get the current mDNS service information.
+ *
+ * This function also succeeds when mDNS is stopped. In that case,
+ * started is false and hostname is empty. Static service information,
+ * including the instance name, service type and port, is still
+ * returned.
+ *
+ * @param[out] info Destination information structure.
+ *
+ * @return ESP_OK on success or ESP_ERR_INVALID_ARG if info is NULL.
+ */
+esp_err_t mdns_service_get_info(
+    mdns_service_info_t *info
+);
+
+/**
  * @brief Copy the current mDNS hostname without the .local suffix.
+ *
+ * Unlike mdns_service_get_info(), this function requires the service
+ * to be running.
  *
  * @param[out] hostname Destination buffer.
  * @param[in] hostname_size Destination buffer size.

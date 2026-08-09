@@ -1,10 +1,14 @@
 #include "network_service.h"
 
+#include <string.h>
+
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 
 #include "dns_server.h"
+
+#define NETWORK_SERVICE_DNS_NAME  ("spectra.device")
 
 static const char *TAG = "network_service";
 
@@ -110,7 +114,7 @@ static esp_err_t network_service_start_dns(void)
 
         .item = {
             {
-                .name = "spectra.device",
+                .name = NETWORK_SERVICE_DNS_NAME,
                 .if_key = USB_NETWORK_INTERFACE_KEY,
 
                 .source_network = {
@@ -132,7 +136,7 @@ static esp_err_t network_service_start_dns(void)
                 },
             },
             {
-                .name = "spectra.device",
+                .name = NETWORK_SERVICE_DNS_NAME,
 
                 /*
                  * Use the actual if_key assigned to the SoftAP
@@ -178,6 +182,34 @@ static esp_err_t network_service_start_dns(void)
     ESP_LOGI(
         TAG,
         "DNS server started for USB and Wi-Fi networks"
+    );
+
+    return ESP_OK;
+}
+
+esp_err_t network_service_get_dns_info(
+    network_service_dns_info_t *info
+)
+{
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        info,
+        0,
+        sizeof(*info)
+    );
+
+    info->started =
+        dns_server_get_started(
+            s_dns_server
+        );
+
+    (void)strlcpy(
+        info->local_name,
+        NETWORK_SERVICE_DNS_NAME,
+        sizeof(info->local_name)
     );
 
     return ESP_OK;
