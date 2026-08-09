@@ -4,9 +4,11 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 #include "web_api_common.h"
 #include "wifi_service.h"
@@ -16,6 +18,224 @@
 
 static const char *TAG =
     "web_network_api";
+
+static const char *web_network_api_scan_state_to_string(
+    wifi_service_scan_state_t state
+)
+{
+    switch (state) {
+        case WIFI_SERVICE_SCAN_STATE_IDLE:
+            return "idle";
+
+        case WIFI_SERVICE_SCAN_STATE_RUNNING:
+            return "running";
+
+        case WIFI_SERVICE_SCAN_STATE_COMPLETE:
+            return "complete";
+
+        case WIFI_SERVICE_SCAN_STATE_ERROR:
+            return "error";
+
+        default:
+            return "unknown";
+    }
+}
+
+static bool web_network_api_add_wifi_scan(
+    cJSON *wifi
+)
+{
+    if (wifi == NULL) {
+        return false;
+    }
+
+    wifi_service_scan_info_t scan_info = {0};
+
+    const esp_err_t info_result =
+        wifi_service_get_scan_info(
+            &scan_info
+        );
+
+    if (info_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to get Wi-Fi scan information: %s",
+            esp_err_to_name(info_result)
+        );
+
+        return false;
+    }
+
+    cJSON *scan =
+        cJSON_AddObjectToObject(
+            wifi,
+            "scan"
+        );
+
+    if (scan == NULL) {
+        return false;
+    }
+
+    bool valid =
+        (cJSON_AddStringToObject(
+            scan,
+            "state",
+            web_network_api_scan_state_to_string(
+                scan_info.state
+            )
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            scan,
+            "result_count",
+            (double)scan_info.result_count
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            scan,
+            "truncated",
+            scan_info.truncated
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            scan,
+            "last_error",
+            scan_info.last_error
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            scan,
+            "last_error_name",
+            esp_err_to_name(
+                scan_info.last_error
+            )
+        ) != NULL);
+
+    cJSON *networks =
+        cJSON_AddArrayToObject(
+            scan,
+            "networks"
+        );
+
+    valid = valid &&
+        (networks != NULL);
+
+    if (!valid) {
+        return false;
+    }
+
+    if (scan_info.state !=
+        WIFI_SERVICE_SCAN_STATE_COMPLETE) {
+
+        return true;
+    }
+
+    wifi_service_scan_result_t *results =
+        heap_caps_calloc(
+            WIFI_SERVICE_SCAN_MAX_RESULT_COUNT,
+            sizeof(*results),
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
+
+    if (results == NULL) {
+        return false;
+    }
+
+    size_t result_count = 0U;
+
+    const esp_err_t result =
+        wifi_service_get_scan_results(
+            results,
+            WIFI_SERVICE_SCAN_MAX_RESULT_COUNT,
+            &result_count
+        );
+
+    if (result != ESP_OK) {
+        free(results);
+
+        ESP_LOGW(
+            TAG,
+            "Failed to get Wi-Fi scan results: %s",
+            esp_err_to_name(result)
+        );
+
+        return false;
+    }
+
+    for (size_t index = 0U;
+         valid && (index < result_count);
+         ++index) {
+
+        char bssid[18];
+
+        const int written =
+            snprintf(
+                bssid,
+                sizeof(bssid),
+                "%02X:%02X:%02X:%02X:%02X:%02X",
+                results[index].bssid[0],
+                results[index].bssid[1],
+                results[index].bssid[2],
+                results[index].bssid[3],
+                results[index].bssid[4],
+                results[index].bssid[5]
+            );
+
+        if ((written < 0) ||
+            ((size_t)written >= sizeof(bssid))) {
+
+            valid = false;
+            break;
+        }
+
+        cJSON *network =
+            cJSON_CreateObject();
+
+        if (network == NULL) {
+            valid = false;
+            break;
+        }
+
+        const bool network_valid =
+            (cJSON_AddStringToObject(
+                network,
+                "ssid",
+                results[index].ssid
+            ) != NULL) &&
+            (cJSON_AddStringToObject(
+                network,
+                "bssid",
+                bssid
+            ) != NULL) &&
+            (cJSON_AddNumberToObject(
+                network,
+                "rssi",
+                results[index].rssi
+            ) != NULL) &&
+            (cJSON_AddNumberToObject(
+                network,
+                "channel",
+                results[index].channel
+            ) != NULL) &&
+            (cJSON_AddBoolToObject(
+                network,
+                "password_required",
+                results[index].password_required
+            ) != NULL);
+
+        if (!network_valid ||
+            !cJSON_AddItemToArray(
+                networks,
+                network
+            )) {
+
+            cJSON_Delete(network);
+            valid = false;
+            break;
+        }
+    }
+
+    free(results);
+
+    return valid;
+}
 
 static bool web_network_api_add_dns(
     cJSON *response,
@@ -544,6 +764,67 @@ static bool web_network_api_add_usb_rndis(
     return valid;
 }
 
+static esp_err_t web_network_api_wifi_scan_handler(
+    httpd_req_t *request
+)
+{
+    if (request == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    wifi_service_scan_info_t scan_info = {0};
+
+    esp_err_t result =
+        wifi_service_get_scan_info(
+            &scan_info
+        );
+
+    if (result != ESP_OK) {
+        return web_api_send_message(
+            request,
+            "503 Service Unavailable",
+            false,
+            "Wi-Fi scan service is not available"
+        );
+    }
+
+    if (scan_info.state ==
+        WIFI_SERVICE_SCAN_STATE_RUNNING) {
+
+        return web_api_send_message(
+            request,
+            "409 Conflict",
+            false,
+            "Wi-Fi scan is already running"
+        );
+    }
+
+    result =
+        wifi_service_start_scan();
+
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to start Wi-Fi scan: %s",
+            esp_err_to_name(result)
+        );
+
+        return web_api_send_message(
+            request,
+            "503 Service Unavailable",
+            false,
+            "Failed to start Wi-Fi scan"
+        );
+    }
+
+    return web_api_send_message(
+        request,
+        "202 Accepted",
+        true,
+        "Wi-Fi scan started"
+    );
+}
+
 static esp_err_t web_network_api_get_handler(
     httpd_req_t *request
 )
@@ -700,6 +981,13 @@ static esp_err_t web_network_api_get_handler(
 
     if (valid) {
         valid =
+            web_network_api_add_wifi_scan(
+                wifi
+            );
+    }
+
+    if (valid) {
+        valid =
             web_network_api_add_usb_rndis(
                 response,
                 &usb_info
@@ -760,7 +1048,15 @@ esp_err_t web_network_api_register(
         .user_ctx = NULL,
     };
 
-    const esp_err_t result =
+    static const httpd_uri_t wifi_scan_uri = {
+        .uri = "/api/network/wifi/scan",
+        .method = HTTP_POST,
+        .handler =
+            web_network_api_wifi_scan_handler,
+        .user_ctx = NULL,
+    };
+
+    esp_err_t result =
         httpd_register_uri_handler(
             server,
             &uri
@@ -770,6 +1066,21 @@ esp_err_t web_network_api_register(
         ESP_LOGE(
             TAG,
             "Failed to register GET /api/network: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    result =
+        httpd_register_uri_handler(
+            server,
+            &wifi_scan_uri
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to register POST "
+            "/api/network/wifi/scan: %s",
             esp_err_to_name(result)
         );
     }

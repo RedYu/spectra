@@ -29,7 +29,23 @@ let currentOffset = 0;
 let hasMore = false;
 let activeRequest = null;
 
-function joinPath(base, name) {
+function setStatus(
+    message,
+    error = false
+) {
+    statusElement.textContent =
+        message;
+
+    statusElement.classList.toggle(
+        "error",
+        error
+    );
+}
+
+function joinPath(
+    base,
+    name
+) {
     if (base === "/") {
         return `/${name}`;
     }
@@ -58,7 +74,7 @@ function formatSize(size) {
     if (!Number.isFinite(size) ||
         size < 0) {
 
-        return "—";
+        return "-";
     }
 
     if (size < 1024) {
@@ -66,7 +82,9 @@ function formatSize(size) {
     }
 
     if (size < 1024 * 1024) {
-        return `${(size / 1024).toFixed(1)} KB`;
+        return `${(
+            size / 1024
+        ).toFixed(1)} KB`;
     }
 
     if (size < 1024 * 1024 * 1024) {
@@ -92,20 +110,25 @@ function updateNavigation() {
     nextPageButton.disabled =
         !hasMore;
 
+    const entryCount =
+        fileList.children.length;
+
+    if (entryCount === 0) {
+        pageStatusElement.textContent =
+            "No entries";
+
+        return;
+    }
+
     const firstEntry =
         currentOffset + 1;
 
     const lastEntry =
         currentOffset +
-        fileList.children.length;
+        entryCount;
 
-    if (fileList.children.length === 0) {
-        pageStatusElement.textContent =
-            "No entries";
-    } else {
-        pageStatusElement.textContent =
-            `${firstEntry}–${lastEntry}`;
-    }
+    pageStatusElement.textContent =
+        `${firstEntry}-${lastEntry}`;
 }
 
 function createFileRow(
@@ -130,12 +153,15 @@ function createFileRow(
     nameCell.textContent =
         entry.name;
 
+    nameCell.title =
+        entry.name;
+
     typeCell.textContent =
         entry.type;
 
     sizeCell.textContent =
         entry.type === "directory"
-            ? "—"
+            ? "-"
             : formatSize(entry.size);
 
     const button =
@@ -157,6 +183,7 @@ function createFileRow(
                     );
 
                 currentOffset = 0;
+                hasMore = false;
 
                 loadFiles();
             }
@@ -215,8 +242,9 @@ async function loadFiles() {
     const volume =
         volumeSelector.value;
 
-    statusElement.textContent =
-        "Loading...";
+    setStatus(
+        "Loading..."
+    );
 
     backButton.disabled = true;
     previousPageButton.disabled = true;
@@ -245,6 +273,7 @@ async function loadFiles() {
         try {
             result =
                 await response.json();
+
         } catch {
             throw new Error(
                 `Invalid server response: HTTP ${response.status}`
@@ -258,9 +287,11 @@ async function loadFiles() {
             );
         }
 
-        if (!Array.isArray(result.entries)) {
+        if ((typeof result.path !== "string") ||
+            !Array.isArray(result.entries)) {
+
             throw new Error(
-                "Invalid file list response"
+                "Invalid file-list response"
             );
         }
 
@@ -279,11 +310,16 @@ async function loadFiles() {
         currentPathElement.textContent =
             currentPath;
 
+        currentPathElement.title =
+            currentPath;
+
         hasMore =
             result.has_more === true;
 
         for (const entry of result.entries) {
-            if ((typeof entry.name !== "string") ||
+            if ((typeof entry !== "object") ||
+                (entry === null) ||
+                (typeof entry.name !== "string") ||
                 ((entry.type !== "file") &&
                  (entry.type !== "directory"))) {
 
@@ -304,10 +340,11 @@ async function loadFiles() {
         const count =
             fileList.children.length;
 
-        statusElement.textContent =
+        setStatus(
             count === 1
                 ? "1 entry"
-                : `${count} entries`;
+                : `${count} entries`
+        );
 
         updateNavigation();
 
@@ -321,8 +358,15 @@ async function loadFiles() {
 
             hasMore = false;
 
-            statusElement.textContent =
-                `Failed to load files: ${error.message}`;
+            const message =
+                error instanceof Error
+                    ? error.message
+                    : String(error);
+
+            setStatus(
+                `Failed to load files: ${message}`,
+                true
+            );
 
             updateNavigation();
         }
@@ -347,6 +391,7 @@ backButton.addEventListener(
             );
 
         currentOffset = 0;
+        hasMore = false;
 
         loadFiles();
     }
@@ -365,6 +410,8 @@ previousPageButton.addEventListener(
                   FILE_LIST_LIMIT
                 : 0;
 
+        hasMore = false;
+
         loadFiles();
     }
 );
@@ -379,6 +426,8 @@ nextPageButton.addEventListener(
         currentOffset +=
             FILE_LIST_LIMIT;
 
+        hasMore = false;
+
         loadFiles();
     }
 );
@@ -389,6 +438,12 @@ volumeSelector.addEventListener(
         currentPath = "/";
         currentOffset = 0;
         hasMore = false;
+
+        currentPathElement.textContent =
+            currentPath;
+
+        currentPathElement.title =
+            currentPath;
 
         loadFiles();
     }

@@ -1,0 +1,2234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <link
+        rel="shortcut icon"
+        href="/favicon.ico"
+        type="image/x-icon"
+    >
+
+    <link
+        rel="icon"
+        href="/favicon.ico"
+        type="image/x-icon"
+    >
+
+    <title>Spectra Settings</title>
+
+    <style>
+        :root {
+            color-scheme: dark;
+
+            --background: #0b0f14;
+            --surface: #121820;
+            --surface-hover: #171f29;
+            --input: #0d131a;
+            --border: #27313d;
+
+            --text: #f3f6f9;
+            --muted: #8f9ba8;
+
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #31c48d;
+            --warning: #f6ad55;
+            --danger: #f05252;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family:
+                Inter,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Arial,
+                sans-serif;
+            background: var(--background);
+            color: var(--text);
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        .header {
+            position: sticky;
+            z-index: 10;
+            top: 0;
+            border-bottom: 1px solid var(--border);
+            background: rgba(11, 15, 20, 0.95);
+        }
+
+        .header-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            width: 100%;
+            max-width: 980px;
+            min-height: 68px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            gap: 12px;
+        }
+
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            flex: 0 0 auto;
+            border: 1px solid #4f8cff;
+            border-radius: 10px;
+            background:
+                linear-gradient(
+                    145deg,
+                    #3b82f6,
+                    #1d4ed8
+                );
+            box-shadow:
+                0 0 24px rgba(59, 130, 246, 0.3);
+        }
+
+        .brand-title {
+            overflow: hidden;
+            font-size: 18px;
+            font-weight: 700;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .brand-subtitle {
+            overflow: hidden;
+            margin-top: 2px;
+            color: var(--muted);
+            font-size: 12px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .navigation {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .navigation a {
+            padding: 9px 13px;
+            border-radius: 8px;
+            color: var(--muted);
+            text-decoration: none;
+        }
+
+        .navigation a:hover,
+        .navigation a.active {
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 28px 20px 110px;
+        }
+
+        .page-header {
+            margin-bottom: 24px;
+        }
+
+        .page-header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+
+        .page-header p {
+            margin: 7px 0 0;
+            color: var(--muted);
+        }
+
+        .notice {
+            display: none;
+            margin-bottom: 18px;
+            padding: 13px 16px;
+            border: 1px solid rgba(246, 173, 85, 0.35);
+            border-radius: 10px;
+            background: rgba(246, 173, 85, 0.1);
+            color: var(--warning);
+            font-size: 13px;
+        }
+
+        .notice.visible {
+            display: block;
+        }
+
+        .card {
+            overflow: hidden;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: var(--surface);
+        }
+
+        .card-header {
+            padding: 18px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-header h2 {
+            margin: 0;
+            font-size: 17px;
+        }
+
+        .card-header p {
+            margin: 5px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .card-content {
+            padding: 4px 20px;
+        }
+
+        .setting-row {
+            display: grid;
+            grid-template-columns:
+                minmax(180px, 0.8fr)
+                minmax(260px, 1.2fr);
+            align-items: center;
+            gap: 24px;
+            min-height: 68px;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(39, 49, 61, 0.72);
+        }
+
+        .setting-row:last-child {
+            border-bottom: 0;
+        }
+
+        .setting-label {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .setting-description {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 400;
+            line-height: 1.45;
+        }
+
+        .setting-control {
+            min-width: 0;
+        }
+
+        .readonly-value {
+            overflow: hidden;
+            color: var(--text);
+            font-size: 14px;
+            text-align: right;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .text-input {
+            width: 100%;
+            min-height: 42px;
+            padding: 9px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            outline: none;
+            background: var(--input);
+            color: var(--text);
+        }
+
+        .text-input:focus {
+            border-color: var(--accent);
+            box-shadow:
+                0 0 0 3px rgba(59, 130, 246, 0.14);
+        }
+
+        .text-input:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .password-control {
+            display: flex;
+            gap: 8px;
+        }
+
+        .password-control .text-input {
+            min-width: 0;
+        }
+
+        .secondary-button {
+            flex: 0 0 auto;
+            padding: 9px 13px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface-hover);
+            color: var(--text);
+            cursor: pointer;
+        }
+
+        .secondary-button:hover:not(:disabled) {
+            border-color: #3c4a5a;
+            background: #1d2732;
+        }
+
+        .secondary-button:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .danger-button {
+            border-color: rgba(240, 82, 82, 0.4);
+            background: rgba(240, 82, 82, 0.1);
+            color: var(--danger);
+        }
+
+        .range-control {
+            display: grid;
+            grid-template-columns: 1fr 58px;
+            align-items: center;
+            gap: 14px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--accent);
+        }
+
+        .range-value {
+            color: var(--text);
+            text-align: right;
+        }
+
+        .switch-control {
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 26px;
+        }
+
+        .switch input {
+            width: 0;
+            height: 0;
+            opacity: 0;
+        }
+
+        .switch-slider {
+            position: absolute;
+            inset: 0;
+            border: 1px solid #3b4652;
+            border-radius: 999px;
+            background: #252e38;
+            cursor: pointer;
+            transition: 150ms ease;
+        }
+
+        .switch-slider::before {
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            top: 3px;
+            left: 3px;
+            border-radius: 50%;
+            background: #b9c2cc;
+            content: "";
+            transition: 150ms ease;
+        }
+
+        .switch input:checked +
+        .switch-slider {
+            border-color: var(--accent);
+            background: var(--accent);
+        }
+
+        .switch input:checked +
+        .switch-slider::before {
+            transform: translateX(22px);
+            background: #ffffff;
+        }
+
+        .switch input:disabled +
+        .switch-slider {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        .inline-option {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .inline-option input {
+            accent-color: var(--accent);
+        }
+
+        .credential-status {
+            margin-top: 9px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .credential-status.configured {
+            color: var(--success);
+        }
+
+        .action-bar {
+            position: fixed;
+            z-index: 9;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            border-top: 1px solid var(--border);
+            background: rgba(11, 15, 20, 0.96);
+            backdrop-filter: blur(12px);
+        }
+
+        .action-bar-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            width: 100%;
+            max-width: 980px;
+            min-height: 76px;
+            margin: 0 auto;
+            padding: 12px 20px;
+        }
+
+        .status {
+            min-width: 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .status.success {
+            color: var(--success);
+        }
+
+        .status.error {
+            color: var(--danger);
+        }
+
+        .actions {
+            display: flex;
+            flex: 0 0 auto;
+            gap: 10px;
+        }
+
+        .button {
+            min-height: 42px;
+            padding: 9px 17px;
+            border: 0;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .button-secondary {
+            border: 1px solid var(--border);
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+
+        .button-primary {
+            background: var(--accent);
+            color: #ffffff;
+            font-weight: 600;
+        }
+
+        .button-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        .scan-control {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .scan-status {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .network-list {
+            display: grid;
+            gap: 8px;
+            width: 100%;
+            max-height: 310px;
+            overflow-y: auto;
+        }
+
+        .network-list:empty {
+            display: none;
+        }
+
+        .network-item {
+            display: grid;
+            grid-template-columns:
+                minmax(0, 1fr)
+                auto;
+            align-items: center;
+            gap: 14px;
+            width: 100%;
+            padding: 11px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--input);
+            color: var(--text);
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .network-item:hover {
+            border-color: var(--accent);
+            background: var(--surface-hover);
+        }
+
+        .network-item.selected {
+            border-color: var(--accent);
+            background: rgba(59, 130, 246, 0.12);
+        }
+
+        .network-name {
+            overflow: hidden;
+            font-size: 13px;
+            font-weight: 600;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .network-details {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .network-signal {
+            color: var(--muted);
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .network-list-message {
+            padding: 14px 12px;
+            border: 1px dashed var(--border);
+            border-radius: 8px;
+            color: var(--muted);
+            font-size: 13px;
+            text-align: center;
+        }
+
+        .scan-results-row {
+            align-items: start;
+        }
+
+        .scan-results-row > div {
+            min-width: 0;
+        }
+
+        .network-list {
+            position: relative;
+            max-height: 300px;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+
+        @media (max-width: 700px) {
+            .header-content {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 10px;
+                padding-top: 14px;
+                padding-bottom: 12px;
+            }
+
+            .navigation {
+                width: 100%;
+            }
+
+            .navigation a {
+                flex: 1;
+                text-align: center;
+            }
+
+            .container {
+                padding-right: 14px;
+                padding-left: 14px;
+            }
+
+            .setting-row {
+                grid-template-columns: 1fr;
+                gap: 10px;
+                padding: 16px 0;
+            }
+
+            .readonly-value {
+                text-align: left;
+            }
+
+            .switch-control {
+                justify-content: flex-start;
+            }
+
+            .action-bar-content {
+                align-items: stretch;
+                flex-direction: column;
+                gap: 9px;
+                padding: 10px 14px;
+            }
+
+            .actions {
+                width: 100%;
+            }
+
+            .actions .button {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="brand">
+                <div
+                    class="brand-mark"
+                    aria-hidden="true"
+                ></div>
+
+                <div>
+                    <div
+                        id="device-title"
+                        class="brand-title"
+                    >
+                        Spectra
+                    </div>
+
+                    <div
+                        id="device-subtitle"
+                        class="brand-subtitle"
+                    >
+                        Device settings
+                    </div>
+                </div>
+            </div>
+
+            <nav
+                class="navigation"
+                aria-label="Main navigation"
+            >
+                <a href="/">
+                    Overview
+                </a>
+
+                <a class="active" href="/settings">
+                    Settings
+                </a>
+
+                <a href="/files">
+                    Files
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="page-header">
+            <h1>Settings</h1>
+
+            <p>
+                Configure the device and its network interfaces
+            </p>
+        </section>
+
+        <div
+            id="restart-notice"
+            class="notice"
+            role="status"
+        >
+            A device restart is required to apply all changes.
+        </div>
+
+        <section class="card">
+            <header class="card-header">
+                <h2>Device</h2>
+
+                <p>
+                    Device identification and configuration format
+                </p>
+            </header>
+
+            <div class="card-content">
+                <div class="setting-row">
+                    <div class="setting-label">
+                        Target
+                    </div>
+
+                    <div
+                        id="device-target"
+                        class="readonly-value"
+                    >
+                        -
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div class="setting-label">
+                        Device name
+                    </div>
+
+                    <div
+                        id="device-name"
+                        class="readonly-value"
+                    >
+                        -
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div class="setting-label">
+                        Schema version
+                    </div>
+
+                    <div
+                        id="schema-version"
+                        class="readonly-value"
+                    >
+                        -
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <header class="card-header">
+                <h2>Display and interface</h2>
+
+                <p>
+                    Screen brightness and GUI behavior
+                </p>
+            </header>
+
+            <div class="card-content">
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Display brightness
+                        </div>
+
+                        <div class="setting-description">
+                            Backlight brightness from 10 to 100 percent
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <div class="range-control">
+                            <input
+                                id="brightness"
+                                type="range"
+                                min="10"
+                                max="100"
+                                value="80"
+                            >
+
+                            <span
+                                id="brightness-value"
+                                class="range-value"
+                            >
+                                80%
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            GUI animations
+                        </div>
+
+                        <div class="setting-description">
+                            Enable animated screen transitions
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input
+                                id="animations"
+                                type="checkbox"
+                            >
+
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <header class="card-header">
+                <h2>Logging</h2>
+
+                <p>
+                    Configure persistent application logging
+                </p>
+            </header>
+
+            <div class="card-content">
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            SD-card logging
+                        </div>
+
+                        <div class="setting-description">
+                            Write application logs to the mounted SD card
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input
+                                id="sd-logging"
+                                type="checkbox"
+                            >
+
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <header class="card-header">
+                <h2>Wi-Fi SoftAP</h2>
+
+                <p>
+                    Local wireless network provided by Spectra
+                </p>
+            </header>
+
+            <div class="card-content">
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            SoftAP enabled
+                        </div>
+
+                        <div class="setting-description">
+                            Allow clients to connect directly to Spectra
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input
+                                id="wifi-ap-enabled"
+                                type="checkbox"
+                            >
+
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Base SSID
+                        </div>
+
+                        <div class="setting-description">
+                            The final six MAC characters are appended automatically
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <input
+                            id="wifi-ap-ssid"
+                            class="text-input"
+                            type="text"
+                            maxlength="25"
+                            autocomplete="off"
+                            placeholder="Spectra"
+                        >
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Password
+                        </div>
+
+                        <div class="setting-description">
+                            Use 8 to 63 characters or select an open network
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <div class="password-control">
+                            <input
+                                id="wifi-ap-password"
+                                class="text-input"
+                                type="password"
+                                minlength="8"
+                                maxlength="63"
+                                autocomplete="new-password"
+                            >
+
+                            <button
+                                id="show-ap-password"
+                                class="secondary-button"
+                                type="button"
+                            >
+                                Show
+                            </button>
+                        </div>
+
+                        <label class="inline-option">
+                            <input
+                                id="wifi-ap-open"
+                                type="checkbox"
+                            >
+
+                            Open network without a password
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <header class="card-header">
+                <h2>Wi-Fi Station</h2>
+
+                <p>
+                    Connect Spectra to an existing wireless network
+                </p>
+            </header>
+
+            <div class="card-content">
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Available networks
+                        </div>
+
+                        <div class="setting-description">
+                            Search for nearby wireless access points
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <div class="scan-control">
+                            <button
+                                id="scan-wifi"
+                                class="secondary-button"
+                                type="button"
+                            >
+                                Scan networks
+                            </button>
+
+                            <span
+                                id="wifi-scan-status"
+                                class="scan-status"
+                                role="status"
+                                aria-live="polite"
+                            >
+                                Not scanned
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setting-row scan-results-row">
+                    <div>
+                        <div class="setting-label">
+                            Scan results
+                        </div>
+
+                        <div class="setting-description">
+                            Select a network to fill the Station SSID
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <div
+                            id="wifi-network-list"
+                            class="network-list"
+                        ></div>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Station enabled
+                        </div>
+
+                        <div class="setting-description">
+                            Connect automatically using credentials stored in NVS
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input
+                                id="wifi-sta-enabled"
+                                type="checkbox"
+                            >
+
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Network SSID
+                        </div>
+
+                        <div class="setting-description">
+                            Name of the external wireless network
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <input
+                            id="wifi-sta-ssid"
+                            class="text-input"
+                            type="text"
+                            maxlength="32"
+                            autocomplete="off"
+                            placeholder="Wi-Fi network"
+                        >
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Network password
+                        </div>
+
+                        <div class="setting-description">
+                            Leave empty to keep the existing stored password
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <div class="password-control">
+                            <input
+                                id="wifi-sta-password"
+                                class="text-input"
+                                type="password"
+                                minlength="8"
+                                maxlength="63"
+                                autocomplete="new-password"
+                                placeholder="Keep existing password"
+                            >
+
+                            <button
+                                id="show-sta-password"
+                                class="secondary-button"
+                                type="button"
+                            >
+                                Show
+                            </button>
+                        </div>
+
+                        <label class="inline-option">
+                            <input
+                                id="wifi-sta-open"
+                                type="checkbox"
+                            >
+
+                            Connect to an open network
+                        </label>
+
+                        <div
+                            id="wifi-sta-credential-status"
+                            class="credential-status"
+                        >
+                            No stored credentials
+                        </div>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Stored credentials
+                        </div>
+
+                        <div class="setting-description">
+                            Remove the Station password and identifier from NVS
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <button
+                            id="clear-sta-credentials"
+                            class="secondary-button danger-button"
+                            type="button"
+                        >
+                            Clear credentials
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <header class="card-header">
+                <h2>USB network</h2>
+
+                <p>
+                    Configure the USB RNDIS network interface
+                </p>
+            </header>
+
+            <div class="card-content">
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            USB RNDIS enabled
+                        </div>
+
+                        <div class="setting-description">
+                            Changes to the USB interface require a device restart
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input
+                                id="usb-rndis-enabled"
+                                type="checkbox"
+                            >
+
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="action-bar">
+        <div class="action-bar-content">
+            <div
+                id="status"
+                class="status"
+                role="status"
+                aria-live="polite"
+            >
+                Loading settings...
+            </div>
+
+            <div class="actions">
+                <button
+                    id="reload"
+                    class="button button-secondary"
+                    type="button"
+                >
+                    Reload
+                </button>
+
+                <button
+                    id="save"
+                    class="button button-primary"
+                    type="button"
+                >
+                    Save settings
+                </button>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const elements = {
+            deviceTitle:
+                document.getElementById("device-title"),
+
+            deviceSubtitle:
+                document.getElementById("device-subtitle"),
+
+            deviceTarget:
+                document.getElementById("device-target"),
+
+            deviceName:
+                document.getElementById("device-name"),
+
+            schemaVersion:
+                document.getElementById("schema-version"),
+
+            restartNotice:
+                document.getElementById("restart-notice"),
+
+            brightness:
+                document.getElementById("brightness"),
+
+            brightnessValue:
+                document.getElementById("brightness-value"),
+
+            animations:
+                document.getElementById("animations"),
+
+            sdLogging:
+                document.getElementById("sd-logging"),
+
+            wifiApEnabled:
+                document.getElementById("wifi-ap-enabled"),
+
+            wifiApSsid:
+                document.getElementById("wifi-ap-ssid"),
+
+            wifiApPassword:
+                document.getElementById("wifi-ap-password"),
+
+            wifiApOpen:
+                document.getElementById("wifi-ap-open"),
+
+            wifiStaEnabled:
+                document.getElementById("wifi-sta-enabled"),
+
+            wifiStaSsid:
+                document.getElementById("wifi-sta-ssid"),
+
+            wifiStaPassword:
+                document.getElementById("wifi-sta-password"),
+
+            wifiStaOpen:
+                document.getElementById("wifi-sta-open"),
+
+            scanWifi:
+                document.getElementById("scan-wifi"),
+
+            wifiScanStatus:
+                document.getElementById(
+                    "wifi-scan-status"
+                ),
+
+            wifiNetworkList:
+                document.getElementById(
+                    "wifi-network-list"
+                ),
+
+            wifiStaCredentialStatus:
+                document.getElementById(
+                    "wifi-sta-credential-status"
+                ),
+
+            clearStaCredentials:
+                document.getElementById(
+                    "clear-sta-credentials"
+                ),
+
+            usbRndisEnabled:
+                document.getElementById("usb-rndis-enabled"),
+
+            reload:
+                document.getElementById("reload"),
+
+            save:
+                document.getElementById("save"),
+
+            status:
+                document.getElementById("status")
+        };
+
+        let credentialsConfigured = false;
+        let loadedStaSsid = "";
+
+        let operationBusy = false;
+        let scanRunning = false;
+        let scanPollTimer = null;
+
+        function updateActionStates() {
+            elements.reload.disabled =
+                operationBusy;
+
+            elements.save.disabled =
+                operationBusy;
+
+            elements.clearStaCredentials.disabled =
+                operationBusy ||
+                !credentialsConfigured;
+
+            elements.scanWifi.disabled =
+                operationBusy ||
+                scanRunning;
+        }
+
+        function setBusy(busy) {
+            operationBusy = busy;
+
+            updateActionStates();
+        }
+
+        function setStatus(
+            message,
+            type = ""
+        ) {
+            elements.status.textContent =
+                message;
+
+            elements.status.className =
+                `status ${type}`.trim();
+        }
+
+        function updateBrightness() {
+            elements.brightnessValue.textContent =
+                `${elements.brightness.value}%`;
+        }
+
+        function updateApControls() {
+            const enabled =
+                elements.wifiApEnabled.checked;
+
+            elements.wifiApSsid.disabled =
+                !enabled;
+
+            elements.wifiApOpen.disabled =
+                !enabled;
+
+            elements.wifiApPassword.disabled =
+                !enabled ||
+                elements.wifiApOpen.checked;
+
+            document
+                .getElementById("show-ap-password")
+                .disabled =
+                    elements.wifiApPassword.disabled;
+        }
+
+        function updateStaControls() {
+            const enabled =
+                elements.wifiStaEnabled.checked;
+
+            elements.wifiStaSsid.disabled =
+                !enabled;
+
+            elements.wifiStaOpen.disabled =
+                !enabled;
+
+            elements.wifiStaPassword.disabled =
+                !enabled ||
+                elements.wifiStaOpen.checked;
+
+            document
+                .getElementById("show-sta-password")
+                .disabled =
+                    elements.wifiStaPassword.disabled;
+        }
+
+        function togglePassword(
+            input,
+            button
+        ) {
+            const visible =
+                input.type === "text";
+
+            input.type =
+                visible
+                    ? "password"
+                    : "text";
+
+            button.textContent =
+                visible
+                    ? "Show"
+                    : "Hide";
+        }
+
+        function formatSignal(rssi) {
+            if (!Number.isFinite(rssi)) {
+                return "Unknown signal";
+            }
+
+            if (rssi >= -50) {
+                return `${rssi} dBm - Excellent`;
+            }
+
+            if (rssi >= -65) {
+                return `${rssi} dBm - Good`;
+            }
+
+            if (rssi >= -75) {
+                return `${rssi} dBm - Fair`;
+            }
+
+            return `${rssi} dBm - Weak`;
+        }
+
+        function selectWifiNetwork(network) {
+            elements.wifiStaEnabled.checked = true;
+
+            elements.wifiStaSsid.value =
+                network.ssid;
+
+            elements.wifiStaPassword.value = "";
+
+            elements.wifiStaOpen.checked =
+                network.password_required !== true;
+
+            updateStaControls();
+
+            for (const item of
+                 elements.wifiNetworkList.children) {
+
+                item.classList.toggle(
+                    "selected",
+                    item.dataset.bssid ===
+                        network.bssid
+                );
+            }
+
+            if (network.password_required) {
+                elements.wifiStaPassword.focus();
+
+                setStatus(
+                    `Selected ${network.ssid}. Enter its password.`
+                );
+
+            } else {
+                setStatus(
+                    `Selected open network ${network.ssid}.`
+                );
+            }
+        }
+
+        function renderWifiNetworks(networks) {
+            elements.wifiNetworkList.replaceChildren();
+
+            if (!Array.isArray(networks) ||
+                networks.length === 0) {
+
+                const message =
+                    document.createElement("div");
+
+                message.className =
+                    "network-list-message";
+
+                message.textContent =
+                    "No Wi-Fi networks found";
+
+                elements.wifiNetworkList.appendChild(
+                    message
+                );
+
+                return;
+            }
+
+            for (const network of networks) {
+                if ((typeof network !== "object") ||
+                    (network === null) ||
+                    (typeof network.ssid !== "string") ||
+                    (network.ssid.length === 0)) {
+
+                    continue;
+                }
+
+                const button =
+                    document.createElement("button");
+
+                button.type = "button";
+                button.className = "network-item";
+
+                button.dataset.bssid =
+                    network.bssid || "";
+
+                const information =
+                    document.createElement("div");
+
+                const name =
+                    document.createElement("div");
+
+                name.className = "network-name";
+                name.textContent = network.ssid;
+
+                const details =
+                    document.createElement("div");
+
+                details.className =
+                    "network-details";
+
+                const security =
+                    network.password_required
+                        ? "Secured"
+                        : "Open";
+
+                details.textContent =
+                    `${security} - Channel ${
+                        network.channel ?? "-"
+                    } - ${network.bssid || "Unknown BSSID"}`;
+
+                const signal =
+                    document.createElement("div");
+
+                signal.className =
+                    "network-signal";
+
+                signal.textContent =
+                    formatSignal(network.rssi);
+
+                information.append(
+                    name,
+                    details
+                );
+
+                button.append(
+                    information,
+                    signal
+                );
+
+                button.addEventListener(
+                    "click",
+                    () => {
+                        selectWifiNetwork(
+                            network
+                        );
+                    }
+                );
+
+                elements.wifiNetworkList.appendChild(
+                    button
+                );
+            }
+
+            if (elements.wifiNetworkList.children.length === 0) {
+                const message =
+                    document.createElement("div");
+
+                message.className =
+                    "network-list-message";
+
+                message.textContent =
+                    "No visible Wi-Fi networks";
+
+                elements.wifiNetworkList.appendChild(
+                    message
+                );
+            }
+        }
+
+        async function loadWifiScanStatus() {
+            try {
+                const network =
+                    await fetchJson(
+                        "/api/network",
+                        {
+                            cache: "no-store"
+                        }
+                    );
+
+                const scan =
+                    network.wifi?.scan;
+
+                if (scan === undefined) {
+                    throw new Error(
+                        "Scan information is unavailable"
+                    );
+                }
+
+                if (scan.state === "running") {
+                    scanRunning = true;
+
+                    updateActionStates();
+
+                    elements.wifiScanStatus.textContent =
+                        "Scanning...";
+
+                    scheduleScanPoll();
+
+                    return;
+                }
+
+                scanRunning = false;
+
+                updateActionStates();
+
+                if (scan.state === "complete") {
+                    const networks =
+                        Array.isArray(scan.networks)
+                            ? scan.networks
+                            : [];
+
+                    renderWifiNetworks(
+                        networks
+                    );
+
+                    elements.wifiScanStatus.textContent =
+                        scan.truncated
+                            ? `${networks.length} networks, result truncated`
+                            : `${networks.length} networks found`;
+
+                    return;
+                }
+
+                if (scan.state === "error") {
+                    elements.wifiScanStatus.textContent =
+                        `Scan failed: ${
+                            scan.last_error_name ||
+                            scan.last_error ||
+                            "unknown error"
+                        }`;
+
+                    return;
+                }
+
+                elements.wifiScanStatus.textContent =
+                    "Not scanned";
+
+            } catch (error) {
+                scanRunning = false;
+
+                updateActionStates();
+
+                elements.wifiScanStatus.textContent =
+                    `Scan status unavailable: ${error.message}`;
+            }
+        }
+
+        function scheduleScanPoll() {
+            if (scanPollTimer !== null) {
+                window.clearTimeout(
+                    scanPollTimer
+                );
+            }
+
+            scanPollTimer =
+                window.setTimeout(
+                    async () => {
+                        scanPollTimer = null;
+
+                        await loadWifiScanStatus();
+                    },
+                    750
+                );
+        }
+
+        async function startWifiScan() {
+            if (scanRunning ||
+                operationBusy) {
+
+                return;
+            }
+
+            scanRunning = true;
+
+            updateActionStates();
+
+            elements.wifiScanStatus.textContent =
+                "Starting scan...";
+
+            elements.wifiNetworkList.replaceChildren();
+
+            try {
+                await fetchJson(
+                    "/api/network/wifi/scan",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                elements.wifiScanStatus.textContent =
+                    "Scanning...";
+
+                scheduleScanPoll();
+
+            } catch (error) {
+                scanRunning = false;
+
+                updateActionStates();
+
+                elements.wifiScanStatus.textContent =
+                    `Scan failed: ${error.message}`;
+
+                setStatus(
+                    `Failed to start Wi-Fi scan: ${error.message}`,
+                    "error"
+                );
+            }
+        }
+
+        async function fetchJson(
+            path,
+            options = {}
+        ) {
+            const response =
+                await fetch(
+                    path,
+                    options
+                );
+
+            let result;
+
+            try {
+                result =
+                    await response.json();
+            } catch {
+                throw new Error(
+                    `Invalid server response: HTTP ${response.status}`
+                );
+            }
+
+            if (!response.ok) {
+                throw new Error(
+                    result.message ||
+                    `HTTP ${response.status}`
+                );
+            }
+
+            return result;
+        }
+
+        function populateSettings(settings) {
+            const device =
+                settings.device || {};
+
+            const display =
+                settings.display || {};
+
+            const logging =
+                settings.logging || {};
+
+            const ui =
+                settings.ui || {};
+
+            const network =
+                settings.network || {};
+
+            const wifiAp =
+                network.wifi_ap || {};
+
+            const wifiSta =
+                network.wifi_sta || {};
+
+            const usbRndis =
+                network.usb_rndis || {};
+
+            elements.deviceTarget.textContent =
+                device.target || "-";
+
+            elements.deviceName.textContent =
+                device.name || "-";
+
+            elements.schemaVersion.textContent =
+                settings.schema_version ?? "-";
+
+            elements.deviceTitle.textContent =
+                device.target || "Spectra";
+
+            elements.deviceSubtitle.textContent =
+                device.name || "Device settings";
+
+            elements.brightness.value =
+                display.brightness ?? 80;
+
+            elements.animations.checked =
+                ui.animations_enabled === true;
+
+            elements.sdLogging.checked =
+                logging.sd_enabled === true;
+
+            elements.wifiApEnabled.checked =
+                wifiAp.enabled === true;
+
+            elements.wifiApSsid.value =
+                wifiAp.ssid || "";
+
+            elements.wifiApPassword.value =
+                wifiAp.password || "";
+
+            elements.wifiApOpen.checked =
+                wifiAp.password === "";
+
+            elements.wifiStaEnabled.checked =
+                wifiSta.enabled === true;
+
+            elements.wifiStaSsid.value =
+                wifiSta.ssid || "";
+
+            elements.wifiStaPassword.value = "";
+            elements.wifiStaOpen.checked = false;
+
+            loadedStaSsid =
+                wifiSta.ssid || "";
+
+            credentialsConfigured =
+                wifiSta.credentials_configured === true;
+
+            elements.wifiStaCredentialStatus.textContent =
+                credentialsConfigured
+                    ? `Credentials stored${
+                        wifiSta.credential_id
+                            ? ` - ${wifiSta.credential_id}`
+                            : ""
+                    }`
+                    : "No stored credentials";
+
+            elements.wifiStaCredentialStatus
+                .classList.toggle(
+                    "configured",
+                    credentialsConfigured
+                );
+
+            elements.usbRndisEnabled.checked =
+                usbRndis.enabled === true;
+
+            elements.restartNotice.classList.toggle(
+                "visible",
+                settings.restart_required === true
+            );
+
+            updateBrightness();
+            updateApControls();
+            updateStaControls();
+
+            elements.clearStaCredentials.disabled =
+                !credentialsConfigured;
+        }
+
+        function validateSettings() {
+            if (elements.wifiApEnabled.checked) {
+                const ssid =
+                    elements.wifiApSsid.value.trim();
+
+                const password =
+                    elements.wifiApPassword.value;
+
+                if (ssid.length === 0) {
+                    throw new Error(
+                        "SoftAP SSID cannot be empty"
+                    );
+                }
+
+                if (!elements.wifiApOpen.checked &&
+                    ((password.length < 8) ||
+                     (password.length > 63))) {
+
+                    throw new Error(
+                        "SoftAP password must contain 8 to 63 characters"
+                    );
+                }
+            }
+
+            if (elements.wifiStaEnabled.checked) {
+                const ssid =
+                    elements.wifiStaSsid.value.trim();
+
+                const password =
+                    elements.wifiStaPassword.value;
+
+                if (ssid.length === 0) {
+                    throw new Error(
+                        "Station SSID cannot be empty"
+                    );
+                }
+
+                const networkChanged =
+                    ssid !== loadedStaSsid;
+
+                const needsCredentials =
+                    !credentialsConfigured ||
+                    networkChanged;
+
+                if (!elements.wifiStaOpen.checked &&
+                    needsCredentials &&
+                    password.length === 0) {
+
+                    throw new Error(
+                        "Enter the Station password for the selected network"
+                    );
+                }
+
+                if (!elements.wifiStaOpen.checked &&
+                    password.length > 0 &&
+                    ((password.length < 8) ||
+                     (password.length > 63))) {
+
+                    throw new Error(
+                        "Station password must contain 8 to 63 characters"
+                    );
+                }
+            }
+        }
+
+        function createSettingsPayload() {
+            const wifiSta = {
+                enabled:
+                    elements.wifiStaEnabled.checked,
+
+                ssid:
+                    elements.wifiStaSsid.value.trim()
+            };
+
+            if (elements.wifiStaOpen.checked) {
+                wifiSta.password = "";
+
+            } else if (
+                elements.wifiStaPassword.value.length > 0
+            ) {
+                wifiSta.password =
+                    elements.wifiStaPassword.value;
+            }
+
+            return {
+                display: {
+                    brightness:
+                        Number(elements.brightness.value)
+                },
+
+                logging: {
+                    sd_enabled:
+                        elements.sdLogging.checked
+                },
+
+                ui: {
+                    animations_enabled:
+                        elements.animations.checked
+                },
+
+                network: {
+                    wifi_ap: {
+                        enabled:
+                            elements.wifiApEnabled.checked,
+
+                        ssid:
+                            elements.wifiApSsid.value.trim(),
+
+                        password:
+                            elements.wifiApOpen.checked
+                                ? ""
+                                : elements.wifiApPassword.value
+                    },
+
+                    wifi_sta:
+                        wifiSta,
+
+                    usb_rndis: {
+                        enabled:
+                            elements.usbRndisEnabled.checked
+                    }
+                }
+            };
+        }
+
+        async function loadSettings() {
+            setBusy(true);
+
+            setStatus(
+                "Loading settings..."
+            );
+
+            try {
+                const settings =
+                    await fetchJson(
+                        "/api/settings",
+                        {
+                            cache: "no-store"
+                        }
+                    );
+
+                populateSettings(settings);
+
+                setStatus(
+                    "Settings loaded",
+                    "success"
+                );
+
+            } catch (error) {
+                setStatus(
+                    `Failed to load settings: ${error.message}`,
+                    "error"
+                );
+
+            } finally {
+                setBusy(false);
+            }
+        }
+
+        async function saveSettings() {
+            setBusy(true);
+
+            setStatus(
+                "Applying settings..."
+            );
+
+            try {
+                validateSettings();
+
+                await fetchJson(
+                    "/api/settings",
+                    {
+                        method: "PUT",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify(
+                            createSettingsPayload()
+                        )
+                    }
+                );
+
+                setStatus(
+                    "Saving settings..."
+                );
+
+                await fetchJson(
+                    "/api/settings/save",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                await loadSettings();
+
+                setStatus(
+                    "Settings saved",
+                    "success"
+                );
+
+            } catch (error) {
+                setStatus(
+                    `Failed to save settings: ${error.message}`,
+                    "error"
+                );
+
+            } finally {
+                setBusy(false);
+            }
+        }
+
+        async function reloadSettings() {
+            setBusy(true);
+
+            setStatus(
+                "Reloading saved settings..."
+            );
+
+            try {
+                await fetchJson(
+                    "/api/settings/reload",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                await loadSettings();
+
+                setStatus(
+                    "Saved settings reloaded",
+                    "success"
+                );
+
+            } catch (error) {
+                setStatus(
+                    `Failed to reload settings: ${error.message}`,
+                    "error"
+                );
+
+            } finally {
+                setBusy(false);
+            }
+        }
+
+        async function clearStaCredentials() {
+            const confirmed =
+                window.confirm(
+                    "Clear the stored Wi-Fi Station credentials?"
+                );
+
+            if (!confirmed) {
+                return;
+            }
+
+            setBusy(true);
+
+            setStatus(
+                "Clearing Station credentials..."
+            );
+
+            try {
+                await fetchJson(
+                    "/api/settings/wifi/sta/credentials",
+                    {
+                        method: "DELETE"
+                    }
+                );
+
+                credentialsConfigured = false;
+                loadedStaSsid = "";
+
+                elements.wifiStaPassword.value = "";
+
+                elements.wifiStaCredentialStatus.textContent =
+                    "No stored credentials";
+
+                elements.wifiStaCredentialStatus
+                    .classList.remove(
+                        "configured"
+                    );
+
+                setStatus(
+                    "Station credentials cleared",
+                    "success"
+                );
+
+            } catch (error) {
+                setStatus(
+                    `Failed to clear credentials: ${error.message}`,
+                    "error"
+                );
+
+            } finally {
+                setBusy(false);
+            }
+        }
+
+        elements.brightness.addEventListener(
+            "input",
+            updateBrightness
+        );
+
+        elements.wifiApEnabled.addEventListener(
+            "change",
+            updateApControls
+        );
+
+        elements.wifiApOpen.addEventListener(
+            "change",
+            () => {
+                if (elements.wifiApOpen.checked) {
+                    elements.wifiApPassword.value = "";
+                }
+
+                updateApControls();
+            }
+        );
+
+        elements.wifiStaEnabled.addEventListener(
+            "change",
+            updateStaControls
+        );
+
+        elements.wifiStaOpen.addEventListener(
+            "change",
+            () => {
+                if (elements.wifiStaOpen.checked) {
+                    elements.wifiStaPassword.value = "";
+                }
+
+                updateStaControls();
+            }
+        );
+
+        document
+            .getElementById("show-ap-password")
+            .addEventListener(
+                "click",
+                event => {
+                    togglePassword(
+                        elements.wifiApPassword,
+                        event.currentTarget
+                    );
+                }
+            );
+
+        document
+            .getElementById("show-sta-password")
+            .addEventListener(
+                "click",
+                event => {
+                    togglePassword(
+                        elements.wifiStaPassword,
+                        event.currentTarget
+                    );
+                }
+            );
+
+        elements.clearStaCredentials.addEventListener(
+            "click",
+            clearStaCredentials
+        );
+
+        elements.reload.addEventListener(
+            "click",
+            reloadSettings
+        );
+
+        elements.save.addEventListener(
+            "click",
+            saveSettings
+        );
+
+        elements.scanWifi.addEventListener(
+            "click",
+            startWifiScan
+        );
+
+        window.addEventListener(
+            "beforeunload",
+            () => {
+                if (scanPollTimer !== null) {
+                    window.clearTimeout(
+                        scanPollTimer
+                    );
+
+                    scanPollTimer = null;
+                }
+            }
+        );
+
+        loadSettings();
+        loadWifiScanStatus();
+    </script>
+</body>
+</html>

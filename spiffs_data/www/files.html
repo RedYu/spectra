@@ -7,11 +7,39 @@
         name="viewport"
         content="width=device-width, initial-scale=1"
     >
-	<link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
-	<link rel="icon" href="/favicon.ico" type="image/x-icon">
+
+    <link
+        rel="shortcut icon"
+        href="/favicon.ico"
+        type="image/x-icon"
+    >
+
+    <link
+        rel="icon"
+        href="/favicon.ico"
+        type="image/x-icon"
+    >
+
     <title>Spectra Files</title>
 
     <style>
+        :root {
+            color-scheme: dark;
+
+            --background: #0b0f14;
+            --surface: #121820;
+            --surface-hover: #171f29;
+            --input: #0d131a;
+            --border: #27313d;
+
+            --text: #f3f6f9;
+            --muted: #8f9ba8;
+
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --danger: #f05252;
+        }
+
         * {
             box-sizing: border-box;
         }
@@ -19,87 +47,245 @@
         body {
             margin: 0;
             min-height: 100vh;
-            font-family: Arial, sans-serif;
-            background: #f3f5f7;
-            color: #20252b;
+            font-family:
+                Inter,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Arial,
+                sans-serif;
+            background: var(--background);
+            color: var(--text);
+        }
+
+        button,
+        select {
+            font: inherit;
         }
 
         .header {
+            position: sticky;
+            z-index: 10;
+            top: 0;
+            border-bottom: 1px solid var(--border);
+            background: rgba(11, 15, 20, 0.95);
+        }
+
+        .header-content {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 16px;
-            padding: 18px 24px;
-            background: #151a20;
-            color: #ffffff;
+            gap: 24px;
+            width: 100%;
+            max-width: 1180px;
+            min-height: 68px;
+            margin: 0 auto;
+            padding: 0 20px;
         }
 
-        .header h1 {
-            margin: 0;
-            font-size: 22px;
+        .brand {
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            gap: 12px;
         }
 
-        .header select {
-            min-width: 160px;
-            padding: 9px 12px;
-            border: 1px solid #404851;
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            flex: 0 0 auto;
+            border: 1px solid #4f8cff;
+            border-radius: 10px;
+            background:
+                linear-gradient(
+                    145deg,
+                    #3b82f6,
+                    #1d4ed8
+                );
+            box-shadow:
+                0 0 24px rgba(59, 130, 246, 0.3);
+        }
+
+        .brand-text {
+            min-width: 0;
+        }
+
+        .brand-title {
+            overflow: hidden;
+            font-size: 18px;
+            font-weight: 700;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .brand-subtitle {
+            overflow: hidden;
+            margin-top: 2px;
+            color: var(--muted);
+            font-size: 12px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .navigation {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .navigation a {
+            padding: 9px 13px;
             border-radius: 8px;
-            background: #252c34;
-            color: #ffffff;
+            color: var(--muted);
+            text-decoration: none;
+        }
+
+        .navigation a:hover,
+        .navigation a.active {
+            background: var(--surface-hover);
+            color: var(--text);
         }
 
         .container {
             width: 100%;
-            max-width: 960px;
-            margin: 28px auto;
-            padding: 0 16px;
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 28px 20px 48px;
+        }
+
+        .page-header {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .page-header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+
+        .page-header p {
+            margin: 7px 0 0;
+            color: var(--muted);
+        }
+
+        .volume-control {
+            display: flex;
+            align-items: center;
+            flex: 0 0 auto;
+            gap: 10px;
+        }
+
+        .volume-control label {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .volume-select {
+            min-width: 180px;
+            min-height: 42px;
+            padding: 8px 34px 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            outline: none;
+            background: var(--input);
+            color: var(--text);
+            cursor: pointer;
+        }
+
+        .volume-select:focus {
+            border-color: var(--accent);
+            box-shadow:
+                0 0 0 3px rgba(59, 130, 246, 0.14);
         }
 
         .card {
             overflow: hidden;
-            background: #ffffff;
-            border-radius: 12px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: var(--surface);
         }
 
-        .toolbar {
+        .file-toolbar {
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 16px;
-            border-bottom: 1px solid #e3e7eb;
+            min-height: 64px;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .path-container {
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            flex: 1;
+            gap: 8px;
+            padding: 9px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--input);
+        }
+
+        .path-label {
+            flex: 0 0 auto;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
         }
 
         .path {
             overflow: hidden;
-            flex: 1;
-            color: #58636e;
-            font-family: monospace;
+            min-width: 0;
+            color: var(--text);
+            font-family:
+                "SFMono-Regular",
+                Consolas,
+                monospace;
+            font-size: 13px;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
 
         .button {
-            min-width: 76px;
-            padding: 9px 14px;
+            min-height: 40px;
+            padding: 8px 14px;
             border: 0;
             border-radius: 8px;
-            background: #2476ff;
-            color: #ffffff;
             cursor: pointer;
         }
 
-        .button:hover:not(:disabled) {
-            background: #145fd8;
+        .button:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
         }
 
-        .button:disabled {
-            background: #aeb7c1;
-            cursor: default;
+        .button-primary {
+            background: var(--accent);
+            color: #ffffff;
+        }
+
+        .button-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        .button-secondary {
+            border: 1px solid var(--border);
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+
+        .button-secondary:hover:not(:disabled) {
+            border-color: #3c4a5a;
+            background: #1d2732;
         }
 
         .table-wrapper {
             overflow-x: auto;
+            min-height: 180px;
         }
 
         table {
@@ -109,49 +295,78 @@
 
         th,
         td {
-            padding: 13px 16px;
-            border-bottom: 1px solid #edf0f2;
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(39, 49, 61, 0.72);
             text-align: left;
         }
 
         th {
-            background: #fafbfc;
-            color: #65717d;
-            font-size: 13px;
+            background: #10161d;
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
             text-transform: uppercase;
         }
 
+        td {
+            font-size: 13px;
+        }
+
+        tbody tr {
+            transition: background 100ms ease;
+        }
+
         tbody tr:hover {
-            background: #f8faff;
+            background: var(--surface-hover);
+        }
+
+        tbody tr:last-child td {
+            border-bottom: 0;
+        }
+
+        th:first-child,
+        td:first-child {
+            width: 52%;
+        }
+
+        th:nth-child(2),
+        td:nth-child(2) {
+            width: 16%;
+            color: var(--muted);
         }
 
         th:nth-child(3),
         td:nth-child(3) {
+            width: 16%;
             text-align: right;
+            white-space: nowrap;
         }
 
         th:last-child,
         td:last-child {
-            width: 120px;
+            width: 16%;
             text-align: right;
         }
 
         td:last-child button {
-            padding: 7px 12px;
-            border: 0;
+            min-width: 84px;
+            padding: 7px 11px;
+            border: 1px solid rgba(59, 130, 246, 0.35);
             border-radius: 7px;
-            background: #e8efff;
-            color: #145fd8;
+            background: rgba(59, 130, 246, 0.12);
+            color: #79a7ff;
             cursor: pointer;
         }
 
         td:last-child button:hover:not(:disabled) {
-            background: #d8e5ff;
+            border-color: rgba(59, 130, 246, 0.6);
+            background: rgba(59, 130, 246, 0.2);
         }
 
         td:last-child button:disabled {
-            color: #8b949e;
-            cursor: default;
+            opacity: 0.45;
+            cursor: not-allowed;
         }
 
         .pagination {
@@ -159,53 +374,112 @@
             align-items: center;
             justify-content: center;
             gap: 14px;
-            padding: 16px;
+            min-height: 68px;
+            padding: 12px 16px;
+            border-top: 1px solid var(--border);
         }
 
         .page-status {
             min-width: 100px;
-            color: #65717d;
+            color: var(--muted);
+            font-size: 13px;
             text-align: center;
         }
 
         .status {
             min-height: 20px;
-            margin: 14px 4px;
-            color: #65717d;
-            font-size: 14px;
+            margin: 14px 3px 0;
+            color: var(--muted);
+            font-size: 13px;
         }
 
-        .navigation {
-            margin-top: 20px;
+        .status.error {
+            color: var(--danger);
         }
 
-        .navigation a {
-            color: #2476ff;
-            text-decoration: none;
+        .empty-state {
+            padding: 36px 16px;
+            color: var(--muted);
+            text-align: center;
         }
 
-        .navigation a:hover {
-            text-decoration: underline;
-        }
+        @media (max-width: 700px) {
+            .header-content {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 10px;
+                padding-top: 14px;
+                padding-bottom: 12px;
+            }
 
-        @media (max-width: 600px) {
-            .header {
+            .navigation {
+                width: 100%;
+            }
+
+            .navigation a {
+                flex: 1;
+                text-align: center;
+            }
+
+            .container {
+                padding-right: 14px;
+                padding-left: 14px;
+            }
+
+            .page-header {
                 align-items: stretch;
                 flex-direction: column;
             }
 
-            .header select {
+            .volume-control {
+                align-items: stretch;
+                flex-direction: column;
+                gap: 6px;
+            }
+
+            .volume-select {
                 width: 100%;
+            }
+
+            .file-toolbar {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .path-container {
+                order: -1;
             }
 
             th,
             td {
-                padding: 11px 10px;
+                padding: 12px 10px;
             }
 
             th:nth-child(2),
             td:nth-child(2) {
                 display: none;
+            }
+
+            th:first-child,
+            td:first-child {
+                width: auto;
+            }
+
+            td:first-child {
+                max-width: 180px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .pagination {
+                gap: 8px;
+            }
+
+            .pagination .button {
+                flex: 1;
+                padding-right: 9px;
+                padding-left: 9px;
             }
         }
     </style>
@@ -213,46 +487,104 @@
 
 <body>
     <header class="header">
-        <h1 id="device-title">
-            Spectra file browser
-        </h1>
+        <div class="header-content">
+            <div class="brand">
+                <div
+                    class="brand-mark"
+                    aria-hidden="true"
+                ></div>
 
-        <select
-            id="volume"
-            aria-label="Storage volume"
-        >
-            <option value="internal">
-                Internal storage
-            </option>
+                <div class="brand-text">
+                    <div
+                        id="device-title"
+                        class="brand-title"
+                    >
+                        Spectra
+                    </div>
 
-            <option value="sd">
-                SD card
-            </option>
-        </select>
+                    <div class="brand-subtitle">
+                        File manager
+                    </div>
+                </div>
+            </div>
+
+            <nav
+                class="navigation"
+                aria-label="Main navigation"
+            >
+                <a href="/">
+                    Overview
+                </a>
+
+                <a href="/settings">
+                    Settings
+                </a>
+
+                <a class="active" href="/files">
+                    Files
+                </a>
+            </nav>
+        </div>
     </header>
 
     <main class="container">
+        <section class="page-header">
+            <div>
+                <h1>File manager</h1>
+
+                <p>
+                    Browse and download files from Spectra storage
+                </p>
+            </div>
+
+            <div class="volume-control">
+                <label for="volume">
+                    Storage volume
+                </label>
+
+                <select
+                    id="volume"
+                    class="volume-select"
+                    aria-label="Storage volume"
+                >
+                    <option value="internal">
+                        Internal storage
+                    </option>
+
+                    <option value="sd">
+                        SD card
+                    </option>
+                </select>
+            </div>
+        </section>
+
         <section class="card">
             <nav
-                class="toolbar"
+                class="file-toolbar"
                 aria-label="Directory navigation"
             >
                 <button
                     id="back"
-                    class="button"
+                    class="button button-secondary"
                     type="button"
                     disabled
                 >
                     Back
                 </button>
 
-                <span
-                    id="current-path"
-                    class="path"
-                    title="/"
-                >
-                    /
-                </span>
+                <div class="path-container">
+                    <span class="path-label">
+                        Path
+                    </span>
+
+                    <span
+                        id="current-path"
+                        class="path"
+                        title="/"
+                    >
+                        /
+                    </span>
+                </div>
             </nav>
 
             <div class="table-wrapper">
@@ -276,7 +608,7 @@
             >
                 <button
                     id="previous-page"
-                    class="button"
+                    class="button button-secondary"
                     type="button"
                     disabled
                 >
@@ -292,7 +624,7 @@
 
                 <button
                     id="next-page"
-                    class="button"
+                    class="button button-primary"
                     type="button"
                     disabled
                 >
@@ -307,14 +639,46 @@
             role="status"
             aria-live="polite"
         ></p>
-
-        <nav class="navigation">
-            <a href="/">
-                Return to settings
-            </a>
-        </nav>
     </main>
 
     <script src="/files.js"></script>
+
+    <script>
+        async function loadDeviceTitle() {
+            const title =
+                document.getElementById(
+                    "device-title"
+                );
+
+            try {
+                const response =
+                    await fetch(
+                        "/api/system",
+                        {
+                            cache: "no-store"
+                        }
+                    );
+
+                if (!response.ok) {
+                    return;
+                }
+
+                const system =
+                    await response.json();
+
+                title.textContent =
+                    system.device_id ||
+                    "Spectra";
+
+            } catch (error) {
+                console.error(
+                    "Failed to load device title:",
+                    error
+                );
+            }
+        }
+
+        loadDeviceTitle();
+    </script>
 </body>
 </html>

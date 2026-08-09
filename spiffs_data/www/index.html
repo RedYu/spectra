@@ -1,326 +1,1416 @@
 <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width,initial-scale=1">
-		<link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
-		<link rel="icon" href="/favicon.ico" type="image/x-icon">
-        <title>Spectra Settings</title>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
 
-        <style>
-            *{box-sizing:border-box}
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
 
-            body{
-                margin:0;
-                min-height:100vh;
-                font-family:Arial,sans-serif;
-                background:#f3f5f7;
-                color:#20252b;
+    <link
+        rel="shortcut icon"
+        href="/favicon.ico"
+        type="image/x-icon"
+    >
+
+    <link
+        rel="icon"
+        href="/favicon.ico"
+        type="image/x-icon"
+    >
+
+    <title>Spectra</title>
+
+    <style>
+        :root {
+            color-scheme: dark;
+
+            --background: #0b0f14;
+            --surface: #121820;
+            --surface-hover: #171f29;
+            --border: #27313d;
+
+            --text: #f3f6f9;
+            --muted: #8f9ba8;
+
+            --accent: #3b82f6;
+            --success: #31c48d;
+            --warning: #f6ad55;
+            --danger: #f05252;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family:
+                Inter,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Arial,
+                sans-serif;
+            background: var(--background);
+            color: var(--text);
+        }
+
+        button,
+        a {
+            font: inherit;
+        }
+
+        .header {
+            position: sticky;
+            z-index: 10;
+            top: 0;
+            border-bottom: 1px solid var(--border);
+            background: rgba(11, 15, 20, 0.95);
+        }
+
+        .header-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            width: 100%;
+            max-width: 1180px;
+            min-height: 68px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            gap: 12px;
+        }
+
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            flex: 0 0 auto;
+            border: 1px solid #4f8cff;
+            border-radius: 10px;
+            background:
+                linear-gradient(
+                    145deg,
+                    #3b82f6,
+                    #1d4ed8
+                );
+            box-shadow:
+                0 0 24px rgba(59, 130, 246, 0.3);
+        }
+
+        .brand-text {
+            min-width: 0;
+        }
+
+        .brand-title {
+            overflow: hidden;
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .brand-subtitle {
+            overflow: hidden;
+            margin-top: 2px;
+            color: var(--muted);
+            font-size: 12px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .navigation {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .navigation a {
+            padding: 9px 13px;
+            border-radius: 8px;
+            color: var(--muted);
+            text-decoration: none;
+            transition:
+                color 120ms ease,
+                background 120ms ease;
+        }
+
+        .navigation a:hover,
+        .navigation a.active {
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 28px 20px 48px;
+        }
+
+        .overview {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .overview h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+
+        .overview p {
+            margin: 7px 0 0;
+            color: var(--muted);
+        }
+
+        .connection-status {
+            display: inline-flex;
+            align-items: center;
+            flex: 0 0 auto;
+            gap: 8px;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: var(--surface);
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--muted);
+        }
+
+        .connection-status.online .status-dot {
+            background: var(--success);
+            box-shadow:
+                0 0 10px rgba(49, 196, 141, 0.7);
+        }
+
+        .connection-status.online {
+            color: var(--success);
+        }
+
+        .connection-status.offline .status-dot {
+            background: var(--danger);
+        }
+
+        .connection-status.offline {
+            color: var(--danger);
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(4, minmax(0, 1fr));
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+
+        .summary-card {
+            min-width: 0;
+            padding: 18px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--surface);
+        }
+
+        .summary-label {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .summary-value {
+            overflow: hidden;
+            margin-top: 10px;
+            font-size: 23px;
+            font-weight: 700;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .summary-details {
+            overflow: hidden;
+            margin-top: 5px;
+            color: var(--muted);
+            font-size: 12px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .content-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(3, minmax(0, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            overflow: hidden;
+            min-width: 0;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: var(--surface);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 58px;
+            padding: 0 18px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-title {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .card-badge {
+            padding: 5px 9px;
+            border-radius: 999px;
+            background: #1a2430;
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .card-badge.success {
+            background: rgba(49, 196, 141, 0.12);
+            color: var(--success);
+        }
+
+        .card-badge.warning {
+            background: rgba(246, 173, 85, 0.12);
+            color: var(--warning);
+        }
+
+        .information-list {
+            margin: 0;
+            padding: 8px 18px;
+        }
+
+        .information-row {
+            display: grid;
+            grid-template-columns:
+                minmax(105px, 0.8fr)
+                minmax(0, 1.2fr);
+            align-items: center;
+            gap: 12px;
+            min-height: 43px;
+            border-bottom: 1px solid rgba(39, 49, 61, 0.7);
+        }
+
+        .information-row:last-child {
+            border-bottom: 0;
+        }
+
+        .information-row dt {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .information-row dd {
+            overflow: hidden;
+            margin: 0;
+            font-size: 13px;
+            font-weight: 500;
+            text-align: right;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .value-success {
+            color: var(--success);
+        }
+
+        .value-warning {
+            color: var(--warning);
+        }
+
+        .value-danger {
+            color: var(--danger);
+        }
+
+        .loading {
+            animation: pulse 1.3s ease-in-out infinite;
+            color: var(--muted);
+        }
+
+        .footer-status {
+            min-height: 20px;
+            margin-top: 18px;
+            color: var(--muted);
+            font-size: 13px;
+            text-align: right;
+        }
+
+        @keyframes pulse {
+            0%,
+            100% {
+                opacity: 0.45;
             }
 
-            .header{
-                background:#151a20;
-                color:#fff;
-                padding:18px 24px;
-                font-size:22px;
-                font-weight:600;
+            50% {
+                opacity: 1;
+            }
+        }
+
+        @media (max-width: 960px) {
+            .summary-grid {
+                grid-template-columns:
+                    repeat(2, minmax(0, 1fr));
             }
 
-            .container{
-                max-width:720px;
-                margin:32px auto;
-                padding:0 16px;
+            .content-grid {
+                grid-template-columns:
+                    repeat(2, minmax(0, 1fr));
             }
 
-            .card{
-                background:#fff;
-                border-radius:12px;
-                padding:24px;
-                box-shadow:0 4px 16px rgba(0,0,0,.08);
-                margin-bottom:20px;
+            .power-card {
+                grid-column: 1 / -1;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .header-content {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 10px;
+                padding-top: 14px;
+                padding-bottom: 12px;
             }
 
-            .card h2{
-                margin:0 0 20px;
-                font-size:20px;
+            .navigation {
+                width: 100%;
             }
 
-            .field{
-                display:flex;
-                align-items:center;
-                justify-content:space-between;
-                gap:20px;
-                margin:18px 0;
+            .navigation a {
+                flex: 1;
+                text-align: center;
             }
 
-            .field label{
-                font-weight:500;
+            .container {
+                padding: 22px 14px 36px;
             }
 
-            input[type=range]{
-                width:240px;
+            .overview {
+                align-items: flex-start;
+                flex-direction: column;
             }
 
-            .value{
-                display:inline-block;
-                min-width:48px;
-                text-align:right;
+            .summary-grid,
+            .content-grid {
+                grid-template-columns: 1fr;
             }
 
-            .status{
-                color:#66717c;
-                font-size:14px;
+            .power-card {
+                grid-column: auto;
             }
+        }
+    </style>
+</head>
 
-            .button{
-                border:0;
-                border-radius:8px;
-                padding:11px 18px;
-                background:#2476ff;
-                color:#fff;
-                font-size:15px;
-                cursor:pointer;
-            }
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="brand">
+                <div
+                    class="brand-mark"
+                    aria-hidden="true"
+                ></div>
 
-            .button:hover{
-                background:#145fd8;
-            }
+                <div class="brand-text">
+                    <div
+                        id="device-title"
+                        class="brand-title"
+                    >
+                        Spectra
+                    </div>
 
-            @media(max-width:560px){
-                .field{
-                    align-items:flex-start;
-                    flex-direction:column;
-                }
-
-                input[type=range]{
-                    width:100%;
-                }
-            }
-        </style>
-    </head>
-
-    <body>
-        <header id="device-title" class="header">Loading device...</header>
-
-        <main class="container">
-            <section class="card">
-                <h2>Device settings</h2>
-
-                <div class="field">
-                    <label>Device address</label>
-                    <span>172.16.10.1</span>
-                </div>
-
-                <div class="field">
-                    <label>Device name</label>
-                    <span>spectra.device</span>
-                </div>
-            </section>
-
-            <section class="card">
-                <h2>Display</h2>
-
-                <div class="field">
-                    <label for="brightness">Brightness</label>
-
-                    <div>
-                        <input id="brightness" type="range" min="10" max="100" value="80">
-
-                        <span id="brightness-value" class="value">
-                            80%
-                        </span>
+                    <div
+                        id="device-subtitle"
+                        class="brand-subtitle"
+                    >
+                        CAN Analyzer
                     </div>
                 </div>
-            </section>
+            </div>
 
-            <section class="card">
-                <h2>Application</h2>
+            <nav
+                class="navigation"
+                aria-label="Main navigation"
+            >
+                <a class="active" href="/">
+                    Overview
+                </a>
 
-                <div class="field">
-                    <label for="animations">GUI animations</label>
-                    <input id="animations" type="checkbox">
+                <a href="/settings">
+                    Settings
+                </a>
+
+                <a href="/files">
+                    Files
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="overview">
+            <div>
+                <h1>Device overview</h1>
+
+                <p>
+                    Live system, network and power information
+                </p>
+            </div>
+
+            <div
+                id="connection-status"
+                class="connection-status"
+                role="status"
+            >
+                <span class="status-dot"></span>
+                <span id="connection-status-text">
+                    Connecting
+                </span>
+            </div>
+        </section>
+
+        <section
+            class="summary-grid"
+            aria-label="System summary"
+        >
+            <article class="summary-card">
+                <div class="summary-label">
+                    CPU load
                 </div>
 
-                <div class="field">
-                    <label for="sd-logging">SD-card logging</label>
-                    <input id="sd-logging" type="checkbox">
+                <div
+                    id="summary-cpu"
+                    class="summary-value loading"
+                >
+                    —
                 </div>
 
-                <button id="save" class="button" type="button">
-                    Save settings
-                </button>
+                <div
+                    id="summary-frequency"
+                    class="summary-details"
+                >
+                    —
+                </div>
+            </article>
 
-                <p id="status" class="status"></p>
-            </section>
-        </main>
+            <article class="summary-card">
+                <div class="summary-label">
+                    Internal heap
+                </div>
 
-        <script>
-			const brightness =
-				document.getElementById("brightness");
+                <div
+                    id="summary-heap"
+                    class="summary-value loading"
+                >
+                    —
+                </div>
 
-			const brightnessValue =
-				document.getElementById("brightness-value");
+                <div
+                    id="summary-minimum-heap"
+                    class="summary-details"
+                >
+                    —
+                </div>
+            </article>
 
-			const animations =
-				document.getElementById("animations");
+            <article class="summary-card">
+                <div class="summary-label">
+                    Temperature
+                </div>
 
-			const sdLogging =
-				document.getElementById("sd-logging");
+                <div
+                    id="summary-temperature"
+                    class="summary-value loading"
+                >
+                    —
+                </div>
 
-			const status =
-				document.getElementById("status");
+                <div class="summary-details">
+                    ESP32-S3 internal sensor
+                </div>
+            </article>
 
-			brightness.addEventListener("input", () => {
-				brightnessValue.textContent =
-					`${brightness.value}%`;
-			});
+            <article class="summary-card">
+                <div class="summary-label">
+                    Uptime
+                </div>
 
-			async function loadSettings() {
-				try {
-					const response =
-						await fetch("/api/settings", {
-							cache: "no-store"
-						});
+                <div
+                    id="summary-uptime"
+                    class="summary-value loading"
+                >
+                    —
+                </div>
 
-					if (!response.ok) {
-						throw new Error(
-							`HTTP ${response.status}`
-						);
-					}
+                <div
+                    id="summary-reset"
+                    class="summary-details"
+                >
+                    —
+                </div>
+            </article>
+        </section>
 
-					const settings =
-						await response.json();
+        <section class="content-grid">
+            <article class="card">
+                <header class="card-header">
+                    <h2 class="card-title">
+                        System
+                    </h2>
 
-					brightness.value =
-						settings.display.brightness;
+                    <span
+                        id="system-badge"
+                        class="card-badge"
+                    >
+                        Loading
+                    </span>
+                </header>
 
-					brightnessValue.textContent =
-						`${settings.display.brightness}%`;
+                <dl class="information-list">
+                    <div class="information-row">
+                        <dt>Device ID</dt>
+                        <dd id="system-device-id">—</dd>
+                    </div>
 
-					animations.checked =
-						settings.ui.animations_enabled;
+                    <div class="information-row">
+                        <dt>Device name</dt>
+                        <dd id="system-device-name">—</dd>
+                    </div>
 
-					sdLogging.checked =
-						settings.logging.sd_enabled;
+                    <div class="information-row">
+                        <dt>Firmware</dt>
+                        <dd id="system-firmware">—</dd>
+                    </div>
 
-					status.textContent =
-						"Settings loaded";
-				} catch (error) {
-					status.textContent =
-						`Failed to load settings: ${error.message}`;
-				}
-			}
+                    <div class="information-row">
+                        <dt>Hardware</dt>
+                        <dd id="system-hardware">—</dd>
+                    </div>
 
-			async function applySettings() {
-				status.textContent =
-					"Applying settings...";
+                    <div class="information-row">
+                        <dt>Processor</dt>
+                        <dd id="system-processor">—</dd>
+                    </div>
 
-				const response =
-					await fetch("/api/settings", {
-						method: "PUT",
+                    <div class="information-row">
+                        <dt>Flash</dt>
+                        <dd id="system-flash">—</dd>
+                    </div>
 
-						headers: {
-							"Content-Type": "application/json"
-						},
+                    <div class="information-row">
+                        <dt>PSRAM</dt>
+                        <dd id="system-psram">—</dd>
+                    </div>
 
-						body: JSON.stringify({
-							display: {
-								brightness:
-									Number(brightness.value)
-							},
+                    <div class="information-row">
+                        <dt>Storage</dt>
+                        <dd id="system-storage">—</dd>
+                    </div>
 
-							logging: {
-								sd_enabled:
-									sdLogging.checked
-							},
+                    <div class="information-row">
+                        <dt>SD card</dt>
+                        <dd id="system-sd-card">—</dd>
+                    </div>
+                </dl>
+            </article>
 
-							ui: {
-								animations_enabled:
-									animations.checked
-							}
-						})
-					});
+            <article class="card">
+                <header class="card-header">
+                    <h2 class="card-title">
+                        Network
+                    </h2>
 
-				const result =
-					await response.json();
+                    <span
+                        id="network-badge"
+                        class="card-badge"
+                    >
+                        Loading
+                    </span>
+                </header>
 
-				if (!response.ok) {
-					throw new Error(result.message);
-				}
-			}
+                <dl class="information-list">
+                    <div class="information-row">
+                        <dt>Wi-Fi mode</dt>
+                        <dd id="network-mode">—</dd>
+                    </div>
 
-			async function saveSettings() {
-				try {
-					await applySettings();
+                    <div class="information-row">
+                        <dt>SoftAP</dt>
+                        <dd id="network-ap">—</dd>
+                    </div>
 
-					const response =
-						await fetch("/api/settings/save", {
-							method: "POST"
-						});
+                    <div class="information-row">
+                        <dt>AP address</dt>
+                        <dd id="network-ap-address">—</dd>
+                    </div>
 
-					const result =
-						await response.json();
+                    <div class="information-row">
+                        <dt>AP clients</dt>
+                        <dd id="network-clients">—</dd>
+                    </div>
 
-					if (!response.ok) {
-						throw new Error(result.message);
-					}
+                    <div class="information-row">
+                        <dt>Station</dt>
+                        <dd id="network-station">—</dd>
+                    </div>
 
-					status.textContent =
-						"Settings saved";
-				} catch (error) {
-					status.textContent =
-						`Failed to save settings: ${error.message}`;
-				}
-			}
+                    <div class="information-row">
+                        <dt>STA address</dt>
+                        <dd id="network-sta-address">—</dd>
+                    </div>
 
-			document
-				.getElementById("save")
-				.addEventListener(
-					"click",
-					saveSettings
-				);
+                    <div class="information-row">
+                        <dt>RNDIS</dt>
+                        <dd id="network-rndis">—</dd>
+                    </div>
 
-			loadSettings();
-		</script>
-		<script>
-			async function loadSystemInformation() {
-				const title =
-					document.getElementById("device-title");
+                    <div class="information-row">
+                        <dt>RNDIS address</dt>
+                        <dd id="network-rndis-address">—</dd>
+                    </div>
 
-				try {
-					const response =
-						await fetch("/api/system", {
-							cache: "no-store"
-						});
+                    <div class="information-row">
+                        <dt>DNS</dt>
+                        <dd id="network-dns">—</dd>
+                    </div>
 
-					if (!response.ok) {
-						throw new Error(
-							`HTTP ${response.status}`
-						);
-					}
+                    <div class="information-row">
+                        <dt>mDNS</dt>
+                        <dd id="network-mdns">—</dd>
+                    </div>
+                </dl>
+            </article>
 
-					const system =
-						await response.json();
+            <article class="card power-card">
+                <header class="card-header">
+                    <h2 class="card-title">
+                        Power
+                    </h2>
 
-					if (system.device_name) {
-						title.textContent =
-							`${system.device_id} (${system.device_name})`;
-					} else {
-						title.textContent =
-							system.device_id;
-					}
-				} catch (error) {
-					title.textContent =
-						"Spectra";
+                    <span
+                        id="power-badge"
+                        class="card-badge"
+                    >
+                        Loading
+                    </span>
+                </header>
 
-					console.error(
-						"Failed to load system information:",
-						error
-					);
-				}
-			}
+                <dl class="information-list">
+                    <div class="information-row">
+                        <dt>Controller</dt>
+                        <dd id="power-controller">—</dd>
+                    </div>
 
-			loadSystemInformation();
-		</script>
-    </body>
-    </html>
+                    <div class="information-row">
+                        <dt>DCDC1</dt>
+                        <dd id="power-dcdc1">—</dd>
+                    </div>
+
+                    <div class="information-row">
+                        <dt>DCDC2</dt>
+                        <dd id="power-dcdc2">—</dd>
+                    </div>
+
+                    <div class="information-row">
+                        <dt>DCDC3</dt>
+                        <dd id="power-dcdc3">—</dd>
+                    </div>
+
+                    <div class="information-row">
+                        <dt>ALDO1</dt>
+                        <dd id="power-aldo1">—</dd>
+                    </div>
+
+                    <div class="information-row">
+                        <dt>DLDO1</dt>
+                        <dd id="power-dldo1">—</dd>
+                    </div>
+
+                    <div class="information-row">
+                        <dt>Power-on source</dt>
+                        <dd id="power-source">—</dd>
+                    </div>
+
+                    <div class="information-row">
+                        <dt>Temperature IRQ</dt>
+                        <dd id="power-temperature">—</dd>
+                    </div>
+
+                    <div class="information-row">
+                        <dt>IRQ status</dt>
+                        <dd id="power-irq">—</dd>
+                    </div>
+                </dl>
+            </article>
+        </section>
+
+        <p
+            id="refresh-status"
+            class="footer-status"
+            role="status"
+            aria-live="polite"
+        ></p>
+    </main>
+
+    <script>
+        const REFRESH_INTERVAL_MS = 2000;
+
+        function setText(id, value) {
+            const element =
+                document.getElementById(id);
+
+            if (element === null) {
+                return;
+            }
+
+            element.textContent =
+                value ?? "—";
+
+            element.classList.remove(
+                "loading"
+            );
+        }
+
+        function setStateValue(
+            id,
+            enabled,
+            enabledText = "Enabled",
+            disabledText = "Disabled"
+        ) {
+            const element =
+                document.getElementById(id);
+
+            if (element === null) {
+                return;
+            }
+
+            element.textContent =
+                enabled
+                    ? enabledText
+                    : disabledText;
+
+            element.classList.toggle(
+                "value-success",
+                enabled
+            );
+
+            element.classList.toggle(
+                "value-danger",
+                !enabled
+            );
+        }
+
+        function setBadge(
+            id,
+            text,
+            state = ""
+        ) {
+            const badge =
+                document.getElementById(id);
+
+            if (badge === null) {
+                return;
+            }
+
+            badge.textContent = text;
+            badge.className =
+                `card-badge ${state}`.trim();
+        }
+
+        function formatBytes(bytes) {
+            if (!Number.isFinite(bytes) ||
+                bytes < 0) {
+
+                return "—";
+            }
+
+            if (bytes < 1024) {
+                return `${bytes} B`;
+            }
+
+            if (bytes < 1024 * 1024) {
+                return `${(
+                    bytes / 1024
+                ).toFixed(1)} KB`;
+            }
+
+            if (bytes < 1024 * 1024 * 1024) {
+                return `${(
+                    bytes /
+                    (1024 * 1024)
+                ).toFixed(1)} MB`;
+            }
+
+            return `${(
+                bytes /
+                (1024 * 1024 * 1024)
+            ).toFixed(1)} GB`;
+        }
+
+        function formatUptime(seconds) {
+            if (!Number.isFinite(seconds) ||
+                seconds < 0) {
+
+                return "—";
+            }
+
+            const days =
+                Math.floor(seconds / 86400);
+
+            const hours =
+                Math.floor(
+                    (seconds % 86400) / 3600
+                );
+
+            const minutes =
+                Math.floor(
+                    (seconds % 3600) / 60
+                );
+
+            const remainingSeconds =
+                Math.floor(seconds % 60);
+
+            const time =
+                [
+                    hours,
+                    minutes,
+                    remainingSeconds
+                ]
+                    .map(value =>
+                        String(value).padStart(2, "0")
+                    )
+                    .join(":");
+
+            return days > 0
+                ? `${days}d ${time}`
+                : time;
+        }
+
+        function formatVoltage(
+            enabled,
+            voltage
+        ) {
+            if (!enabled) {
+                return "Disabled";
+            }
+
+            if (Number.isFinite(voltage) &&
+                voltage > 0) {
+
+                return `Enabled · ${voltage} mV`;
+            }
+
+            return "Enabled";
+        }
+
+        function getPowerOutput(
+            power,
+            name
+        ) {
+            const outputs =
+                power.outputs || {};
+
+            const voltages =
+                power.configured_voltages_mv ||
+                power.voltages_mv ||
+                {};
+
+            const nested =
+                outputs[name];
+
+            if ((typeof nested === "object") &&
+                (nested !== null)) {
+
+                return {
+                    enabled:
+                        nested.enabled === true,
+
+                    voltage:
+                        nested.configured_voltage_mv ??
+                        nested.voltage_mv ??
+                        0
+                };
+            }
+
+            return {
+                enabled:
+                    nested === true ||
+                    power[`${name}_enabled`] === true,
+
+                voltage:
+                    voltages[name] ??
+                    power[
+                        `${name}_configured_voltage_mv`
+                    ] ??
+                    0
+            };
+        }
+
+        async function fetchJson(path) {
+            const response =
+                await fetch(path, {
+                    cache: "no-store"
+                });
+
+            let result;
+
+            try {
+                result =
+                    await response.json();
+            } catch {
+                throw new Error(
+                    `${path}: invalid response`
+                );
+            }
+
+            if (!response.ok) {
+                throw new Error(
+                    result.message ||
+                    `${path}: HTTP ${response.status}`
+                );
+            }
+
+            return result;
+        }
+
+        function updateSystem(system) {
+            const title =
+                system.device_name
+                    ? `${system.device_id} (${system.device_name})`
+                    : system.device_id || "Spectra";
+
+            setText(
+                "device-title",
+                title
+            );
+
+            setText(
+                "device-subtitle",
+                system.firmware_version
+                    ? `Firmware ${system.firmware_version}`
+                    : "CAN Analyzer"
+            );
+
+            setText(
+                "summary-cpu",
+                `${system.cpu_usage ?? 0}%`
+            );
+
+            setText(
+                "summary-frequency",
+                `${system.cpu_frequency_mhz ?? 0} MHz`
+            );
+
+            setText(
+                "summary-heap",
+                formatBytes(system.free_heap)
+            );
+
+            setText(
+                "summary-minimum-heap",
+                `Minimum ${formatBytes(
+                    system.minimum_free_heap
+                )}`
+            );
+
+            setText(
+                "summary-temperature",
+                system.chip_temperature_valid
+                    ? `${Number(
+                        system.chip_temperature_celsius
+                    ).toFixed(1)} °C`
+                    : "Unavailable"
+            );
+
+            setText(
+                "summary-uptime",
+                formatUptime(system.uptime_sec)
+            );
+
+            setText(
+                "summary-reset",
+                `Reset: ${
+                    system.reset_reason_name ||
+                    "unknown"
+                }`
+            );
+
+            setText(
+                "system-device-id",
+                system.device_id
+            );
+
+            setText(
+                "system-device-name",
+                system.device_name
+            );
+
+            setText(
+                "system-firmware",
+                system.firmware_version
+            );
+
+            setText(
+                "system-hardware",
+                system.hardware_version
+            );
+
+            const processor =
+                system.chip_model
+                    ? `${system.chip_model}, ${
+                        system.chip_cores
+                    } cores`
+                    : "—";
+
+            setText(
+                "system-processor",
+                processor
+            );
+
+            setText(
+                "system-flash",
+                formatBytes(system.flash_size)
+            );
+
+            setText(
+                "system-psram",
+                formatBytes(system.psram_size)
+            );
+
+            setStateValue(
+                "system-storage",
+                system.storage_ready,
+                "Ready",
+                "Unavailable"
+            );
+
+            setStateValue(
+                "system-sd-card",
+                system.sd_card_mounted,
+                "Mounted",
+                "Not mounted"
+            );
+
+            setBadge(
+                "system-badge",
+                "Online",
+                "success"
+            );
+
+            updateConnectionStatus(
+                system.internet_available
+            );
+        }
+
+        function updateConnectionStatus(
+            available
+        ) {
+            const container =
+                document.getElementById(
+                    "connection-status"
+                );
+
+            const text =
+                document.getElementById(
+                    "connection-status-text"
+                );
+
+            container.classList.remove(
+                "online",
+                "offline"
+            );
+
+            if (available) {
+                container.classList.add(
+                    "online"
+                );
+
+                text.textContent =
+                    "Backend online";
+            } else {
+                container.classList.add(
+                    "offline"
+                );
+
+                text.textContent =
+                    "Backend unavailable";
+            }
+        }
+
+        function updateNetwork(network) {
+            const wifi =
+                network.wifi || {};
+
+            const softap =
+                wifi.softap || {};
+
+            const station =
+                wifi.station || {};
+
+            const rndis =
+                network.usb_rndis || {};
+
+            const dns =
+                network.dns || {};
+
+            const mdns =
+                network.mdns || {};
+
+            setText(
+                "network-mode",
+                wifi.mode || "disabled"
+            );
+
+            setText(
+                "network-ap",
+                softap.enabled
+                    ? softap.ssid || "Enabled"
+                    : "Disabled"
+            );
+
+            setText(
+                "network-ap-address",
+                softap.ipv4?.address || "—"
+            );
+
+            setText(
+                "network-clients",
+                String(
+                    softap.client_count ?? 0
+                )
+            );
+
+            setText(
+                "network-station",
+                station.connected
+                    ? station.ssid || "Connected"
+                    : station.enabled
+                        ? "Connecting"
+                        : "Disabled"
+            );
+
+            setText(
+                "network-sta-address",
+                station.ipv4?.address || "—"
+            );
+
+            setText(
+                "network-rndis",
+                rndis.host_connected
+                    ? "Host connected"
+                    : rndis.started
+                        ? "Waiting for host"
+                        : "Disabled"
+            );
+
+            setText(
+                "network-rndis-address",
+                rndis.ipv4?.address || "—"
+            );
+
+            setText(
+                "network-dns",
+                dns.started
+                    ? dns.local_name
+                    : "Stopped"
+            );
+
+            setText(
+                "network-mdns",
+                mdns.started
+                    ? mdns.address
+                    : "Stopped"
+            );
+
+            const active =
+                station.connected ||
+                rndis.host_connected ||
+                softap.client_count > 0;
+
+            setBadge(
+                "network-badge",
+                active ? "Active" : "Idle",
+                active ? "success" : ""
+            );
+        }
+
+        function updatePower(power) {
+            const dcdc1 =
+                getPowerOutput(power, "dcdc1");
+
+            const dcdc2 =
+                getPowerOutput(power, "dcdc2");
+
+            const dcdc3 =
+                getPowerOutput(power, "dcdc3");
+
+            const aldo1 =
+                getPowerOutput(power, "aldo1");
+
+            const dldo1 =
+                getPowerOutput(power, "dldo1");
+
+            setText(
+                "power-controller",
+                power.controller || "AXP313A"
+            );
+
+            setText(
+                "power-dcdc1",
+                formatVoltage(
+                    dcdc1.enabled,
+                    dcdc1.voltage
+                )
+            );
+
+            setText(
+                "power-dcdc2",
+                formatVoltage(
+                    dcdc2.enabled,
+                    dcdc2.voltage
+                )
+            );
+
+            setText(
+                "power-dcdc3",
+                formatVoltage(
+                    dcdc3.enabled,
+                    dcdc3.voltage
+                )
+            );
+
+            setText(
+                "power-aldo1",
+                formatVoltage(
+                    aldo1.enabled,
+                    aldo1.voltage
+                )
+            );
+
+            setText(
+                "power-dldo1",
+                formatVoltage(
+                    dldo1.enabled,
+                    dldo1.voltage
+                )
+            );
+
+            setText(
+                "power-source",
+                power.power_on_source_name ??
+                power.power_on_source ??
+                "—"
+            );
+
+            const temperatureIrq =
+                power.interrupts
+                    ?.overtemperature ??
+                power.overtemperature_irq ??
+                false;
+
+            setText(
+                "power-temperature",
+                temperatureIrq
+                    ? "Triggered"
+                    : "Normal"
+            );
+
+            const irqStatus =
+                power.irq_status ??
+                power.interrupts?.raw_status;
+
+            setText(
+                "power-irq",
+                Number.isFinite(irqStatus)
+                    ? `0x${Number(
+                        irqStatus
+                    )
+                        .toString(16)
+                        .toUpperCase()
+                        .padStart(2, "0")}`
+                    : "—"
+            );
+
+            setBadge(
+                "power-badge",
+                temperatureIrq
+                    ? "Warning"
+                    : "Normal",
+                temperatureIrq
+                    ? "warning"
+                    : "success"
+            );
+        }
+
+        async function refreshDashboard() {
+            const status =
+                document.getElementById(
+                    "refresh-status"
+                );
+
+            try {
+                const [
+                    system,
+                    network,
+                    power
+                ] = await Promise.all([
+                    fetchJson("/api/system"),
+                    fetchJson("/api/network"),
+                    fetchJson("/api/power")
+                ]);
+
+                updateSystem(system);
+                updateNetwork(network);
+                updatePower(power);
+
+                status.textContent =
+                    `Updated ${new Date()
+                        .toLocaleTimeString()}`;
+
+            } catch (error) {
+                status.textContent =
+                    `Update failed: ${error.message}`;
+
+                console.error(
+                    "Failed to refresh dashboard:",
+                    error
+                );
+            }
+        }
+
+        refreshDashboard();
+
+        window.setInterval(
+            refreshDashboard,
+            REFRESH_INTERVAL_MS
+        );
+    </script>
+</body>
+</html>
