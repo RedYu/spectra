@@ -11,9 +11,9 @@
 #include "board.h"
 #include "display_driver.h"
 #include "touch_driver.h"
-#include "axp313a_driver.h"
 #include "system_model.h"
 #include "system_service.h"
+#include "power_service.h"
 #include "storage_service.h"
 #include "storage_sd_service.h"
 #include "settings_model.h"
@@ -31,8 +31,6 @@
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
 
-#define AXP313A_REGISTER_DUMP_ENABLED  (0)
-
 typedef enum
 {
     SERVICE_OPTIONAL = 0,
@@ -41,37 +39,6 @@ typedef enum
 } service_requirement_t;
 
 static const char *TAG = "app_main";
-
-#if AXP313A_REGISTER_DUMP_ENABLED
-static void log_axp313a_register(
-    uint8_t address
-)
-{
-    uint8_t value = 0U;
-
-    const esp_err_t result =
-        axp313a_driver_read_register(
-            address,
-            &value
-        );
-
-    if (result == ESP_OK) {
-        ESP_LOGI(
-            TAG,
-            "AXP313A register 0x%02X = 0x%02X",
-            address,
-            value
-        );
-    } else {
-        ESP_LOGW(
-            TAG,
-            "Failed to read AXP313A register 0x%02X: %s",
-            address,
-            esp_err_to_name(result)
-        );
-    }
-}
-#endif
 
 static void log_heap_region(
     const char *name,
@@ -261,55 +228,61 @@ static void startup_task(
     }
 
     /*
-     * Initialize the power-management controller. The PMIC is optional
-     * for application startup because its outputs are already configured
-     * by hardware defaults.
+     * Initialize the power-management service using the shared board
+     * I2C bus. Power monitoring is optional for application startup.
      */
     result =
-        axp313a_driver_init(
+        power_service_init(
             board_i2c_get_handle()
         );
 
     if (result != ESP_OK) {
         ESP_LOGW(
             TAG,
-            "AXP313A initialization failed: %s",
+            "Power-service initialization failed: %s",
             esp_err_to_name(result)
         );
 
         startup_warning = true;
     } else {
-        axp313a_status_t power_status = {0};
+        power_service_snapshot_t power = {0};
 
-        const esp_err_t status_result =
-            axp313a_driver_get_status(
-                &power_status
+        const esp_err_t power_result =
+            power_service_get_snapshot(
+                &power
             );
 
-        if (status_result != ESP_OK) {
+        if (power_result != ESP_OK) {
             ESP_LOGW(
                 TAG,
-                "Failed to read AXP313A status: %s",
-                esp_err_to_name(status_result)
+                "Failed to read power information: %s",
+                esp_err_to_name(power_result)
             );
 
             startup_warning = true;
         } else {
+            const axp313a_status_t *power_status =
+                &power.status;
+
+            const axp313a_configuration_t
+                *power_configuration =
+                    &power.configuration;
+
             ESP_LOGI(
                 TAG,
                 "AXP313A outputs: "
                 "DCDC1=%u, DCDC2=%u, DCDC3=%u, "
                 "ALDO1=%u, DLDO1=%u",
                 (unsigned int)
-                    power_status.dcdc1_enabled,
+                    power_status->dcdc1_enabled,
                 (unsigned int)
-                    power_status.dcdc2_enabled,
+                    power_status->dcdc2_enabled,
                 (unsigned int)
-                    power_status.dcdc3_enabled,
+                    power_status->dcdc3_enabled,
                 (unsigned int)
-                    power_status.aldo1_enabled,
+                    power_status->aldo1_enabled,
                 (unsigned int)
-                    power_status.dldo1_enabled
+                    power_status->dldo1_enabled
             );
 
             ESP_LOGI(
@@ -320,19 +293,19 @@ static void startup_task(
                 "DLDO1=%u mV",
                 (unsigned int)
                     power_status
-                        .dcdc1_configured_voltage_mv,
+                        ->dcdc1_configured_voltage_mv,
                 (unsigned int)
                     power_status
-                        .dcdc2_configured_voltage_mv,
+                        ->dcdc2_configured_voltage_mv,
                 (unsigned int)
                     power_status
-                        .dcdc3_configured_voltage_mv,
+                        ->dcdc3_configured_voltage_mv,
                 (unsigned int)
                     power_status
-                        .aldo1_configured_voltage_mv,
+                        ->aldo1_configured_voltage_mv,
                 (unsigned int)
                     power_status
-                        .dldo1_configured_voltage_mv
+                        ->dldo1_configured_voltage_mv
             );
 
             ESP_LOGI(
@@ -342,44 +315,27 @@ static void startup_task(
                 "DCDC3_PWM=%u, source=0x%02X, "
                 "IRQ=0x%02X",
                 (unsigned int)
-                    power_status.dcdc1_forced_pwm,
+                    power_status->dcdc1_forced_pwm,
                 (unsigned int)
-                    power_status.dcdc2_forced_pwm,
+                    power_status->dcdc2_forced_pwm,
                 (unsigned int)
-                    power_status.dcdc3_forced_pwm,
+                    power_status->dcdc3_forced_pwm,
                 (unsigned int)
-                    power_status.power_on_source,
+                    power_status->power_on_source,
                 (unsigned int)
-                    power_status.irq_status
-            );
-        }
-
-        axp313a_configuration_t power_configuration = {0};
-
-        const esp_err_t configuration_result =
-            axp313a_driver_get_configuration(
-                &power_configuration
+                    power_status->irq_status
             );
 
-        if (configuration_result != ESP_OK) {
-            ESP_LOGW(
-                TAG,
-                "Failed to read AXP313A configuration: %s",
-                esp_err_to_name(configuration_result)
-            );
-
-            startup_warning = true;
-        } else {
             ESP_LOGI(
                 TAG,
                 "AXP313A DCDC configuration: "
                 "spread=%u, frequency=%u kHz",
                 (unsigned int)
                     power_configuration
-                        .spread_spectrum_enabled,
+                        ->spread_spectrum_enabled,
                 (unsigned int)
                     power_configuration
-                        .spread_spectrum_frequency_khz
+                        ->spread_spectrum_frequency_khz
             );
 
             ESP_LOGI(
@@ -388,13 +344,13 @@ static void startup_task(
                 "IRQ=%u, shutdown=%u, threshold=%u C",
                 (unsigned int)
                     power_configuration
-                        .overtemperature_irq_enabled,
+                        ->overtemperature_irq_enabled,
                 (unsigned int)
                     power_configuration
-                        .overtemperature_shutdown_enabled,
+                        ->overtemperature_shutdown_enabled,
                 (unsigned int)
                     power_configuration
-                        .overtemperature_threshold_c
+                        ->overtemperature_threshold_c
             );
 
             ESP_LOGI(
@@ -405,22 +361,22 @@ static void startup_task(
                 "sleep_wakeup=%u, IRQ_wakeup=%u",
                 (unsigned int)
                     power_configuration
-                        .startup_pwrok_monitoring_enabled,
+                        ->startup_pwrok_monitoring_enabled,
                 (unsigned int)
                     power_configuration
-                        .pwrok_low_restart_enabled,
+                        ->pwrok_low_restart_enabled,
                 (unsigned int)
                     power_configuration
-                        .reverse_shutdown_sequence_enabled,
+                        ->reverse_shutdown_sequence_enabled,
                 (unsigned int)
                     power_configuration
-                        .shutdown_delay_enabled,
+                        ->shutdown_delay_enabled,
                 (unsigned int)
                     power_configuration
-                        .sleep_wakeup_enabled,
+                        ->sleep_wakeup_enabled,
                 (unsigned int)
                     power_configuration
-                        .irq_wakeup_enabled
+                        ->irq_wakeup_enabled
             );
 
             ESP_LOGI(
@@ -431,38 +387,21 @@ static void startup_task(
                 "DCDC_OV=%u",
                 (unsigned int)
                     power_configuration
-                        .dldo1_overcurrent_shutdown_enabled,
+                        ->dldo1_overcurrent_shutdown_enabled,
                 (unsigned int)
                     power_configuration
-                        .dcdc1_undervoltage_shutdown_enabled,
+                        ->dcdc1_undervoltage_shutdown_enabled,
                 (unsigned int)
                     power_configuration
-                        .dcdc2_undervoltage_shutdown_enabled,
+                        ->dcdc2_undervoltage_shutdown_enabled,
                 (unsigned int)
                     power_configuration
-                        .dcdc3_undervoltage_shutdown_enabled,
+                        ->dcdc3_undervoltage_shutdown_enabled,
                 (unsigned int)
                     power_configuration
-                        .dcdc_overvoltage_shutdown_enabled
+                        ->dcdc_overvoltage_shutdown_enabled
             );
         }
-
-#if AXP313A_REGISTER_DUMP_ENABLED
-        log_axp313a_register(0x00U);
-        log_axp313a_register(0x10U);
-        log_axp313a_register(0x12U);
-        log_axp313a_register(0x13U);
-        log_axp313a_register(0x14U);
-        log_axp313a_register(0x15U);
-        log_axp313a_register(0x16U);
-        log_axp313a_register(0x17U);
-        log_axp313a_register(0x1AU);
-        log_axp313a_register(0x1BU);
-        log_axp313a_register(0x1CU);
-        log_axp313a_register(0x1DU);
-        log_axp313a_register(0x20U);
-        log_axp313a_register(0x21U);
-#endif
     }
 
     /*
