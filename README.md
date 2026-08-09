@@ -27,21 +27,26 @@ The long-term goal is to provide a handheld device for real-time monitoring, rec
 
 - ESP-IDF 6.x and FreeRTOS
 - LVGL 9 graphical interface
-- ILI9488 480×320 display over SPI with DMA
-- GT911 capacitive touch controller over I²C
+- ILI9488 480x320 display over SPI with DMA
+- GT911 capacitive touch controller over shared I²C
 - Centralized screen manager with lazy creation and navigation history
 - Splash, main, and settings screens
-- Internal SPIFFS storage
-- SD-card storage with shared SPI-bus synchronization
+- Shared GUI theme and reusable LVGL style system
+- Selectable Light and Dark GUI themes
+- Internal SPIFFS and removable SD-card storage
+- Shared SPI-bus synchronization
 - JSON-based settings model and service
 - Thread-safe system model and runtime metrics
 - UART and optional SD-card file logging
-- USB RNDIS networking
-- DHCP server for the `172.16.10.x` subnet
-- Local DNS resolution for `spectra.device`
-- Embedded HTTP server and settings API
-- Browser-based internal-storage and SD-card file listing
-- File downloads through the web interface
+- Periodic SD-card log flushing
+- Core-dump export from flash to SD card
+- USB RNDIS, Wi-Fi SoftAP, and Wi-Fi Station networking
+- Wi-Fi network scanning and credential storage in NVS
+- DHCP, local DNS, and mDNS discovery
+- Internet connectivity monitoring through the Spectra backend
+- AXP313A power-management driver and service
+- Embedded Web UI and REST API
+- Browser-based internal-storage and SD-card file manager
 - GitHub Actions build workflow
 
 ### Planned
@@ -52,7 +57,7 @@ The long-term goal is to provide a handheld device for real-time monitoring, rec
 - UDS and OBD-II support
 - XCP support
 - Live dashboards
-- Wi-Fi and Bluetooth connectivity
+- Bluetooth connectivity
 - OTA firmware updates
 - Device registration and authentication
 - Remote backend integration
@@ -62,7 +67,7 @@ The long-term goal is to provide a handheld device for real-time monitoring, rec
 | Component | Description |
 | --- | --- |
 | MCU | ESP32-S3 |
-| Display | ILI9488, 480×320, SPI |
+| Display | ILI9488, 480x320, SPI |
 | Touch | GT911, I²C |
 | Automotive communication | CAN/TWAI planned |
 | Internal storage | SPIFFS |
@@ -81,11 +86,14 @@ spectra/
 │   ├── drivers/               # Display, touch, backlight, and SD drivers
 │   ├── services/              # System, storage, settings, logging, USB, and web services
 │   ├── models/                # Thread-safe application state
-│   ├── gui/                   # Screens, widgets, configuration, and assets
+│   ├── gui/                   # Screens, widgets, shared themes, styles, and assets
 │   └── lvgl_port/             # LVGL display and input integration
 ├── partitions.csv
 └── sdkconfig.defaults
 ```
+
+- **GUI Theme** defines Light and Dark color palettes, fonts, spacing, radii, and component-specific visual tokens.
+- **GUI Styles** provides reusable LVGL styles shared by screens, toolbars, dialogs, cards, inputs, and buttons.
 
 The application follows a layered architecture:
 
@@ -170,15 +178,35 @@ Example configuration:
     "brightness": 80
   },
   "logging": {
-    "sd_enabled": false
+    "sd_enabled": true
   },
   "ui": {
-    "animations_enabled": false
+    "animations_enabled": false,
+    "theme": "light"
+  },
+  "network": {
+    "wifi_ap": {
+      "enabled": true,
+      "ssid": "Spectra",
+      "password": "spectra123"
+    },
+    "wifi_sta": {
+      "enabled": false,
+      "ssid": "",
+      "credential_id": ""
+    },
+    "usb_rndis": {
+      "enabled": true
+    }
   }
 }
 ```
 
-## USB Network and Web Interface
+The GUI supports `light` and `dark` themes. Theme changes are applied after restarting the device.
+
+Wi-Fi Station passwords are not stored in the JSON configuration. Credentials are stored separately in NVS, while the configuration contains only the selected SSID and a non-secret credential identifier.
+
+## Network and Web Interface
 
 Spectra exposes a USB RNDIS network interface. The device provides network configuration to the connected computer through DHCP.
 
@@ -187,6 +215,12 @@ Spectra exposes a USB RNDIS network interface. The device provides network confi
 | Device address | `172.16.10.1` |
 | Client subnet | `172.16.10.x` |
 | Local hostname | `spectra.device` |
+
+When connected through a local Wi-Fi network, the device can also be accessed using its unique mDNS hostname:
+
+```text
+http://spectra-XXXXXX.local/
+```
 
 After connecting the device, open either address:
 
@@ -205,7 +239,9 @@ Current HTTP endpoints include:
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/api/system` | Read system information |
+| `GET` | `/api/system` | Read system, CPU, memory, and storage information |
+| `GET` | `/api/network` | Read Wi-Fi, USB RNDIS, DNS, and mDNS information |
+| `GET` | `/api/power` | Read AXP313A power-management information |
 | `GET` | `/api/settings` | Read current settings |
 | `PUT` | `/api/settings` | Update settings |
 | `POST` | `/api/settings/save` | Save settings to internal storage |
@@ -272,7 +308,7 @@ idf.py fullclean
 - [x] Settings and system services
 - [x] Logging service
 - [x] Screen manager
-- [ ] Shared GUI theme and style system
+- [x] Shared GUI theme and style system
 
 ### User Interface
 
@@ -296,9 +332,13 @@ idf.py fullclean
 ### Connectivity
 
 - [x] USB RNDIS networking
+- [x] Wi-Fi SoftAP
+- [x] Wi-Fi Station
+- [x] Wi-Fi network scanning
 - [x] DHCP and local DNS services
+- [x] mDNS discovery
+- [x] Internet connectivity monitoring
 - [x] Embedded Web UI
-- [ ] Wi-Fi
 - [ ] Bluetooth
 - [ ] OTA updates
 - [ ] Device registration
