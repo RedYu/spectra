@@ -24,27 +24,38 @@ idf_component_register(
     PRIV_REQUIRES
         app
         gui
-        esp_app_format
         drivers
         lvgl_port
+
         freertos
+        driver
+        esp_driver_tsens
+
+        esp_app_format
+        esp_system
+        esp_hw_support
+        spi_flash
+        esp_psram
+        esp_timer
+
+        esp_event
+        esp_netif
+        esp_wifi
+        lwip
+
         nvs_flash
         fatfs
         spiffs
         cjson
+
         esp_tinyusb
-        esp_hw_support
-        esp_netif
-        lwip
         dns_server
+
         esp_http_server
         esp_http_client
         mbedtls
-        esp_wifi
-        esp_event
-        nvs_flash
+
         espcoredump
-        spi_flash
         mdns
 )
 

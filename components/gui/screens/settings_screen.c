@@ -271,6 +271,47 @@ static void settings_screen_set_switch_state(
     }
 }
 
+static const char *settings_screen_reset_reason_to_string(
+    esp_reset_reason_t reason
+)
+{
+    switch (reason) {
+        case ESP_RST_POWERON:
+            return "Power on";
+
+        case ESP_RST_EXT:
+            return "External reset";
+
+        case ESP_RST_SW:
+            return "Software restart";
+
+        case ESP_RST_PANIC:
+            return "Application panic";
+
+        case ESP_RST_INT_WDT:
+            return "Interrupt watchdog";
+
+        case ESP_RST_TASK_WDT:
+            return "Task watchdog";
+
+        case ESP_RST_WDT:
+            return "Watchdog";
+
+        case ESP_RST_DEEPSLEEP:
+            return "Deep sleep";
+
+        case ESP_RST_BROWNOUT:
+            return "Brownout";
+
+        case ESP_RST_SDIO:
+            return "SDIO";
+
+        case ESP_RST_UNKNOWN:
+        default:
+            return "Unknown";
+    }
+}
+
 static void settings_screen_refresh_system_info(void)
 {
     if (s_system_info_label == NULL) {
@@ -325,27 +366,129 @@ static void settings_screen_refresh_system_info(void)
             ? model.serial_number
             : "N/A";
 
+    const char *chip_model =
+        model.chip_model[0] != '\0'
+            ? model.chip_model
+            : "N/A";
+
+    const char *reset_reason =
+        settings_screen_reset_reason_to_string(
+            model.reset_reason
+        );
+
+    char temperature[24];
+
+    if (model.chip_temperature_valid) {
+        const int32_t temperature_tenths =
+            (int32_t)(
+                model.chip_temperature_celsius *
+                10.0F
+            );
+
+        const bool negative =
+            temperature_tenths < 0;
+
+        const uint32_t absolute_tenths =
+            (uint32_t)(
+                negative
+                    ? -temperature_tenths
+                    : temperature_tenths
+            );
+
+        (void)snprintf(
+            temperature,
+            sizeof(temperature),
+            "%s%u.%u C",
+            negative ? "-" : "",
+            (unsigned int)(
+                absolute_tenths / 10U
+            ),
+            (unsigned int)(
+                absolute_tenths % 10U
+            )
+        );
+    } else {
+        (void)strlcpy(
+            temperature,
+            "Unavailable",
+            sizeof(temperature)
+        );
+    }
+
+    const uint32_t chip_revision_major =
+        model.chip_revision / 100U;
+
+    const uint32_t chip_revision_minor =
+        model.chip_revision % 100U;
+
     lv_label_set_text_fmt(
         s_system_info_label,
-        "Device: %s\n"
-        "Firmware: %s\n"
-        "Hardware: %s\n"
-        "Serial: %s\n"
-        "Uptime: %u d %02u:%02u:%02u\n"
-        "Free heap: %u KB\n"
-        "Minimum heap: %u KB\n"
-        "CPU usage: %u%%",
+
+        "Device\n"
+        "  Name: %s\n"
+        "  Firmware: %s\n"
+        "  Hardware: %s\n"
+        "  Serial: %s\n"
+        "\n"
+        "Processor\n"
+        "  Model: %s\n"
+        "  Revision: v%u.%u\n"
+        "  Cores: %u\n"
+        "  Frequency: %u MHz\n"
+        "  Temperature: %s\n"
+        "  CPU usage: %u%%\n"
+        "\n"
+        "Memory\n"
+        "  Flash: %u MB\n"
+        "  PSRAM: %u MB\n"
+        "  PSRAM free: %u KB\n"
+        "  PSRAM minimum: %u KB\n"
+        "  Internal heap free: %u KB\n"
+        "  Internal heap minimum: %u KB\n"
+        "\n"
+        "Runtime\n"
+        "  Uptime: %u d %02u:%02u:%02u\n"
+        "  Last reset: %s",
+
         device_name,
         firmware_version,
         hardware_version,
         serial_number,
+
+        chip_model,
+        (unsigned int)chip_revision_major,
+        (unsigned int)chip_revision_minor,
+        (unsigned int)model.chip_cores,
+        (unsigned int)model.cpu_frequency_mhz,
+        temperature,
+        (unsigned int)model.cpu_usage,
+
+        (unsigned int)(
+            model.flash_size /
+            (1024U * 1024U)
+        ),
+        (unsigned int)(
+            model.psram_size /
+            (1024U * 1024U)
+        ),
+        (unsigned int)(
+            model.psram_free / 1024U
+        ),
+        (unsigned int)(
+            model.psram_minimum_free / 1024U
+        ),
+        (unsigned int)(
+            model.free_heap / 1024U
+        ),
+        (unsigned int)(
+            model.minimum_free_heap / 1024U
+        ),
+
         (unsigned int)days,
         (unsigned int)hours,
         (unsigned int)minutes,
         (unsigned int)seconds,
-        (unsigned int)(model.free_heap / 1024U),
-        (unsigned int)(model.minimum_free_heap / 1024U),
-        (unsigned int)model.cpu_usage
+        reset_reason
     );
 }
 

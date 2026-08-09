@@ -9,6 +9,9 @@
 #include <string.h>
 
 #include "esp_system.h"
+#include "esp_chip_info.h"
+#include "esp_flash.h"
+#include "esp_psram.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -16,6 +19,8 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
+#include "driver/temperature_sensor.h"
 
 #include "app_config.h"
 #include "board_config.h"
@@ -30,26 +35,25 @@
 #define SYSTEM_RESTART_TASK_PRIORITY    (3U)
 #define SYSTEM_RESTART_DELAY_MAX_MS     (60000U)
 
+#define SYSTEM_TEMPERATURE_MIN_C             (10)
+#define SYSTEM_TEMPERATURE_MAX_C             (80)
+#define SYSTEM_TEMPERATURE_UPDATE_INTERVAL   (5U)
+
 /*
  * TODO:
  * system_service_stop() requests asynchronous cooperative shutdown.
  * Add synchronized service state and completion acknowledgement before
  * supporting an immediate stop/start sequence.
- *
- * Extend system_model_t with separate PSRAM statistics:
- *
- *     uint32_t psram_free;
- *     uint32_t psram_minimum_free;
- *
- * Update these fields in system_service_update_runtime() using
- * MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT. Internal heap and PSRAM
- * statistics must remain separate because free PSRAM cannot replace
- * internal memory required by Wi-Fi, DMA and system services.
  */
 
 static const char *TAG = "system_service";
 
 static TaskHandle_t s_task_handle = NULL;
+
+static temperature_sensor_handle_t
+    s_temperature_sensor = NULL;
+
+static uint32_t s_temperature_update_counter = 0U;
 
 static atomic_bool s_restart_scheduled =
     ATOMIC_VAR_INIT(false);
@@ -83,6 +87,117 @@ static void system_service_reset_cpu_usage(void)
     s_previous_cpu_sample_valid = false;
 
 #endif
+}
+
+static esp_err_t system_service_temperature_init(void)
+{
+    if (s_temperature_sensor != NULL) {
+        return ESP_OK;
+    }
+
+    const temperature_sensor_config_t config =
+        TEMPERATURE_SENSOR_CONFIG_DEFAULT(
+            SYSTEM_TEMPERATURE_MIN_C,
+            SYSTEM_TEMPERATURE_MAX_C
+        );
+
+    esp_err_t result =
+        temperature_sensor_install(
+            &config,
+            &s_temperature_sensor
+        );
+
+    if (result != ESP_OK) {
+        s_temperature_sensor = NULL;
+        return result;
+    }
+
+    result =
+        temperature_sensor_enable(
+            s_temperature_sensor
+        );
+
+    if (result != ESP_OK) {
+        (void)temperature_sensor_uninstall(
+            s_temperature_sensor
+        );
+
+        s_temperature_sensor = NULL;
+        return result;
+    }
+
+    return ESP_OK;
+}
+
+static void system_service_temperature_deinit(void)
+{
+    if (s_temperature_sensor == NULL) {
+        return;
+    }
+
+    (void)temperature_sensor_disable(
+        s_temperature_sensor
+    );
+
+    (void)temperature_sensor_uninstall(
+        s_temperature_sensor
+    );
+
+    s_temperature_sensor = NULL;
+}
+
+static esp_err_t system_service_update_temperature(void)
+{
+    if (s_temperature_sensor == NULL) {
+        return system_model_set_chip_temperature(
+            0.0F,
+            false
+        );
+    }
+
+    float temperature_celsius = 0.0F;
+
+    const esp_err_t result =
+        temperature_sensor_get_celsius(
+            s_temperature_sensor,
+            &temperature_celsius
+        );
+
+    if (result != ESP_OK) {
+        (void)system_model_set_chip_temperature(
+            0.0F,
+            false
+        );
+
+        return result;
+    }
+
+    return system_model_set_chip_temperature(
+        temperature_celsius,
+        true
+    );
+}
+
+static const char *system_service_chip_model_to_string(
+    esp_chip_model_t model
+)
+{
+    switch (model) {
+        case CHIP_ESP32:
+            return "ESP32";
+
+        case CHIP_ESP32S2:
+            return "ESP32-S2";
+
+        case CHIP_ESP32S3:
+            return "ESP32-S3";
+
+        case CHIP_ESP32C3:
+            return "ESP32-C3";
+
+        default:
+            return "Unknown";
+    }
 }
 
 static esp_err_t system_service_generate_serial(
@@ -369,15 +484,60 @@ static esp_err_t system_service_update_runtime(void)
             MALLOC_CAP_8BIT
         );
 
+    uint32_t psram_free = 0U;
+    uint32_t psram_minimum_free = 0U;
+
+    if (esp_psram_is_initialized()) {
+        psram_free =
+            (uint32_t)heap_caps_get_free_size(
+                MALLOC_CAP_SPIRAM |
+                MALLOC_CAP_8BIT
+            );
+
+        psram_minimum_free =
+            (uint32_t)heap_caps_get_minimum_free_size(
+                MALLOC_CAP_SPIRAM |
+                MALLOC_CAP_8BIT
+            );
+    }
+
     const uint8_t cpu_usage =
         system_service_get_cpu_usage();
 
-    return system_model_set_runtime(
-        uptime_sec,
-        free_heap,
-        minimum_free_heap,
-        cpu_usage
-    );
+    esp_err_t result =
+        system_model_set_runtime(
+            uptime_sec,
+            free_heap,
+            minimum_free_heap,
+            psram_free,
+            psram_minimum_free,
+            cpu_usage
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    ++s_temperature_update_counter;
+
+    if (s_temperature_update_counter >=
+        SYSTEM_TEMPERATURE_UPDATE_INTERVAL) {
+
+        s_temperature_update_counter = 0U;
+
+        result =
+            system_service_update_temperature();
+
+        if (result != ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Failed to update chip temperature: %s",
+                esp_err_to_name(result)
+            );
+        }
+    }
+
+    return ESP_OK;
 }
 
 static void system_service_restart_task(
@@ -465,6 +625,13 @@ static void system_service_task(
         }
     }
 
+    system_service_temperature_deinit();
+
+    (void)system_model_set_chip_temperature(
+        0.0F,
+        false
+    );
+
     ESP_LOGI(
         TAG,
         "System service stopped"
@@ -543,6 +710,68 @@ esp_err_t system_service_start(void)
         );
     }
 
+    esp_chip_info_t chip_info = {0};
+
+    esp_chip_info(
+        &chip_info
+    );
+
+    (void)strlcpy(
+        model.chip_model,
+        system_service_chip_model_to_string(
+            chip_info.model
+        ),
+        sizeof(model.chip_model)
+    );
+
+    model.chip_cores =
+        chip_info.cores;
+
+    model.chip_revision =
+        (uint16_t)chip_info.revision;
+
+    model.cpu_frequency_mhz =
+        CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
+
+    model.reset_reason =
+        esp_reset_reason();
+
+    uint32_t flash_size = 0U;
+
+    const esp_err_t flash_result =
+        esp_flash_get_size(
+            NULL,
+            &flash_size
+        );
+
+    if (flash_result == ESP_OK) {
+        model.flash_size =
+            flash_size;
+    } else {
+        ESP_LOGW(
+            TAG,
+            "Failed to read Flash size: %s",
+            esp_err_to_name(flash_result)
+        );
+    }
+
+    if (esp_psram_is_initialized()) {
+        model.psram_size =
+            (uint32_t)esp_psram_get_size();
+
+        model.psram_free =
+            (uint32_t)heap_caps_get_free_size(
+                MALLOC_CAP_SPIRAM |
+                MALLOC_CAP_8BIT
+            );
+
+        model.psram_minimum_free =
+            (uint32_t)heap_caps_get_minimum_free_size(
+                MALLOC_CAP_SPIRAM |
+                MALLOC_CAP_8BIT
+            );
+    }
+
     model.free_heap =
         (uint32_t)heap_caps_get_free_size(
             MALLOC_CAP_INTERNAL |
@@ -563,6 +792,25 @@ esp_err_t system_service_start(void)
         return result;
     }
 
+    const esp_err_t temperature_result =
+        system_service_temperature_init();
+
+    if (temperature_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Chip temperature sensor is unavailable: %s",
+            esp_err_to_name(temperature_result)
+        );
+
+        (void)system_model_set_chip_temperature(
+            0.0F,
+            false
+        );
+    }
+
+    s_temperature_update_counter =
+        SYSTEM_TEMPERATURE_UPDATE_INTERVAL;
+
     system_service_reset_cpu_usage();
 
     const BaseType_t task_result =
@@ -577,6 +825,14 @@ esp_err_t system_service_start(void)
 
     if (task_result != pdPASS) {
         s_task_handle = NULL;
+
+        system_service_temperature_deinit();
+
+        (void)system_model_set_chip_temperature(
+            0.0F,
+            false
+        );
+
         return ESP_ERR_NO_MEM;
     }
 
