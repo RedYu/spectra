@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "board.h"
 #include "esp_log.h"
@@ -711,7 +712,8 @@ esp_err_t storage_sd_service_flush(
         return result;
     }
 
-    result = storage_sd_service_spi_lock();
+    result =
+        storage_sd_service_spi_lock();
 
     if (result != ESP_OK) {
         storage_sd_service_mutex_unlock();
@@ -720,18 +722,36 @@ esp_err_t storage_sd_service_flush(
 
     errno = 0;
 
-    const int flush_result =
+    int operation_result =
         fflush(file);
 
-    const int saved_errno = errno;
+    int saved_errno =
+        errno;
+
+    if (operation_result == 0) {
+        const int descriptor =
+            fileno(file);
+
+        if (descriptor < 0) {
+            operation_result = -1;
+            saved_errno = errno;
+        } else {
+            errno = 0;
+
+            operation_result =
+                fsync(descriptor);
+
+            saved_errno = errno;
+        }
+    }
 
     board_spi_unlock();
     storage_sd_service_mutex_unlock();
 
-    if (flush_result != 0) {
+    if (operation_result != 0) {
         ESP_LOGE(
             TAG,
-            "Failed to flush file: errno=%d (%s)",
+            "Failed to synchronize file: errno=%d (%s)",
             saved_errno,
             strerror(saved_errno)
         );

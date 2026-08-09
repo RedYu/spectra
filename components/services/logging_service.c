@@ -22,7 +22,7 @@
 #define LOGGING_TASK_STACK_SIZE            (4096U)
 #define LOGGING_TASK_PRIORITY              (4U)
 
-#define LOGGING_FLUSH_INTERVAL_MS          (1000U)
+#define LOGGING_FLUSH_INTERVAL_MS          (5000U)
 
 typedef enum
 {
@@ -742,15 +742,23 @@ static void logging_service_task(
 
         if ((log_file != NULL) &&
             ((current_tick - last_flush_tick) >=
-             flush_interval_ticks)) {
+            flush_interval_ticks)) {
 
-            (void)logging_service_write_dropped_notice(
-                log_file
-            );
+            const esp_err_t notice_result =
+                logging_service_write_dropped_notice(
+                    log_file
+                );
 
-            (void)storage_sd_service_flush(
-                log_file
-            );
+            const esp_err_t flush_result =
+                storage_sd_service_flush(
+                    log_file
+                );
+
+            if ((notice_result != ESP_OK) ||
+                (flush_result != ESP_OK)) {
+
+                logging_service_record_dropped_message();
+            }
 
             last_flush_tick = current_tick;
         }
