@@ -421,6 +421,70 @@ static void startup_task(
         return;
     }
 
+    result = storage_service_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Internal storage initialization failed: %s",
+            esp_err_to_name(result)
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    result = start_service(
+        "System",
+        system_service_start,
+        SERVICE_REQUIRED
+    );
+
+    if (result != ESP_OK) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    result = network_service_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize network service: %s",
+            esp_err_to_name(result)
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    result =
+        wifi_credentials_service_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize Wi-Fi credentials service: %s",
+            esp_err_to_name(result)
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    result = settings_service_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Configuration initialization failed: %s",
+            esp_err_to_name(result)
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
     result = gui_service_init();
 
     if (result != ESP_OK) {
@@ -453,118 +517,9 @@ static void startup_task(
     );
 
     (void)gui_service_set_boot_progress(
-        5U,
-        "Initializing internal storage"
+        35U,
+        "Configuration loaded"
     );
-
-    result = storage_service_init();
-
-    if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Internal storage initialization failed: %s",
-            esp_err_to_name(result)
-        );
-
-        (void)gui_service_set_boot_progress(
-            5U,
-            "Internal storage failed"
-        );
-
-        vTaskDelete(NULL);
-        return;
-    }
-
-    (void)gui_service_set_boot_progress(
-        15U,
-        "Starting system services"
-    );
-
-    result = start_service(
-        "System",
-        system_service_start,
-        SERVICE_REQUIRED
-    );
-
-    if (result != ESP_OK) {
-        (void)gui_service_set_boot_progress(
-            15U,
-            "System initialization failed"
-        );
-
-        vTaskDelete(NULL);
-        return;
-    }
-
-    (void)gui_service_set_boot_progress(
-        20U,
-        "Initializing network stack"
-    );
-
-    result = network_service_init();
-
-    if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to initialize network service: %s",
-            esp_err_to_name(result)
-        );
-
-        (void)gui_service_set_boot_progress(
-            20U,
-            "Network initialization failed"
-        );
-
-        vTaskDelete(NULL);
-        return;
-    }
-
-    (void)gui_service_set_boot_progress(
-        25U,
-        "Initializing Wi-Fi credentials"
-    );
-
-    result =
-        wifi_credentials_service_init();
-
-    if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to initialize Wi-Fi credentials service: %s",
-            esp_err_to_name(result)
-        );
-
-        (void)gui_service_set_boot_progress(
-            25U,
-            "Wi-Fi credentials initialization failed"
-        );
-
-        vTaskDelete(NULL);
-        return;
-    }
-
-    (void)gui_service_set_boot_progress(
-        30U,
-        "Loading configuration"
-    );
-
-    result = settings_service_init();
-
-    if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Configuration initialization failed: %s",
-            esp_err_to_name(result)
-        );
-
-        (void)gui_service_set_boot_progress(
-            30U,
-            "Configuration loading failed"
-        );
-
-        vTaskDelete(NULL);
-        return;
-    }
 
     app_settings_t settings;
 

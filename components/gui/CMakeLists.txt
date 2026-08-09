@@ -1,5 +1,7 @@
 idf_component_register(
     SRCS
+        "gui_theme.c"
+        "gui_styles.c"
         "gui_config.c"
         "screen_manager.c"
 

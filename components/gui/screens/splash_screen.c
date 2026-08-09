@@ -7,10 +7,11 @@
 
 #include "assets/gui_images.h"
 #include "gui_config.h"
+#include "gui_styles.h"
+#include "gui_theme.h"
 #include "screen_manager.h"
 
 #define SPLASH_PROGRESS_MAX          (100U)
-#define SPLASH_SHOW_TIME_MS          (1500U)
 #define SPLASH_TRANSITION_TIME_MS    (300U)
 
 #define SPLASH_LOGO_OFFSET_Y         (-45)
@@ -160,6 +161,24 @@ static void splash_screen_start_transition_timer(void)
 
 lv_obj_t *splash_screen_create(void)
 {
+    if (!gui_theme_is_initialized() ||
+        !gui_styles_is_initialized()) {
+
+        ESP_LOGE(
+            TAG,
+            "GUI theme or styles are not initialized"
+        );
+
+        return NULL;
+    }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return NULL;
+    }
+
     lv_obj_t *screen =
         lv_obj_create(NULL);
 
@@ -192,34 +211,36 @@ lv_obj_t *splash_screen_create(void)
         LV_OBJ_FLAG_SCROLLABLE
     );
 
-    lv_obj_set_style_bg_color(
+    lv_obj_add_style(
         screen,
-        lv_color_hex(0xFFFFFFU),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_opa(
-        screen,
-        LV_OPA_COVER,
+        gui_styles_screen(),
         LV_PART_MAIN
     );
 
     lv_obj_t *logo_image =
         lv_image_create(screen);
 
-    if (logo_image != NULL) {
-        lv_image_set_src(
-            logo_image,
-            &dev_logo
+    if (logo_image == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create splash-screen logo"
         );
 
-        lv_obj_align(
-            logo_image,
-            LV_ALIGN_CENTER,
-            0,
-            SPLASH_LOGO_OFFSET_Y
-        );
+        lv_obj_delete(screen);
+        return NULL;
     }
+
+    lv_image_set_src(
+        logo_image,
+        &dev_logo
+    );
+
+    lv_obj_align(
+        logo_image,
+        LV_ALIGN_CENTER,
+        0,
+        SPLASH_LOGO_OFFSET_Y
+    );
 
     s_context.status_label =
         lv_label_create(screen);
@@ -242,15 +263,15 @@ lv_obj_t *splash_screen_create(void)
         "Initializing"
     );
 
-    lv_obj_set_style_text_font(
+    lv_obj_add_style(
         s_context.status_label,
-        &lv_font_montserrat_16,
+        gui_styles_text_body(),
         LV_PART_MAIN
     );
 
     lv_obj_set_style_text_color(
         s_context.status_label,
-        lv_color_hex(0xA0A8B0U),
+        theme->splash.status_text,
         LV_PART_MAIN
     );
 
@@ -281,6 +302,48 @@ lv_obj_t *splash_screen_create(void)
         s_context.progress_bar,
         SPLASH_PROGRESS_WIDTH,
         SPLASH_PROGRESS_HEIGHT
+    );
+
+    lv_obj_set_style_radius(
+        s_context.progress_bar,
+        LV_RADIUS_CIRCLE,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        s_context.progress_bar,
+        theme->splash.progress_background,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_context.progress_bar,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        s_context.progress_bar,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_radius(
+        s_context.progress_bar,
+        LV_RADIUS_CIRCLE,
+        LV_PART_INDICATOR
+    );
+
+    lv_obj_set_style_bg_color(
+        s_context.progress_bar,
+        theme->splash.progress_indicator,
+        LV_PART_INDICATOR
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_context.progress_bar,
+        LV_OPA_COVER,
+        LV_PART_INDICATOR
     );
 
     lv_obj_align(
@@ -317,10 +380,15 @@ void splash_screen_set_progress(
     s_context.progress = progress;
 
     if (s_context.progress_bar != NULL) {
+        const lv_anim_enable_t animation =
+            gui_config_get_animations_enabled()
+                ? LV_ANIM_ON
+                : LV_ANIM_OFF;
+
         lv_bar_set_value(
             s_context.progress_bar,
             (int32_t)progress,
-            LV_ANIM_ON
+            animation
         );
     }
 

@@ -18,7 +18,8 @@
         }
     },
     "ui": {
-        "animations_enabled": false
+        "animations_enabled": false,
+        "theme": "light"
     },
     "network": {
         "wifi_ap": {

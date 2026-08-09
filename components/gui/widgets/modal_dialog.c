@@ -2,38 +2,20 @@
 
 #include <stddef.h>
 
+#include "gui_styles.h"
+#include "gui_theme.h"
+
 #define MODAL_DIALOG_WIDTH   360
 #define MODAL_DIALOG_HEIGHT  260
 
-#define MODAL_DIALOG_RADIUS             16
-#define MODAL_DIALOG_PADDING            16
 #define MODAL_DIALOG_CONTENT_GAP        10
 
 #define MODAL_DIALOG_BUTTON_HEIGHT      42
-#define MODAL_DIALOG_BUTTON_RADIUS      10
 #define MODAL_DIALOG_BUTTON_GAP         10
 
 #define MODAL_DIALOG_ANIMATION_TIME_MS  180
 #define MODAL_DIALOG_SCALE_START        220
 #define MODAL_DIALOG_SCALE_END          256
-
-#define MODAL_OVERLAY_COLOR             0x000000
-#define MODAL_DIALOG_BACKGROUND_COLOR   0xFFFFFF
-#define MODAL_DIALOG_BORDER_COLOR       0xD8DEE5
-
-#define MODAL_TITLE_COLOR               0x1F2933
-#define MODAL_TEXT_COLOR                0x4B5563
-#define MODAL_PROGRESS_TEXT_COLOR       0x6B7280
-
-#define MODAL_PRIMARY_COLOR             0x4B77D1
-#define MODAL_PRIMARY_PRESSED_COLOR     0x3F66B8
-
-#define MODAL_SECONDARY_COLOR           0xE5E7EB
-#define MODAL_SECONDARY_PRESSED_COLOR   0xD1D5DB
-
-#define MODAL_DISABLED_COLOR            0xBFC6CE
-#define MODAL_PROGRESS_BACKGROUND       0xE5E7EB
-#define MODAL_PROGRESS_INDICATOR        0x4B77D1
 
 static void modal_dialog_delete_event_cb(
     lv_event_t *event
@@ -84,6 +66,17 @@ bool modal_dialog_create(
         (parent == NULL) ||
         (config == NULL)) {
 
+        return false;
+    }
+
+    if (!gui_styles_is_initialized()) {
+        return false;
+    }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
         return false;
     }
 
@@ -163,9 +156,7 @@ bool modal_dialog_create(
 
     lv_obj_set_style_bg_color(
         dialog->overlay,
-        lv_color_hex(
-            MODAL_OVERLAY_COLOR
-        ),
+        theme->modal.overlay,
         LV_PART_MAIN
     );
 
@@ -210,6 +201,36 @@ bool modal_dialog_create(
             dialog->overlay
         );
 
+    if (dialog->dialog == NULL) {
+        lv_obj_delete(
+            dialog->overlay
+        );
+
+        modal_dialog_reset(
+            dialog
+        );
+
+        return false;
+    }
+
+    lv_obj_add_style(
+        dialog->dialog,
+        gui_styles_card(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        dialog->dialog,
+        theme->modal.background,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_color(
+        dialog->dialog,
+        theme->modal.border,
+        LV_PART_MAIN
+    );
+
     lv_obj_set_size(
         dialog->dialog,
         MODAL_DIALOG_WIDTH,
@@ -228,46 +249,6 @@ bool modal_dialog_create(
     lv_obj_add_flag(
         dialog->dialog,
         LV_OBJ_FLAG_EVENT_BUBBLE
-    );
-
-    lv_obj_set_style_radius(
-        dialog->dialog,
-        MODAL_DIALOG_RADIUS,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_border_width(
-        dialog->dialog,
-        1,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_border_color(
-        dialog->dialog,
-        lv_color_hex(
-            MODAL_DIALOG_BORDER_COLOR
-        ),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        dialog->dialog,
-        lv_color_hex(
-            MODAL_DIALOG_BACKGROUND_COLOR
-        ),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_opa(
-        dialog->dialog,
-        LV_OPA_COVER,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_pad_all(
-        dialog->dialog,
-        MODAL_DIALOG_PADDING,
-        LV_PART_MAIN
     );
 
     lv_obj_set_style_pad_row(
@@ -296,6 +277,18 @@ bool modal_dialog_create(
             dialog->dialog
         );
 
+    lv_obj_add_style(
+        dialog->title_label,
+        gui_styles_text_title(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        dialog->title_label,
+        theme->modal.title,
+        LV_PART_MAIN
+    );
+
     lv_label_set_text(
         dialog->title_label,
         config->title != NULL
@@ -316,20 +309,6 @@ bool modal_dialog_create(
     lv_obj_set_style_text_align(
         dialog->title_label,
         LV_TEXT_ALIGN_CENTER,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_font(
-        dialog->title_label,
-        &lv_font_montserrat_20,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        dialog->title_label,
-        lv_color_hex(
-            MODAL_TITLE_COLOR
-        ),
         LV_PART_MAIN
     );
 
@@ -411,9 +390,7 @@ bool modal_dialog_create(
 
         lv_obj_set_style_image_recolor(
             dialog->icon,
-            lv_color_hex(
-                MODAL_TITLE_COLOR
-            ),
+            theme->modal.title,
             LV_PART_MAIN
         );
 
@@ -437,6 +414,18 @@ bool modal_dialog_create(
             dialog->content_container
         );
 
+    lv_obj_add_style(
+        dialog->message_label,
+        gui_styles_text_muted(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        dialog->message_label,
+        theme->modal.text,
+        LV_PART_MAIN
+    );
+
     lv_label_set_text(
         dialog->message_label,
         config->message != NULL
@@ -457,14 +446,6 @@ bool modal_dialog_create(
     lv_obj_set_style_text_align(
         dialog->message_label,
         LV_TEXT_ALIGN_CENTER,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        dialog->message_label,
-        lv_color_hex(
-            MODAL_TEXT_COLOR
-        ),
         LV_PART_MAIN
     );
 
@@ -525,6 +506,18 @@ bool modal_dialog_create(
             dialog->progress_container
         );
 
+    lv_obj_add_style(
+        dialog->progress_label,
+        gui_styles_text_muted(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        dialog->progress_label,
+        theme->modal.progress_text,
+        LV_PART_MAIN
+    );
+
     lv_label_set_text(
         dialog->progress_label,
         config->progress_text != NULL
@@ -545,14 +538,6 @@ bool modal_dialog_create(
     lv_obj_set_style_text_align(
         dialog->progress_label,
         LV_TEXT_ALIGN_CENTER,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        dialog->progress_label,
-        lv_color_hex(
-            MODAL_PROGRESS_TEXT_COLOR
-        ),
         LV_PART_MAIN
     );
 
@@ -589,9 +574,7 @@ bool modal_dialog_create(
 
     lv_obj_set_style_bg_color(
         dialog->progress_bar,
-        lv_color_hex(
-            MODAL_PROGRESS_BACKGROUND
-        ),
+        theme->modal.progress_background,
         LV_PART_MAIN
     );
 
@@ -609,9 +592,7 @@ bool modal_dialog_create(
 
     lv_obj_set_style_bg_color(
         dialog->progress_bar,
-        lv_color_hex(
-            MODAL_PROGRESS_INDICATOR
-        ),
+        theme->modal.progress_indicator,
         LV_PART_INDICATOR
     );
 
@@ -1017,15 +998,87 @@ static lv_obj_t *modal_dialog_button_create(
     lv_obj_t **label_out
 )
 {
-    if (parent == NULL ||
-        text == NULL ||
-        event_callback == NULL) {
+    if ((parent == NULL) ||
+        (text == NULL) ||
+        (event_callback == NULL) ||
+        !gui_styles_is_initialized()) {
 
         return NULL;
     }
 
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return NULL;
+    }
+
     lv_obj_t *button =
-        lv_button_create(parent);
+        lv_button_create(
+            parent
+        );
+
+    if (button == NULL) {
+        return NULL;
+    }
+
+    lv_obj_add_style(
+        button,
+        gui_styles_button_base(),
+        LV_PART_MAIN
+    );
+
+    const lv_color_t background =
+        primary
+            ? theme->modal.primary
+            : theme->modal.secondary;
+
+    const lv_color_t pressed_background =
+        primary
+            ? theme->modal.primary_pressed
+            : theme->modal.secondary_pressed;
+
+    lv_obj_set_style_bg_color(
+        button,
+        background,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        button,
+        pressed_background,
+        LV_PART_MAIN | LV_STATE_PRESSED
+    );
+
+    lv_obj_set_style_bg_color(
+        button,
+        theme->modal.disabled,
+        LV_PART_MAIN | LV_STATE_DISABLED
+    );
+
+    lv_obj_set_style_border_width(
+        button,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        button,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        button,
+        LV_OPA_COVER,
+        LV_PART_MAIN | LV_STATE_PRESSED
+    );
+
+    lv_obj_set_style_bg_opa(
+        button,
+        LV_OPA_70,
+        LV_PART_MAIN | LV_STATE_DISABLED
+    );
 
     lv_obj_set_height(
         button,
@@ -1037,36 +1090,10 @@ static lv_obj_t *modal_dialog_button_create(
         1
     );
 
-    lv_obj_set_style_radius(
-        button,
-        MODAL_DIALOG_BUTTON_RADIUS,
-        LV_PART_MAIN
-    );
-
     lv_obj_set_style_shadow_width(
         button,
         0,
         LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        button,
-        lv_color_hex(
-            primary
-                ? MODAL_PRIMARY_COLOR
-                : MODAL_SECONDARY_COLOR
-        ),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        button,
-        lv_color_hex(
-            primary
-                ? MODAL_PRIMARY_PRESSED_COLOR
-                : MODAL_SECONDARY_PRESSED_COLOR
-        ),
-        LV_PART_MAIN | LV_STATE_PRESSED
     );
 
     lv_obj_add_event_cb(
@@ -1077,7 +1104,14 @@ static lv_obj_t *modal_dialog_button_create(
     );
 
     lv_obj_t *label =
-        lv_label_create(button);
+        lv_label_create(
+            button
+        );
+
+    if (label == NULL) {
+        lv_obj_delete(button);
+        return NULL;
+    }
 
     lv_label_set_text(
         label,
@@ -1086,13 +1120,17 @@ static lv_obj_t *modal_dialog_button_create(
 
     lv_obj_set_style_text_color(
         label,
-        lv_color_hex(
-            MODAL_TITLE_COLOR
-        ),
+        theme->modal.title,
         LV_PART_MAIN
     );
 
-    lv_obj_center(label);
+    /*
+     * The font is inherited from the base button style. The text color is
+     * assigned explicitly to preserve the original modal palette.
+     */
+    lv_obj_center(
+        label
+    );
 
     if (label_out != NULL) {
         *label_out = label;
@@ -1264,29 +1302,10 @@ static void modal_dialog_apply_button_enabled(
             LV_STATE_DISABLED
         );
 
-        lv_obj_set_style_bg_opa(
-            button,
-            LV_OPA_COVER,
-            LV_PART_MAIN
-        );
     } else {
         lv_obj_add_state(
             button,
             LV_STATE_DISABLED
-        );
-
-        lv_obj_set_style_bg_color(
-            button,
-            lv_color_hex(
-                MODAL_DISABLED_COLOR
-            ),
-            LV_PART_MAIN | LV_STATE_DISABLED
-        );
-
-        lv_obj_set_style_bg_opa(
-            button,
-            LV_OPA_70,
-            LV_PART_MAIN | LV_STATE_DISABLED
         );
     }
 }

@@ -58,6 +58,9 @@ extern "C" {
 #define SETTINGS_LOG_DEBUG_TAGS_DEFAULT     ("")
 #define SETTINGS_LOG_DISABLED_TAGS_DEFAULT  ("")
 
+#define SETTINGS_UI_THEME_MODE_DEFAULT \
+    UI_THEME_MODE_LIGHT
+
 typedef struct
 {
     char target[SETTINGS_DEVICE_TARGET_MAX_LENGTH];
@@ -93,9 +96,17 @@ typedef struct
 
 } logging_settings_t;
 
+typedef enum
+{
+    UI_THEME_MODE_LIGHT = 0,
+    UI_THEME_MODE_DARK,
+
+} ui_theme_mode_t;
+
 typedef struct
 {
     bool animations_enabled;
+    ui_theme_mode_t theme_mode;
 
 } ui_settings_t;
 

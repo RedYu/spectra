@@ -17,7 +17,10 @@
 
 #include "lvgl.h"
 #include "lvgl_port.h"
+#include "gui_theme.h"
+#include "gui_styles.h"
 #include "screen_manager.h"
+#include "settings_model.h"
 
 #define GUI_TASK_STACK_SIZE       (8192U)
 #define GUI_TASK_PRIORITY         (5U)
@@ -206,7 +209,40 @@ static void gui_task(
 {
     (void)argument;
 
+    /*
+     * Settings must be loaded before LVGL initialization because
+     * shared styles capture the selected theme colors.
+     */
+    app_settings_t settings = {0};
+
     esp_err_t result =
+        settings_model_get(
+            &settings
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to get GUI settings: %s",
+            esp_err_to_name(result)
+        );
+
+        atomic_store(
+            &s_started,
+            false
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    const gui_theme_mode_t theme_mode =
+        settings.ui.theme_mode ==
+            UI_THEME_MODE_DARK
+                ? GUI_THEME_MODE_DARK
+                : GUI_THEME_MODE_LIGHT;
+
+    result =
         lvgl_port_init();
 
     if (result != ESP_OK) {
@@ -226,6 +262,48 @@ static void gui_task(
     }
 
     result =
+        gui_theme_init(
+            theme_mode
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize GUI theme: %s",
+            esp_err_to_name(result)
+        );
+
+        /*
+         * LVGL is already initialized. Complete cleanup is required
+         * before the GUI service can be started again safely.
+         */
+        vTaskDelete(NULL);
+        return;
+    }
+
+    result =
+        gui_styles_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize GUI styles: %s",
+            esp_err_to_name(result)
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Shared GUI %s theme and styles initialized",
+        theme_mode == GUI_THEME_MODE_DARK
+            ? "dark"
+            : "light"
+    );
+
+    result =
         gui_initialize_screens();
 
     if (result != ESP_OK) {
@@ -235,11 +313,6 @@ static void gui_task(
             esp_err_to_name(result)
         );
 
-        /*
-         * Keep the service in the started state because LVGL and the
-         * screen manager may be partially initialized. Restart requires
-         * complete cleanup support.
-         */
         vTaskDelete(NULL);
         return;
     }

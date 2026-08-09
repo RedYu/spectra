@@ -79,6 +79,13 @@ static esp_err_t settings_model_validate(
             SETTINGS_DISPLAY_BRIGHTNESS_MAX;
     }
 
+    if ((settings->ui.theme_mode != UI_THEME_MODE_LIGHT) &&
+        (settings->ui.theme_mode != UI_THEME_MODE_DARK)) {
+
+        settings->ui.theme_mode =
+            SETTINGS_UI_THEME_MODE_DEFAULT;
+    }
+
     const size_t ap_ssid_length =
         strlen(
             settings->wifi_ap.ssid
@@ -263,6 +270,9 @@ esp_err_t settings_model_set_defaults(
 
     settings->ui.animations_enabled =
         SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT;
+
+    settings->ui.theme_mode =
+        SETTINGS_UI_THEME_MODE_DEFAULT;
 
     settings->wifi_ap.enabled =
         SETTINGS_WIFI_AP_ENABLED_DEFAULT;

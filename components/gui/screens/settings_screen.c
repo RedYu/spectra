@@ -12,6 +12,8 @@
 #include "assets/gui_images.h"
 #include "board_config.h"
 #include "gui_config.h"
+#include "gui_styles.h"
+#include "gui_theme.h"
 #include "screen_manager.h"
 #include "system_model.h"
 #include "settings_model.h"
@@ -24,19 +26,23 @@
 #include "widgets/toolbar.h"
 #include "widgets/wifi_credentials_dialog.h"
 
-#define TOOLBAR_HEIGHT                  (56U)
+#define SETTINGS_TOOLBAR_HEIGHT \
+    GUI_THEME_TOOLBAR_HEIGHT
 #define SETTINGS_TRANSITION_TIME_MS     (200U)
 
 #define SETTINGS_TAB_BAR_WIDTH          (105)
 
-#define CONTENT_PADDING                 (12)
-#define CONTENT_ROW_PADDING             (12)
+#define CONTENT_PADDING \
+    GUI_THEME_SPACE_MD
+
+#define CONTENT_ROW_PADDING \
+    GUI_THEME_SPACE_MD
 
 #define BRIGHTNESS_CARD_HEIGHT          (110)
 #define SETTINGS_ROW_CARD_HEIGHT        (70)
 
-#define CARD_PADDING                    (14)
-#define CARD_RADIUS                     (12)
+#define CARD_PADDING \
+    GUI_THEME_SPACE_MD
 
 #define SETTINGS_SWITCH_WIDTH           (48)
 #define SETTINGS_SWITCH_HEIGHT          (26)
@@ -2004,38 +2010,32 @@ static void settings_screen_style_card(
     lv_obj_t *card
 )
 {
-    lv_obj_remove_flag(
+    if (card == NULL) {
+        return;
+    }
+
+    lv_obj_add_style(
         card,
-        LV_OBJ_FLAG_SCROLLABLE
+        gui_styles_card(),
+        LV_PART_MAIN
     );
 
-    lv_obj_set_style_border_width(
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return;
+    }
+
+    lv_obj_set_style_bg_color(
         card,
-        1,
+        theme->settings.card_background,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_border_color(
         card,
-        lv_color_hex(0xE1E5EAU),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_radius(
-        card,
-        CARD_RADIUS,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        card,
-        lv_color_hex(0xF7F8FAU),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_opa(
-        card,
-        LV_OPA_COVER,
+        theme->settings.card_border,
         LV_PART_MAIN
     );
 
@@ -2044,12 +2044,28 @@ static void settings_screen_style_card(
         CARD_PADDING,
         LV_PART_MAIN
     );
+
+    lv_obj_remove_flag(
+        card,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
 }
 
 static void settings_screen_style_switch(
     lv_obj_t *switch_obj
 )
 {
+    if (switch_obj == NULL) {
+        return;
+    }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return;
+    }
+
     lv_obj_set_size(
         switch_obj,
         SETTINGS_SWITCH_WIDTH,
@@ -2058,19 +2074,20 @@ static void settings_screen_style_switch(
 
     lv_obj_set_style_bg_color(
         switch_obj,
-        lv_color_hex(0xD9DEE5U),
+        theme->settings.control_track,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_bg_color(
         switch_obj,
-        lv_color_hex(0x4B77D1U),
-        LV_PART_INDICATOR | LV_STATE_CHECKED
+        theme->colors.control_accent,
+        LV_PART_INDICATOR |
+        LV_STATE_CHECKED
     );
 
     lv_obj_set_style_bg_color(
         switch_obj,
-        lv_color_hex(0xFFFFFFU),
+        theme->colors.text_on_primary,
         LV_PART_KNOB
     );
 }
@@ -2080,6 +2097,13 @@ static void settings_screen_style_tab(
 )
 {
     if (tab == NULL) {
+        return;
+    }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
         return;
     }
 
@@ -2097,7 +2121,7 @@ static void settings_screen_style_tab(
 
     lv_obj_set_style_bg_color(
         tab,
-        lv_color_hex(0xFFFFFFU),
+        theme->colors.background,
         LV_PART_MAIN
     );
 
@@ -2185,15 +2209,9 @@ static lv_obj_t *settings_screen_create_switch_card(
         text
     );
 
-    lv_obj_set_style_text_font(
+    lv_obj_add_style(
         label,
-        &lv_font_montserrat_14,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        label,
-        lv_color_hex(0x4B5563U),
+        gui_styles_text_small(),
         LV_PART_MAIN
     );
 
@@ -2262,6 +2280,13 @@ static esp_err_t settings_screen_create_general_tab(
         brightness_card
     );
 
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     lv_obj_t *brightness_label =
         lv_label_create(
             brightness_card
@@ -2271,21 +2296,21 @@ static esp_err_t settings_screen_create_general_tab(
         return ESP_ERR_NO_MEM;
     }
 
-    lv_label_set_text(
+    lv_obj_add_style(
         brightness_label,
-        "Display brightness"
-    );
-
-    lv_obj_set_style_text_font(
-        brightness_label,
-        &lv_font_montserrat_16,
+        gui_styles_text_body(),
         LV_PART_MAIN
     );
 
     lv_obj_set_style_text_color(
         brightness_label,
-        lv_color_hex(0x20252AU),
+        theme->colors.text,
         LV_PART_MAIN
+    );
+
+    lv_label_set_text(
+        brightness_label,
+        "Display brightness"
     );
 
     lv_obj_align(
@@ -2304,21 +2329,21 @@ static esp_err_t settings_screen_create_general_tab(
         return ESP_ERR_NO_MEM;
     }
 
-    lv_label_set_text(
+    lv_obj_add_style(
         s_brightness_value_label,
-        "0%"
-    );
-
-    lv_obj_set_style_text_font(
-        s_brightness_value_label,
-        &lv_font_montserrat_16,
+        gui_styles_text_body(),
         LV_PART_MAIN
     );
 
     lv_obj_set_style_text_color(
         s_brightness_value_label,
-        lv_color_hex(0x4B77D1U),
+        theme->colors.control_accent,
         LV_PART_MAIN
+    );
+
+    lv_label_set_text(
+        s_brightness_value_label,
+        "0%"
     );
 
     lv_obj_align(
@@ -2367,7 +2392,7 @@ static esp_err_t settings_screen_create_general_tab(
 
     lv_obj_set_style_bg_color(
         s_brightness_slider,
-        lv_color_hex(0xD9DEE5U),
+        theme->settings.control_track,
         LV_PART_MAIN
     );
 
@@ -2379,7 +2404,7 @@ static esp_err_t settings_screen_create_general_tab(
 
     lv_obj_set_style_bg_color(
         s_brightness_slider,
-        lv_color_hex(0x4B77D1U),
+        theme->colors.control_accent,
         LV_PART_INDICATOR
     );
 
@@ -2391,7 +2416,7 @@ static esp_err_t settings_screen_create_general_tab(
 
     lv_obj_set_style_bg_color(
         s_brightness_slider,
-        lv_color_hex(0x4B77D1U),
+        theme->colors.control_accent,
         LV_PART_KNOB
     );
 
@@ -2506,15 +2531,9 @@ static esp_err_t settings_screen_create_wifi_tab(
         "State: Loading..."
     );
 
-    lv_obj_set_style_text_font(
+    lv_obj_add_style(
         s_wifi_info_label,
-        &lv_font_montserrat_14,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        s_wifi_info_label,
-        lv_color_hex(0x374151U),
+        gui_styles_text_small(),
         LV_PART_MAIN
     );
 
@@ -2590,15 +2609,9 @@ static esp_err_t settings_screen_create_wifi_tab(
         "State: Loading..."
     );
 
-    lv_obj_set_style_text_font(
+    lv_obj_add_style(
         s_wifi_sta_info_label,
-        &lv_font_montserrat_14,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        s_wifi_sta_info_label,
-        lv_color_hex(0x374151U),
+        gui_styles_text_small(),
         LV_PART_MAIN
     );
 
@@ -2712,9 +2725,9 @@ static esp_err_t settings_screen_create_wifi_tab(
         "Press Scan to find networks"
     );
 
-    lv_obj_set_style_text_font(
+    lv_obj_add_style(
         s_wifi_scan_status_label,
-        &lv_font_montserrat_14,
+        gui_styles_text_muted(),
         LV_PART_MAIN
     );
 
@@ -2735,6 +2748,30 @@ static esp_err_t settings_screen_create_wifi_tab(
         return ESP_ERR_NO_MEM;
     }
 
+    lv_obj_add_style(
+        s_wifi_scan_button,
+        gui_styles_button_base(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_add_style(
+        s_wifi_scan_button,
+        gui_styles_button_primary(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_add_style(
+        s_wifi_scan_button,
+        gui_styles_button_primary_pressed(),
+        LV_PART_MAIN | LV_STATE_PRESSED
+    );
+
+    lv_obj_add_style(
+        s_wifi_scan_button,
+        gui_styles_button_disabled(),
+        LV_PART_MAIN | LV_STATE_DISABLED
+    );
+
     lv_obj_add_event_cb(
         s_wifi_scan_button,
         wifi_scan_button_event_cb,
@@ -2742,9 +2779,10 @@ static esp_err_t settings_screen_create_wifi_tab(
         NULL
     );
 
-    lv_obj_set_width(
+    lv_obj_set_size(
         s_wifi_scan_button,
-        68
+        68,
+        GUI_THEME_CONTROL_HEIGHT
     );
 
     lv_obj_t *button_label =
@@ -2755,6 +2793,25 @@ static esp_err_t settings_screen_create_wifi_tab(
     if (button_label == NULL) {
         return ESP_ERR_NO_MEM;
     }
+
+    lv_obj_add_style(
+        button_label,
+        gui_styles_text_small(),
+        LV_PART_MAIN
+    );
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    lv_obj_set_style_text_color(
+        button_label,
+        theme->colors.text_on_primary,
+        LV_PART_MAIN
+    );
 
     lv_label_set_text(
         button_label,
@@ -2772,6 +2829,72 @@ static esp_err_t settings_screen_create_wifi_tab(
         return ESP_ERR_NO_MEM;
     }
 
+    lv_obj_set_style_bg_color(
+        s_wifi_scan_table,
+        theme->colors.input,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_wifi_scan_table,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_color(
+        s_wifi_scan_table,
+        theme->settings.card_border,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        s_wifi_scan_table,
+        GUI_THEME_BORDER_WIDTH,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_radius(
+        s_wifi_scan_table,
+        GUI_THEME_RADIUS_SM,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        s_wifi_scan_table,
+        theme->colors.input,
+        LV_PART_ITEMS
+    );
+
+    lv_obj_set_style_text_color(
+        s_wifi_scan_table,
+        theme->colors.text_secondary,
+        LV_PART_ITEMS
+    );
+
+    lv_obj_set_style_text_font(
+        s_wifi_scan_table,
+        theme->fonts.small,
+        LV_PART_ITEMS
+    );
+
+    lv_obj_set_style_border_color(
+        s_wifi_scan_table,
+        theme->settings.card_border,
+        LV_PART_ITEMS
+    );
+
+    lv_obj_set_style_border_width(
+        s_wifi_scan_table,
+        GUI_THEME_BORDER_WIDTH,
+        LV_PART_ITEMS
+    );
+
+    lv_obj_set_style_bg_color(
+        s_wifi_scan_table,
+        theme->colors.surface_hover,
+        LV_PART_ITEMS | LV_STATE_PRESSED
+    );
+
     lv_obj_add_event_cb(
         s_wifi_scan_table,
         wifi_scan_table_event_cb,
@@ -2781,13 +2904,13 @@ static esp_err_t settings_screen_create_wifi_tab(
 
     lv_obj_set_style_pad_left(
         s_wifi_scan_table,
-        4,
+        GUI_THEME_SPACE_XS,
         LV_PART_ITEMS
     );
 
     lv_obj_set_style_pad_right(
         s_wifi_scan_table,
-        4,
+        GUI_THEME_SPACE_XS,
         LV_PART_ITEMS
     );
 
@@ -2959,15 +3082,9 @@ static esp_err_t settings_screen_create_usb_tab(
         "State: Loading..."
     );
 
-    lv_obj_set_style_text_font(
+    lv_obj_add_style(
         s_usb_rndis_info_label,
-        &lv_font_montserrat_14,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        s_usb_rndis_info_label,
-        lv_color_hex(0x374151U),
+        gui_styles_text_small(),
         LV_PART_MAIN
     );
 
@@ -3054,15 +3171,9 @@ static esp_err_t settings_screen_create_storage_tab(
         "SD card: Loading..."
     );
 
-    lv_obj_set_style_text_font(
+    lv_obj_add_style(
         s_storage_info_label,
-        &lv_font_montserrat_14,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        s_storage_info_label,
-        lv_color_hex(0x374151U),
+        gui_styles_text_small(),
         LV_PART_MAIN
     );
 
@@ -3137,15 +3248,9 @@ static esp_err_t settings_screen_create_system_tab(
         "Loading system information..."
     );
 
-    lv_obj_set_style_text_font(
+    lv_obj_add_style(
         s_system_info_label,
-        &lv_font_montserrat_14,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        s_system_info_label,
-        lv_color_hex(0x374151U),
+        gui_styles_text_small(),
         LV_PART_MAIN
     );
 
@@ -3166,6 +3271,13 @@ static esp_err_t settings_screen_create_tabs(
         return ESP_ERR_INVALID_ARG;
     }
 
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     s_tabview =
         lv_tabview_create(
             screen
@@ -3175,10 +3287,34 @@ static esp_err_t settings_screen_create_tabs(
         return ESP_ERR_NO_MEM;
     }
 
+    lv_obj_set_style_bg_color(
+        s_tabview,
+        theme->colors.background,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_tabview,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        s_tabview,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_radius(
+        s_tabview,
+        0,
+        LV_PART_MAIN
+    );
+
     lv_obj_set_size(
         s_tabview,
         LV_PCT(100),
-        LCD_V_RES - TOOLBAR_HEIGHT
+        LCD_V_RES - SETTINGS_TOOLBAR_HEIGHT
     );
 
     lv_obj_align(
@@ -3204,22 +3340,82 @@ static esp_err_t settings_screen_create_tabs(
         );
 
     if (tab_bar != NULL) {
-        lv_obj_set_style_text_font(
+        lv_obj_add_style(
             tab_bar,
-            &lv_font_montserrat_14,
+            gui_styles_text_small(),
             LV_PART_MAIN
         );
 
         lv_obj_set_style_pad_all(
             tab_bar,
-            4,
+            GUI_THEME_SPACE_XS,
             LV_PART_MAIN
         );
 
         lv_obj_set_style_pad_row(
             tab_bar,
-            4,
+            GUI_THEME_SPACE_XS,
             LV_PART_MAIN
+        );
+
+        lv_obj_set_style_bg_color(
+            tab_bar,
+            theme->colors.surface,
+            LV_PART_MAIN
+        );
+
+        lv_obj_set_style_bg_opa(
+            tab_bar,
+            LV_OPA_COVER,
+            LV_PART_MAIN
+        );
+
+        lv_obj_set_style_border_width(
+            tab_bar,
+            0,
+            LV_PART_MAIN
+        );
+
+        lv_obj_set_style_bg_opa(
+            tab_bar,
+            LV_OPA_TRANSP,
+            LV_PART_ITEMS
+        );
+
+        lv_obj_set_style_text_color(
+            tab_bar,
+            theme->colors.text_muted,
+            LV_PART_ITEMS
+        );
+
+        lv_obj_set_style_bg_color(
+            tab_bar,
+            theme->colors.control_accent,
+            LV_PART_ITEMS | LV_STATE_CHECKED
+        );
+
+        lv_obj_set_style_bg_opa(
+            tab_bar,
+            LV_OPA_COVER,
+            LV_PART_ITEMS | LV_STATE_CHECKED
+        );
+
+        lv_obj_set_style_text_color(
+            tab_bar,
+            theme->colors.text_on_primary,
+            LV_PART_ITEMS | LV_STATE_CHECKED
+        );
+
+        lv_obj_set_style_radius(
+            tab_bar,
+            GUI_THEME_RADIUS_SM,
+            LV_PART_ITEMS | LV_STATE_CHECKED
+        );
+
+        lv_obj_set_style_bg_color(
+            tab_bar,
+            theme->colors.surface_hover,
+            LV_PART_ITEMS | LV_STATE_PRESSED
         );
     }
 
@@ -3305,6 +3501,17 @@ static esp_err_t settings_screen_create_tabs(
 
 lv_obj_t *settings_screen_create(void)
 {
+    if (!gui_theme_is_initialized() ||
+        !gui_styles_is_initialized()) {
+
+        ESP_LOGE(
+            TAG,
+            "GUI theme or styles are not initialized"
+        );
+
+        return NULL;
+    }
+
     lv_obj_t *screen =
         lv_obj_create(NULL);
 
@@ -3357,9 +3564,9 @@ lv_obj_t *settings_screen_create(void)
         LV_OBJ_FLAG_SCROLLABLE
     );
 
-    lv_obj_set_style_bg_color(
+    lv_obj_add_style(
         screen,
-        lv_color_hex(0xFFFFFFU),
+        gui_styles_screen(),
         LV_PART_MAIN
     );
 

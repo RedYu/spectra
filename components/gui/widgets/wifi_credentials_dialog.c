@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "gui_styles.h"
 #include "widgets/modal_dialog.h"
+#include "gui_theme.h"
 
 #include "wifi_service.h"
 
@@ -265,6 +267,17 @@ bool wifi_credentials_dialog_open(
         return false;
     }
 
+    if (!gui_styles_is_initialized()) {
+        return false;
+    }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return false;
+    }
+
     if (wifi_credentials_dialog_is_open()) {
         return false;
     }
@@ -393,6 +406,25 @@ bool wifi_credentials_dialog_open(
         return false;
     }
 
+    lv_obj_add_style(
+        s_context.password_textarea,
+        gui_styles_input(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_add_style(
+        s_context.password_textarea,
+        gui_styles_input_focused(),
+        LV_PART_MAIN |
+        LV_STATE_FOCUSED
+    );
+
+    lv_obj_set_style_text_color(
+        s_context.password_textarea,
+        theme->colors.text_muted,
+        LV_PART_TEXTAREA_PLACEHOLDER
+    );
+
     lv_obj_set_size(
         s_context.password_textarea,
         LV_PCT(100),
@@ -433,6 +465,69 @@ bool wifi_credentials_dialog_open(
         wifi_credentials_dialog_close();
         return false;
     }
+
+    lv_obj_add_style(
+        s_context.keyboard,
+        gui_styles_text_small(),
+        LV_PART_ITEMS |
+        LV_STATE_DEFAULT
+    );
+
+    lv_obj_set_style_bg_color(
+        s_context.keyboard,
+        theme->modal.secondary,
+        LV_PART_ITEMS
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_context.keyboard,
+        LV_OPA_COVER,
+        LV_PART_ITEMS
+    );
+
+    lv_obj_set_style_text_color(
+        s_context.keyboard,
+        theme->modal.title,
+        LV_PART_ITEMS
+    );
+
+    lv_obj_set_style_border_color(
+        s_context.keyboard,
+        theme->modal.border,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_color(
+        s_context.keyboard,
+        theme->modal.border,
+        LV_PART_ITEMS
+    );
+
+    lv_obj_set_style_bg_color(
+        s_context.keyboard,
+        theme->modal.background,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_context.keyboard,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        s_context.keyboard,
+        theme->modal.secondary_pressed,
+        LV_PART_ITEMS |
+        LV_STATE_PRESSED
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_context.keyboard,
+        LV_OPA_COVER,
+        LV_PART_ITEMS |
+        LV_STATE_PRESSED
+    );
 
     lv_obj_set_size(
         s_context.keyboard,

@@ -9,6 +9,8 @@
 #include "widgets/modal_dialog.h"
 #include "widgets/sd_card_modal.h"
 #include "assets/gui_images.h"
+#include "gui_styles.h"
+#include "gui_theme.h"
 
 #include "gui_config.h"
 #include "board_config.h"
@@ -16,13 +18,12 @@
 #include "usb_network_service.h"
 #include "wifi_service.h"
 
-#define TOOLBAR_HEIGHT          (56U)
+#define MAIN_TOOLBAR_HEIGHT \
+    GUI_THEME_TOOLBAR_HEIGHT
 #define MAIN_SCREEN_UPDATE_MS   (1000U)
 
 #define MAIN_CAN_CHANNEL_COUNT  (2U)
 #define MAIN_CAN_ROW_HEIGHT     (132)
-#define MAIN_CAN_CARD_PADDING   (8)
-#define MAIN_CAN_CARD_RADIUS    (12)
 #define MAIN_RECORDING_ROW_HEIGHT  (44)
 #define MAIN_ACTION_ROW_HEIGHT  (44)
 
@@ -150,6 +151,34 @@ static lv_obj_t *main_screen_create_action_button(
         return NULL;
     }
 
+    lv_obj_add_style(
+        button,
+        gui_styles_button_base(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_add_style(
+        button,
+        primary
+            ? gui_styles_button_primary()
+            : gui_styles_button_secondary(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_add_style(
+        button,
+        primary
+            ? gui_styles_button_primary_pressed()
+            : gui_styles_button_secondary_pressed(),
+        LV_PART_MAIN | LV_STATE_PRESSED
+    );
+
+    lv_obj_add_style(
+        button,
+        gui_styles_button_disabled(),
+        LV_PART_MAIN | LV_STATE_DISABLED
+    );
+
     lv_obj_set_height(
         button,
         LV_PCT(100)
@@ -158,38 +187,6 @@ static lv_obj_t *main_screen_create_action_button(
     lv_obj_set_flex_grow(
         button,
         1
-    );
-
-    lv_obj_set_style_radius(
-        button,
-        10,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_border_width(
-        button,
-        primary ? 0 : 1,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_border_color(
-        button,
-        lv_color_hex(0x2563EBU),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        button,
-        primary
-            ? lv_color_hex(0x2563EBU)
-            : lv_color_hex(0xFFFFFFU),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_opa(
-        button,
-        LV_OPA_COVER,
-        LV_PART_MAIN
     );
 
     lv_obj_add_event_cb(
@@ -207,23 +204,31 @@ static lv_obj_t *main_screen_create_action_button(
         return NULL;
     }
 
-    lv_label_set_text(
+    lv_obj_add_style(
         label,
-        text
-    );
-
-    lv_obj_set_style_text_font(
-        label,
-        &lv_font_montserrat_14,
+        gui_styles_text_small(),
         LV_PART_MAIN
     );
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        lv_obj_delete(button);
+        return NULL;
+    }
 
     lv_obj_set_style_text_color(
         label,
         primary
-            ? lv_color_hex(0xFFFFFFU)
-            : lv_color_hex(0x2563EBU),
+            ? theme->colors.text_on_primary
+            : theme->colors.primary,
         LV_PART_MAIN
+    );
+
+    lv_label_set_text(
+        label,
+        text
     );
 
     lv_obj_center(
@@ -538,45 +543,21 @@ static void main_screen_style_card(
         return;
     }
 
-    lv_obj_set_style_bg_color(
+    lv_obj_add_style(
         card,
-        lv_color_hex(0xF5F7FAU),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_opa(
-        card,
-        LV_OPA_COVER,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_border_width(
-        card,
-        1,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_border_color(
-        card,
-        lv_color_hex(0xE2E8F0U),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_radius(
-        card,
-        MAIN_CAN_CARD_RADIUS,
+        gui_styles_card(),
         LV_PART_MAIN
     );
 
     lv_obj_set_style_pad_all(
         card,
-        MAIN_CAN_CARD_PADDING,
+        GUI_THEME_SPACE_SM,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_pad_row(
         card,
-        2,
+        GUI_THEME_SPACE_XS,
         LV_PART_MAIN
     );
 
@@ -601,13 +582,12 @@ static void main_screen_style_card(
 static lv_obj_t *main_screen_create_card_label(
     lv_obj_t *parent,
     const char *text,
-    const lv_font_t *font,
-    lv_color_t color
+    const lv_style_t *style
 )
 {
     if ((parent == NULL) ||
         (text == NULL) ||
-        (font == NULL)) {
+        (style == NULL)) {
 
         return NULL;
     }
@@ -624,15 +604,9 @@ static lv_obj_t *main_screen_create_card_label(
         text
     );
 
-    lv_obj_set_style_text_font(
+    lv_obj_add_style(
         label,
-        font,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_text_color(
-        label,
-        color,
+        style,
         LV_PART_MAIN
     );
 
@@ -677,52 +651,59 @@ static esp_err_t main_screen_create_can_card(
         main_screen_create_card_label(
             card,
             title,
-            &lv_font_montserrat_16,
-            lv_color_hex(0x111827U)
+            gui_styles_text_body()
         );
 
     if (title_label == NULL) {
         return ESP_ERR_NO_MEM;
     }
 
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    lv_obj_set_style_text_color(
+        title_label,
+        theme->colors.text,
+        LV_PART_MAIN
+    );
+
     s_context.can_state_label[channel_index] =
         main_screen_create_card_label(
             card,
             "State: Not configured",
-            &lv_font_montserrat_14,
-            lv_color_hex(0x6B7280U)
+            gui_styles_text_muted()
         );
 
     s_context.can_bitrate_label[channel_index] =
         main_screen_create_card_label(
             card,
             "Bitrate: N/A",
-            &lv_font_montserrat_14,
-            lv_color_hex(0x374151U)
+            gui_styles_text_small()
         );
 
     s_context.can_load_label[channel_index] =
         main_screen_create_card_label(
             card,
             "Load: 0%",
-            &lv_font_montserrat_14,
-            lv_color_hex(0x374151U)
+            gui_styles_text_small()
         );
 
     s_context.can_frames_label[channel_index] =
         main_screen_create_card_label(
             card,
             "Frames/s: 0",
-            &lv_font_montserrat_14,
-            lv_color_hex(0x374151U)
+            gui_styles_text_small()
         );
 
     s_context.can_errors_label[channel_index] =
         main_screen_create_card_label(
             card,
             "Errors: 0",
-            &lv_font_montserrat_14,
-            lv_color_hex(0x374151U)
+            gui_styles_text_small()
         );
 
     if ((s_context.can_state_label[channel_index] == NULL) ||
@@ -743,6 +724,13 @@ static esp_err_t main_screen_create_recording_row(
 {
     if (parent == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     lv_obj_t *row =
@@ -807,7 +795,7 @@ static esp_err_t main_screen_create_recording_row(
 
     lv_obj_set_style_bg_color(
         s_context.recording_indicator,
-        lv_color_hex(0x9CA3AFU),
+        theme->colors.text_disabled,
         LV_PART_MAIN
     );
 
@@ -838,8 +826,7 @@ static esp_err_t main_screen_create_recording_row(
         main_screen_create_card_label(
             row,
             "Idle",
-            &lv_font_montserrat_14,
-            lv_color_hex(0x374151U)
+            gui_styles_text_small()
         );
 
     if (s_context.recording_status_label == NULL) {
@@ -850,8 +837,7 @@ static esp_err_t main_screen_create_recording_row(
         main_screen_create_card_label(
             row,
             "00:00:00 | 0 B | Dropped: 0",
-            &lv_font_montserrat_14,
-            lv_color_hex(0x6B7280U)
+            gui_styles_text_muted()
         );
 
     if (s_context.recording_details_label == NULL) {
@@ -954,6 +940,24 @@ static esp_err_t main_screen_create_can_row(
 
 lv_obj_t *main_screen_create(void)
 {
+    if (!gui_theme_is_initialized() ||
+        !gui_styles_is_initialized()) {
+
+        ESP_LOGE(
+            TAG,
+            "GUI theme or styles are not initialized"
+        );
+
+        return NULL;
+    }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return NULL;
+    }
+
     lv_obj_t *screen =
         lv_obj_create(NULL);
 
@@ -983,9 +987,9 @@ lv_obj_t *main_screen_create(void)
         LV_OBJ_FLAG_SCROLLABLE
     );
 
-    lv_obj_set_style_bg_color(
+    lv_obj_add_style(
         screen,
-        lv_color_hex(0xFFFFFF),
+        gui_styles_screen(),
         LV_PART_MAIN
     );
 
@@ -1060,10 +1064,16 @@ lv_obj_t *main_screen_create(void)
         return NULL;
     }
 
+    lv_obj_set_style_bg_color(
+        content,
+        theme->colors.background,
+        LV_PART_MAIN
+    );
+
     lv_obj_set_size(
         content,
         LV_PCT(100),
-        LCD_V_RES - TOOLBAR_HEIGHT
+        LCD_V_RES - MAIN_TOOLBAR_HEIGHT
     );
 
     lv_obj_align(
@@ -1071,6 +1081,18 @@ lv_obj_t *main_screen_create(void)
         LV_ALIGN_BOTTOM_MID,
         0,
         0
+    );
+
+    lv_obj_set_style_pad_all(
+        content,
+        GUI_THEME_SPACE_MD,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_row(
+        content,
+        GUI_THEME_SPACE_SM,
+        LV_PART_MAIN
     );
 
     /*
@@ -1098,18 +1120,6 @@ lv_obj_t *main_screen_create(void)
         LV_PART_MAIN
     );
 
-    lv_obj_set_style_pad_all(
-        content,
-        10,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        content,
-        lv_color_hex(0xFFFFFF),
-        LV_PART_MAIN
-    );
-
     lv_obj_set_style_bg_opa(
         content,
         LV_OPA_COVER,
@@ -1129,12 +1139,6 @@ lv_obj_t *main_screen_create(void)
         LV_FLEX_ALIGN_START,
         LV_FLEX_ALIGN_START,
         LV_FLEX_ALIGN_START
-    );
-
-    lv_obj_set_style_pad_row(
-        content,
-        8,
-        LV_PART_MAIN
     );
 
     esp_err_t dashboard_result =

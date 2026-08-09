@@ -3,35 +3,28 @@
 #include <stdlib.h>
 
 #include "assets/gui_images.h"
+#include "gui_styles.h"
+#include "gui_theme.h"
 
-#define TOOLBAR_HEIGHT       56
-#define TOOLBAR_BUTTON_SIZE  44
+#define TOOLBAR_HEIGHT \
+    GUI_THEME_TOOLBAR_HEIGHT
+#define TOOLBAR_BUTTON_SIZE \
+    GUI_THEME_TOOLBAR_BUTTON_SIZE
+#define TOOLBAR_STATUS_BUTTON_HEIGHT TOOLBAR_BUTTON_SIZE
 #define TOOLBAR_STATUS_CONTAINER_WIDTH  (340)
 
-#define TOOLBAR_COLOR_BACKGROUND       0x343B42
-#define TOOLBAR_COLOR_PRESSED          0x4B77D1
-
-#define TOOLBAR_ICON_COLOR_DEFAULT      0xFFFFFF
-#define TOOLBAR_ICON_COLOR_INACTIVE     0x7B858F
-#define TOOLBAR_ICON_COLOR_SD_MOUNTED   0x4B77D1
-#define TOOLBAR_ICON_COLOR_SD_ERROR     0xE05252
-#define TOOLBAR_ICON_COLOR_OTA_READY    0xF4B400
-
-#define TOOLBAR_STATUS_BUTTON_HEIGHT  (44)
 #define TOOLBAR_USB_BUTTON_WIDTH   (46)
 #define TOOLBAR_WIFI_BUTTON_WIDTH  (60)
 #define TOOLBAR_CPU_BUTTON_WIDTH   (82)
 
-#define TOOLBAR_STATUS_BUTTON_PADDING_HORIZONTAL  (6)
-#define TOOLBAR_STATUS_BUTTON_PADDING_VERTICAL    (2)
-
-#define TOOLBAR_STATUS_COLOR_ACTIVE    0x4B77D1
-#define TOOLBAR_STATUS_COLOR_WARNING   0xF4B400
-#define TOOLBAR_STATUS_COLOR_CRITICAL  0xE05252
+#define TOOLBAR_STATUS_BUTTON_PADDING_HORIZONTAL \
+    GUI_THEME_SPACE_SM
+#define TOOLBAR_STATUS_BUTTON_PADDING_VERTICAL \
+    GUI_THEME_SPACE_XS
 
 #define TOOLBAR_INTERNET_INDICATOR_SIZE   (10)
-#define TOOLBAR_INTERNET_INDICATOR_GAP    (8)
-#define TOOLBAR_INTERNET_COLOR_AVAILABLE  (0x39C56B)
+#define TOOLBAR_INTERNET_INDICATOR_GAP \
+    GUI_THEME_SPACE_SM
 
 typedef struct
 {
@@ -87,6 +80,54 @@ static void toolbar_button_delete_event_cb(
     );
 }
 
+static void toolbar_apply_button_style(
+    lv_obj_t *button,
+    const gui_theme_t *theme
+)
+{
+    if ((button == NULL) ||
+        (theme == NULL)) {
+
+        return;
+    }
+
+    lv_obj_add_style(
+        button,
+        gui_styles_button_base(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        button,
+        theme->colors.toolbar_control,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        button,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        button,
+        theme->colors.toolbar_control_pressed,
+        LV_PART_MAIN | LV_STATE_PRESSED
+    );
+
+    lv_obj_set_style_bg_opa(
+        button,
+        LV_OPA_COVER,
+        LV_PART_MAIN | LV_STATE_PRESSED
+    );
+
+    lv_obj_set_style_border_width(
+        button,
+        0,
+        LV_PART_MAIN
+    );
+}
+
 static lv_obj_t *toolbar_button_create(
     lv_obj_t *parent,
     const lv_image_dsc_t *image_source,
@@ -96,6 +137,14 @@ static lv_obj_t *toolbar_button_create(
     if (parent == NULL || image_source == NULL) {
         return NULL;
     }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return NULL;
+    }
+
     toolbar_button_context_t *context =
         calloc(
             1U,
@@ -116,6 +165,11 @@ static lv_obj_t *toolbar_button_create(
         return NULL;
     }
 
+    toolbar_apply_button_style(
+        button,
+        theme
+    );
+
     lv_obj_set_user_data(
         button,
         context
@@ -132,40 +186,6 @@ static lv_obj_t *toolbar_button_create(
         button,
         TOOLBAR_BUTTON_SIZE,
         TOOLBAR_BUTTON_SIZE
-    );
-
-    lv_obj_set_style_radius(
-        button,
-        10,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        button,
-        lv_color_hex(
-            TOOLBAR_COLOR_BACKGROUND
-        ),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        button,
-        lv_color_hex(
-            TOOLBAR_COLOR_PRESSED
-        ),
-        LV_PART_MAIN | LV_STATE_PRESSED
-    );
-
-    lv_obj_set_style_bg_opa(
-        button,
-        LV_OPA_COVER,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_shadow_width(
-        button,
-        0,
-        LV_PART_MAIN
     );
 
     lv_obj_set_style_pad_all(
@@ -207,9 +227,7 @@ static lv_obj_t *toolbar_button_create(
 
     lv_obj_set_style_image_recolor(
         image,
-        lv_color_hex(
-            TOOLBAR_ICON_COLOR_DEFAULT
-        ),
+        theme->colors.toolbar_foreground,
         LV_PART_MAIN
     );
 
@@ -239,6 +257,13 @@ static lv_obj_t *toolbar_text_button_create(
 
     *out_label = NULL;
 
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return NULL;
+    }
+
     toolbar_button_context_t *context =
         calloc(
             1U,
@@ -259,6 +284,11 @@ static lv_obj_t *toolbar_text_button_create(
         return NULL;
     }
 
+    toolbar_apply_button_style(
+        button,
+        theme
+    );
+
     lv_obj_set_user_data(
         button,
         context
@@ -275,40 +305,6 @@ static lv_obj_t *toolbar_text_button_create(
         button,
         width,
         TOOLBAR_STATUS_BUTTON_HEIGHT
-    );
-
-    lv_obj_set_style_radius(
-        button,
-        8,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        button,
-        lv_color_hex(
-            TOOLBAR_COLOR_BACKGROUND
-        ),
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_bg_color(
-        button,
-        lv_color_hex(
-            TOOLBAR_COLOR_PRESSED
-        ),
-        LV_PART_MAIN | LV_STATE_PRESSED
-    );
-
-    lv_obj_set_style_bg_opa(
-        button,
-        LV_OPA_COVER,
-        LV_PART_MAIN
-    );
-
-    lv_obj_set_style_shadow_width(
-        button,
-        0,
-        LV_PART_MAIN
     );
 
     lv_obj_set_style_pad_hor(
@@ -345,25 +341,23 @@ static lv_obj_t *toolbar_text_button_create(
         return NULL;
     }
 
-    context->label = label;
-
-    lv_label_set_text(
+    lv_obj_add_style(
         label,
-        text
-    );
-
-    lv_obj_set_style_text_font(
-        label,
-        &lv_font_montserrat_14,
+        gui_styles_text_small(),
         LV_PART_MAIN
     );
 
     lv_obj_set_style_text_color(
         label,
-        lv_color_hex(
-            TOOLBAR_ICON_COLOR_INACTIVE
-        ),
+        theme->colors.toolbar_inactive,
         LV_PART_MAIN
+    );
+
+    context->label = label;
+
+    lv_label_set_text(
+        label,
+        text
     );
 
     lv_obj_center(
@@ -377,7 +371,7 @@ static lv_obj_t *toolbar_text_button_create(
 
 static void toolbar_set_text_color(
     lv_obj_t *label,
-    uint32_t color
+    lv_color_t color
 )
 {
     if (label == NULL) {
@@ -386,13 +380,11 @@ static void toolbar_set_text_color(
 
     lv_obj_set_style_text_color(
         label,
-        lv_color_hex(color),
+        color,
         LV_PART_MAIN
     );
 
-    lv_obj_invalidate(
-        label
-    );
+    lv_obj_invalidate(label);
 }
 
 toolbar_t toolbar_create(
@@ -402,7 +394,18 @@ toolbar_t toolbar_create(
 {
     toolbar_t result = {0};
 
-    if (parent == NULL || config == NULL) {
+    if ((parent == NULL) ||
+        (config == NULL) ||
+        !gui_theme_is_initialized() ||
+        !gui_styles_is_initialized()) {
+
+        return result;
+    }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
         return result;
     }
 
@@ -447,31 +450,31 @@ toolbar_t toolbar_create(
 
     lv_obj_set_style_pad_left(
         toolbar,
-        8,
+        GUI_THEME_SPACE_SM,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_pad_right(
         toolbar,
-        8,
+        GUI_THEME_SPACE_SM,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_pad_top(
         toolbar,
-        4,
+        GUI_THEME_SPACE_XS,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_pad_bottom(
         toolbar,
-        4,
+        GUI_THEME_SPACE_XS,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_bg_color(
         toolbar,
-        lv_color_hex(0x20252A),
+        theme->colors.toolbar_background,
         LV_PART_MAIN
     );
 
@@ -488,6 +491,13 @@ toolbar_t toolbar_create(
 
     lv_obj_t *left_container =
         lv_obj_create(toolbar);
+
+    if (left_container == NULL) {
+        lv_obj_delete(toolbar);
+
+        toolbar_t empty = {0};
+        return empty;
+    }
 
     lv_obj_set_size(
         left_container,
@@ -620,15 +630,15 @@ toolbar_t toolbar_create(
             : ""
     );
 
-    lv_obj_set_style_text_font(
+    lv_obj_add_style(
         title,
-        &lv_font_montserrat_20,
+        gui_styles_text_title(),
         LV_PART_MAIN
     );
 
     lv_obj_set_style_text_color(
         title,
-        lv_color_hex(0xFFFFFF),
+        theme->colors.toolbar_foreground,
         LV_PART_MAIN
     );
 
@@ -651,9 +661,7 @@ toolbar_t toolbar_create(
 
             lv_obj_set_style_bg_color(
                 result.internet_indicator,
-                lv_color_hex(
-                    TOOLBAR_INTERNET_COLOR_AVAILABLE
-                ),
+                theme->colors.success,
                 LV_PART_MAIN
             );
 
@@ -701,6 +709,13 @@ toolbar_t toolbar_create(
      */
     lv_obj_t *status_container =
         lv_obj_create(toolbar);
+
+    if (status_container == NULL) {
+        lv_obj_delete(toolbar);
+
+        toolbar_t empty = {0};
+        return empty;
+    }
 
     lv_obj_set_size(
         status_container,
@@ -882,13 +897,18 @@ void toolbar_set_sd_mounted(
         return;
     }
 
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return;
+    }
+
     toolbar_set_button_icon_color(
         toolbar->sd_button,
-        lv_color_hex(
-            mounted
-                ? TOOLBAR_ICON_COLOR_SD_MOUNTED
-                : TOOLBAR_ICON_COLOR_INACTIVE
-        )
+        mounted
+            ? theme->colors.control_accent
+            : theme->colors.toolbar_inactive
     );
 }
 
@@ -901,13 +921,18 @@ void toolbar_set_ota_available(
         return;
     }
 
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return;
+    }
+
     toolbar_set_button_icon_color(
         toolbar->ota_button,
-        lv_color_hex(
-            available
-                ? TOOLBAR_ICON_COLOR_OTA_READY
-                : TOOLBAR_ICON_COLOR_INACTIVE
-        )
+        available
+            ? theme->colors.warning
+            : theme->colors.toolbar_inactive
     );
 }
 
@@ -928,14 +953,21 @@ void toolbar_set_usb_status(
         "USB"
     );
 
-    uint32_t color =
-        TOOLBAR_ICON_COLOR_INACTIVE;
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return;
+    }
+
+    lv_color_t color =
+        theme->colors.toolbar_inactive;
 
     if (started) {
         color =
             host_connected
-                ? TOOLBAR_STATUS_COLOR_ACTIVE
-                : TOOLBAR_ICON_COLOR_DEFAULT;
+                ? theme->colors.control_accent
+                : theme->colors.toolbar_foreground;
     }
 
     toolbar_set_text_color(
@@ -962,14 +994,21 @@ void toolbar_set_wifi_status(
         (unsigned int)client_count
     );
 
-    uint32_t color =
-        TOOLBAR_ICON_COLOR_INACTIVE;
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return;
+    }
+
+    lv_color_t color =
+        theme->colors.toolbar_inactive;
 
     if (started) {
         color =
             client_count > 0U
-                ? TOOLBAR_STATUS_COLOR_ACTIVE
-                : TOOLBAR_ICON_COLOR_DEFAULT;
+                ? theme->colors.control_accent
+                : theme->colors.toolbar_foreground;
     }
 
     toolbar_set_text_color(
@@ -999,15 +1038,20 @@ void toolbar_set_cpu_usage(
         (unsigned int)cpu_usage
     );
 
-    uint32_t color =
-        TOOLBAR_ICON_COLOR_DEFAULT;
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return;
+    }
+
+    lv_color_t color =
+        theme->colors.toolbar_foreground;
 
     if (cpu_usage >= 90U) {
-        color =
-            TOOLBAR_STATUS_COLOR_CRITICAL;
+        color = theme->colors.danger;
     } else if (cpu_usage >= 70U) {
-        color =
-            TOOLBAR_STATUS_COLOR_WARNING;
+        color = theme->colors.warning;
     }
 
     toolbar_set_text_color(

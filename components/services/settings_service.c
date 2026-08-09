@@ -88,6 +88,10 @@ static esp_err_t settings_service_set_animations_enabled_internal(
     bool enabled
 );
 
+static esp_err_t settings_service_set_theme_mode_internal(
+    ui_theme_mode_t theme_mode
+);
+
 static esp_err_t settings_service_apply_internal(void);
 
 static esp_err_t settings_service_lock(void)
@@ -335,6 +339,90 @@ static esp_err_t settings_service_parse_log_tag_list(
     );
 
     return ESP_OK;
+}
+
+static const char *settings_service_theme_mode_to_string(
+    ui_theme_mode_t theme_mode
+)
+{
+    switch (theme_mode) {
+        case UI_THEME_MODE_DARK:
+            return "dark";
+
+        case UI_THEME_MODE_LIGHT:
+        default:
+            return "light";
+    }
+}
+
+static esp_err_t settings_service_parse_theme_mode(
+    const cJSON *ui,
+    ui_theme_mode_t *theme_mode
+)
+{
+    if ((ui == NULL) ||
+        (theme_mode == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const cJSON *theme =
+        cJSON_GetObjectItemCaseSensitive(
+            ui,
+            "theme"
+        );
+
+    /*
+     * Keep compatibility with configuration files created before
+     * theme selection was introduced.
+     */
+    if (theme == NULL) {
+        *theme_mode =
+            SETTINGS_UI_THEME_MODE_DEFAULT;
+
+        return ESP_OK;
+    }
+
+    if (!cJSON_IsString(theme) ||
+        (theme->valuestring == NULL)) {
+
+        ESP_LOGE(
+            TAG,
+            "Invalid ui.theme"
+        );
+
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    if (strcmp(
+            theme->valuestring,
+            "light"
+        ) == 0) {
+
+        *theme_mode =
+            UI_THEME_MODE_LIGHT;
+
+        return ESP_OK;
+    }
+
+    if (strcmp(
+            theme->valuestring,
+            "dark"
+        ) == 0) {
+
+        *theme_mode =
+            UI_THEME_MODE_DARK;
+
+        return ESP_OK;
+    }
+
+    ESP_LOGE(
+        TAG,
+        "Unsupported ui.theme: %s",
+        theme->valuestring
+    );
+
+    return ESP_ERR_INVALID_RESPONSE;
 }
 
 static esp_err_t parse_config(
@@ -773,6 +861,24 @@ static esp_err_t parse_config(
     parsed_settings->ui.animations_enabled =
         cJSON_IsTrue(animations_enabled);
 
+    result =
+        settings_service_parse_theme_mode(
+            ui,
+            &parsed_settings->ui.theme_mode
+        );
+
+    if (result != ESP_OK) {
+        goto cleanup;
+    }
+
+    ESP_LOGD(
+        TAG,
+        "UI theme: %s",
+        settings_service_theme_mode_to_string(
+            parsed_settings->ui.theme_mode
+        )
+    );
+
     const cJSON *network =
         cJSON_GetObjectItemCaseSensitive(
             root,
@@ -1185,6 +1291,17 @@ static cJSON *settings_service_create_json(
             ui,
             "animations_enabled",
             settings->ui.animations_enabled
+        ) == NULL) {
+
+        goto error;
+    }
+
+    if (cJSON_AddStringToObject(
+            ui,
+            "theme",
+            settings_service_theme_mode_to_string(
+                settings->ui.theme_mode
+            )
         ) == NULL) {
 
         goto error;
@@ -1796,6 +1913,35 @@ static esp_err_t settings_service_set_sd_logging_enabled_internal(
     return result;
 }
 
+static esp_err_t settings_service_set_theme_mode_internal(
+    ui_theme_mode_t theme_mode
+)
+{
+    if ((theme_mode != UI_THEME_MODE_LIGHT) &&
+        (theme_mode != UI_THEME_MODE_DARK)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    app_settings_t settings;
+
+    esp_err_t result =
+        settings_model_get(
+            &settings
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    settings.ui.theme_mode =
+        theme_mode;
+
+    return settings_model_set(
+        &settings
+    );
+}
+
 static esp_err_t settings_service_set_animations_enabled_internal(
     bool enabled
 )
@@ -2125,11 +2271,14 @@ static esp_err_t settings_service_apply_internal(void)
 
     ESP_LOGI(
         TAG,
-        "Display: brightness=%u%%, animations=%s",
+        "Display: brightness=%u%%, animations=%s, theme=%s",
         (unsigned int)settings->display.brightness,
         settings->ui.animations_enabled
             ? "enabled"
-            : "disabled"
+            : "disabled",
+        settings_service_theme_mode_to_string(
+            settings->ui.theme_mode
+        )
     );
 
     ESP_LOGI(
@@ -2285,6 +2434,33 @@ esp_err_t settings_service_set_animations_enabled(
 
     return result;
 }
+
+esp_err_t settings_service_set_theme_mode(
+    ui_theme_mode_t theme_mode
+)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result =
+        ESP_ERR_INVALID_STATE;
+
+    if (s_initialized) {
+        result =
+            settings_service_set_theme_mode_internal(
+                theme_mode
+            );
+    }
+
+    settings_service_unlock();
+
+    return result;
+}
+
 
 esp_err_t settings_service_apply(void)
 {

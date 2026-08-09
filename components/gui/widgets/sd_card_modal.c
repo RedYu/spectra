@@ -4,6 +4,7 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 #include "widgets/modal_dialog.h"
 #include "logging_service.h"
@@ -12,6 +13,8 @@
 
 #include "sd_card_driver.h"
 #include "gui_config.h"
+
+#define SD_CARD_MODAL_INFO_BUFFER_SIZE  (768U)
 
 static const char *TAG =
     "sd_card_modal";
@@ -225,32 +228,54 @@ static void sd_card_modal_action_cb(
             storage_sd_service_mount();
 
         if (result == ESP_OK) {
-            app_settings_t settings;
-
-            const esp_err_t settings_result =
-                settings_model_get(
-                    &settings
+            app_settings_t *settings =
+                heap_caps_calloc(
+                    1U,
+                    sizeof(*settings),
+                    MALLOC_CAP_SPIRAM |
+                    MALLOC_CAP_8BIT
                 );
 
-            if (settings_result != ESP_OK) {
+            if (settings == NULL) {
                 ESP_LOGW(
                     TAG,
-                    "Failed to get logging setting: %s",
-                    esp_err_to_name(settings_result)
+                    "Failed to allocate settings snapshot"
                 );
-            } else if (settings.logging.sd_enabled) {
-                const esp_err_t logging_result =
-                    logging_service_enable_file();
 
-                if ((logging_result != ESP_OK) &&
-                    (logging_result != ESP_ERR_INVALID_STATE)) {
+            } else {
+                const esp_err_t settings_result =
+                    settings_model_get(
+                        settings
+                    );
 
+                if (settings_result != ESP_OK) {
                     ESP_LOGW(
                         TAG,
-                        "Failed to enable SD logging: %s",
-                        esp_err_to_name(logging_result)
+                        "Failed to get logging setting: %s",
+                        esp_err_to_name(settings_result)
                     );
+
+                } else if (
+                    settings->logging.sd_enabled
+                ) {
+                    const esp_err_t logging_result =
+                        logging_service_enable_file();
+
+                    if ((logging_result != ESP_OK) &&
+                        (logging_result !=
+                         ESP_ERR_INVALID_STATE)) {
+
+                        ESP_LOGW(
+                            TAG,
+                            "Failed to enable SD logging: %s",
+                            esp_err_to_name(logging_result)
+                        );
+                    }
                 }
+
+                heap_caps_free(
+                    settings
+                );
             }
         }
     }
@@ -364,34 +389,63 @@ static void sd_card_modal_update(
     }
 
     if (state == STORAGE_SD_STATE_MOUNTED) {
-        char card_info[768];
-
         modal_dialog_set_title(
             dialog,
             "SD Card Information"
         );
 
-        const esp_err_t info_result =
-            sd_card_driver_get_info_text(
-                card_info,
-                sizeof(card_info)
+        char *card_info =
+            heap_caps_calloc(
+                SD_CARD_MODAL_INFO_BUFFER_SIZE,
+                sizeof(char),
+                MALLOC_CAP_SPIRAM |
+                MALLOC_CAP_8BIT
             );
 
-        if (info_result == ESP_OK) {
+        if (card_info == NULL) {
             modal_dialog_set_message(
                 dialog,
-                card_info
-            );
-        } else {
-            modal_dialog_set_message(
-                dialog,
-                "The SD card is mounted, but its information could not be read."
+                "Failed to allocate SD-card information buffer."
             );
 
             ESP_LOGW(
                 TAG,
-                "Failed to get SD-card information: %s",
-                esp_err_to_name(info_result)
+                "Failed to allocate SD-card information buffer"
+            );
+
+        } else {
+            const esp_err_t info_result =
+                sd_card_driver_get_info_text(
+                    card_info,
+                    SD_CARD_MODAL_INFO_BUFFER_SIZE
+                );
+
+            if (info_result == ESP_OK) {
+                /*
+                 * LVGL copies the label text, so the temporary buffer
+                 * can be released immediately afterward.
+                 */
+                modal_dialog_set_message(
+                    dialog,
+                    card_info
+                );
+
+            } else {
+                modal_dialog_set_message(
+                    dialog,
+                    "The SD card is mounted, but its information "
+                    "could not be read."
+                );
+
+                ESP_LOGW(
+                    TAG,
+                    "Failed to get SD-card information: %s",
+                    esp_err_to_name(info_result)
+                );
+            }
+
+            heap_caps_free(
+                card_info
             );
         }
 

@@ -5,6 +5,8 @@
 
 #include "esp_err.h"
 
+#include "settings_model.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -266,8 +268,8 @@ esp_err_t settings_service_save(void);
  * STA credentials are loaded separately from NVS and must match the
  * SSID and credential identifier stored in the settings model.
  *
- * The USB RNDIS setting is applied only during application startup
- * because changing USB descriptors requires re-enumeration.
+ * USB RNDIS and the GUI theme are applied only during application
+ * startup. Changing either setting may require a device restart.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if a required
  * service is not initialized, ESP_ERR_TIMEOUT if a required lock
@@ -326,6 +328,25 @@ esp_err_t settings_service_set_log_tag_levels(
     const char *info_tags,
     const char *debug_tags,
     const char *disabled_tags
+);
+
+/**
+ * @brief Select the GUI theme for the next application start.
+ *
+ * Updates the settings model but does not modify existing LVGL styles.
+ * The selected theme takes effect after the device is restarted.
+ * The setting is not automatically saved to persistent storage; call
+ * settings_service_save() after this function succeeds.
+ *
+ * @param[in] theme_mode Requested light or dark GUI theme.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if theme_mode is
+ * invalid, ESP_ERR_INVALID_STATE if the settings service is not
+ * initialized, ESP_ERR_TIMEOUT if the service lock cannot be acquired,
+ * otherwise an ESP-IDF error code.
+ */
+esp_err_t settings_service_set_theme_mode(
+    ui_theme_mode_t theme_mode
 );
 
 #ifdef __cplusplus
