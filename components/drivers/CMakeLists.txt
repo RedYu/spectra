@@ -4,6 +4,7 @@ idf_component_register(
         "display_backlight.c"
         "display_driver.c"
         "touch_driver.c"
+        "axp313a_driver.c"
 
     INCLUDE_DIRS
         "include"

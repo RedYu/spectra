@@ -1,20 +1,24 @@
 #include "touch_driver.h"
 
 #include "driver/i2c_master.h"
+
 #include "esp_check.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_touch_gt911.h"
 #include "esp_log.h"
 
+#include "board.h"
 #include "board_config.h"
 
-static const char *TAG = "touch_driver";
+static const char *TAG =
+    "touch_driver";
 
-static esp_lcd_touch_io_gt911_config_t s_gt911_config = {
-    .dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS,
-};
+static esp_lcd_touch_io_gt911_config_t
+    s_gt911_config = {
+        .dev_addr =
+            ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS,
+    };
 
-static i2c_master_bus_handle_t s_i2c_bus = NULL;
 static esp_lcd_panel_io_handle_t s_touch_io = NULL;
 static esp_lcd_touch_handle_t s_touch = NULL;
 
@@ -24,7 +28,9 @@ static esp_err_t touch_driver_cleanup(void)
 {
     if (s_touch != NULL) {
         const esp_err_t result =
-            esp_lcd_touch_del(s_touch);
+            esp_lcd_touch_del(
+                s_touch
+            );
 
         if (result != ESP_OK) {
             ESP_LOGE(
@@ -41,7 +47,9 @@ static esp_err_t touch_driver_cleanup(void)
 
     if (s_touch_io != NULL) {
         const esp_err_t result =
-            esp_lcd_panel_io_del(s_touch_io);
+            esp_lcd_panel_io_del(
+                s_touch_io
+            );
 
         if (result != ESP_OK) {
             ESP_LOGE(
@@ -56,70 +64,42 @@ static esp_err_t touch_driver_cleanup(void)
         s_touch_io = NULL;
     }
 
-    if (s_i2c_bus != NULL) {
-        const esp_err_t result =
-            i2c_del_master_bus(s_i2c_bus);
-
-        if (result != ESP_OK) {
-            ESP_LOGE(
-                TAG,
-                "Failed to delete touch I2C bus: %s",
-                esp_err_to_name(result)
-            );
-
-            return result;
-        }
-
-        s_i2c_bus = NULL;
-    }
-
+    /*
+     * The shared I2C bus is owned by the board module and must not be
+     * deleted by an individual device driver.
+     */
     s_initialized = false;
-
-    return ESP_OK;
-}
-
-static esp_err_t touch_i2c_init(void)
-{
-    const i2c_master_bus_config_t bus_config = {
-        .i2c_port = TOUCH_I2C_PORT,
-        .sda_io_num = TOUCH_PIN_SDA,
-        .scl_io_num = TOUCH_PIN_SCL,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7U,
-
-        /*
-         * Internal pull-up resistors can be useful for testing,
-         * but external pull-up resistors (typically 2.2-4.7 kOhm)
-         * are recommended for production hardware.
-         */
-        .flags.enable_internal_pullup = true,
-    };
-
-    ESP_RETURN_ON_ERROR(
-        i2c_new_master_bus(
-            &bus_config,
-            &s_i2c_bus
-        ),
-        TAG,
-        "Failed to create I2C bus"
-    );
 
     return ESP_OK;
 }
 
 static esp_err_t touch_panel_io_init(void)
 {
+    i2c_master_bus_handle_t i2c_bus =
+        board_i2c_get_handle();
+
+    if (i2c_bus == NULL) {
+        ESP_LOGE(
+            TAG,
+            "Shared I2C bus is not initialized"
+        );
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
     esp_lcd_panel_io_i2c_config_t io_config =
         ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
 
     /*
-     * Set the I2C clock speed explicitly.
+     * Set the device clock speed explicitly. The shared bus may contain
+     * devices with different clock-speed limits.
      */
-    io_config.scl_speed_hz = TOUCH_I2C_FREQ_HZ;
+    io_config.scl_speed_hz =
+        TOUCH_I2C_FREQ_HZ;
 
     ESP_RETURN_ON_ERROR(
         esp_lcd_new_panel_io_i2c(
-            s_i2c_bus,
+            i2c_bus,
             &io_config,
             &s_touch_io
         ),
@@ -150,7 +130,8 @@ static esp_err_t touch_controller_init(void)
             .mirror_y = TOUCH_MIRROR_Y,
         },
 
-        .driver_data = &s_gt911_config,
+        .driver_data =
+            &s_gt911_config,
     };
 
     return esp_lcd_touch_new_i2c_gt911(
@@ -166,13 +147,21 @@ esp_err_t touch_driver_init(void)
         return ESP_OK;
     }
 
+    if (!board_i2c_is_initialized()) {
+        ESP_LOGE(
+            TAG,
+            "Cannot initialize GT911 before the board I2C bus"
+        );
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
     /*
-     * Clean up resources that may remain after a previously
-     * failed initialization attempt.
+     * Clean resources that may remain after an earlier failed
+     * initialization attempt.
      */
     if ((s_touch != NULL) ||
-        (s_touch_io != NULL) ||
-        (s_i2c_bus != NULL)) {
+        (s_touch_io != NULL)) {
 
         const esp_err_t cleanup_result =
             touch_driver_cleanup();
@@ -180,7 +169,7 @@ esp_err_t touch_driver_init(void)
         if (cleanup_result != ESP_OK) {
             ESP_LOGE(
                 TAG,
-                "Failed to clean up previous GT911 state: %s",
+                "Failed to clean previous GT911 state: %s",
                 esp_err_to_name(cleanup_result)
             );
 
@@ -193,14 +182,12 @@ esp_err_t touch_driver_init(void)
         "Initializing GT911"
     );
 
-    esp_err_t result = touch_i2c_init();
+    esp_err_t result =
+        touch_panel_io_init();
 
     if (result == ESP_OK) {
-        result = touch_panel_io_init();
-    }
-
-    if (result == ESP_OK) {
-        result = touch_controller_init();
+        result =
+            touch_controller_init();
     }
 
     if (result != ESP_OK) {
@@ -256,18 +243,22 @@ esp_err_t touch_driver_read(
     *y = 0U;
     *pressed = false;
 
-    if (s_touch == NULL) {
+    if (!s_initialized ||
+        (s_touch == NULL)) {
+
         return ESP_ERR_INVALID_STATE;
     }
 
     ESP_RETURN_ON_ERROR(
-        esp_lcd_touch_read_data(s_touch),
+        esp_lcd_touch_read_data(
+            s_touch
+        ),
         TAG,
         "Failed to read GT911"
     );
 
     esp_lcd_touch_point_data_t point[1] = {0};
-    uint8_t point_count = 0;
+    uint8_t point_count = 0U;
 
     ESP_RETURN_ON_ERROR(
         esp_lcd_touch_get_data(

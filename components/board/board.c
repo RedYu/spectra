@@ -2,6 +2,8 @@
 
 #include "esp_log.h"
 
+#include "driver/i2c_master.h"
+
 #include "app_config.h"
 #include "board_config.h"
 #include "display_backlight.h"
@@ -10,9 +12,12 @@ static const char *TAG = "board";
 
 static SemaphoreHandle_t s_bus_semaphore = NULL;
 
+static i2c_master_bus_handle_t s_i2c_bus = NULL;
+
 esp_err_t board_init(void)
 {
-    esp_err_t result = display_backlight_init();
+    esp_err_t result =
+        display_backlight_init();
 
     if (result != ESP_OK) {
         ESP_LOGE(
@@ -24,7 +29,10 @@ esp_err_t board_init(void)
         return result;
     }
 
-    result = display_backlight_set_brightness(0U);
+    result =
+        display_backlight_set_brightness(
+            0U
+        );
 
     if (result != ESP_OK) {
         ESP_LOGE(
@@ -36,7 +44,8 @@ esp_err_t board_init(void)
         return result;
     }
 
-    result = board_spi_init();
+    result =
+        board_spi_init();
 
     if (result != ESP_OK) {
         ESP_LOGE(
@@ -47,6 +56,24 @@ esp_err_t board_init(void)
 
         return result;
     }
+
+    result =
+        board_i2c_init();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize shared I2C bus: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Board initialized"
+    );
 
     return ESP_OK;
 }
@@ -177,4 +204,60 @@ void board_spi_unlock_from_isr(
         s_bus_semaphore,
         higher_priority_task_woken
     );
+}
+
+esp_err_t board_i2c_init(void)
+{
+    if (s_i2c_bus != NULL) {
+        return ESP_OK;
+    }
+
+    const i2c_master_bus_config_t config = {
+        .i2c_port = TOUCH_I2C_PORT,
+        .sda_io_num = TOUCH_PIN_SDA,
+        .scl_io_num = TOUCH_PIN_SCL,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7U,
+
+        /*
+         * External pull-up resistors are recommended for a shared
+         * production I2C bus.
+         */
+        .flags.enable_internal_pullup = true,
+    };
+
+    const esp_err_t result =
+        i2c_new_master_bus(
+            &config,
+            &s_i2c_bus
+        );
+
+    if (result != ESP_OK) {
+        s_i2c_bus = NULL;
+
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize shared I2C bus: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Shared I2C bus initialized"
+    );
+
+    return ESP_OK;
+}
+
+bool board_i2c_is_initialized(void)
+{
+    return s_i2c_bus != NULL;
+}
+
+i2c_master_bus_handle_t board_i2c_get_handle(void)
+{
+    return s_i2c_bus;
 }
