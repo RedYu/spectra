@@ -21,6 +21,7 @@
 #include "gui_styles.h"
 #include "screen_manager.h"
 #include "settings_model.h"
+#include "settings_service.h"
 
 #define GUI_TASK_STACK_SIZE       (8192U)
 #define GUI_TASK_PRIORITY         (5U)
@@ -273,6 +274,11 @@ static void gui_task(
             esp_err_to_name(result)
         );
 
+        atomic_store(
+            &s_started,
+            false
+        );
+
         /*
          * LVGL is already initialized. Complete cleanup is required
          * before the GUI service can be started again safely.
@@ -291,8 +297,26 @@ static void gui_task(
             esp_err_to_name(result)
         );
 
+        atomic_store(
+            &s_started,
+            false
+        );
+
         vTaskDelete(NULL);
         return;
+    }
+
+    result =
+        settings_service_mark_theme_applied(
+            settings.ui.theme_mode
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to record applied GUI theme: %s",
+            esp_err_to_name(result)
+        );
     }
 
     ESP_LOGI(
@@ -311,6 +335,11 @@ static void gui_task(
             TAG,
             "Failed to initialize GUI screens: %s",
             esp_err_to_name(result)
+        );
+
+        atomic_store(
+            &s_started,
+            false
         );
 
         vTaskDelete(NULL);

@@ -76,6 +76,8 @@ static lv_obj_t *s_sd_logging_switch = NULL;
 static lv_obj_t *s_storage_info_label = NULL;
 
 static lv_obj_t *s_animations_switch = NULL;
+static lv_obj_t *s_theme_dropdown = NULL;
+static lv_obj_t *s_restart_required_label = NULL;
 
 static lv_obj_t *s_wifi_enabled_switch = NULL;
 static lv_obj_t *s_wifi_info_label = NULL;
@@ -233,6 +235,8 @@ static void settings_screen_delete_event_cb(
     s_sd_logging_switch = NULL;
     s_storage_info_label = NULL;
     s_animations_switch = NULL;
+    s_theme_dropdown = NULL;
+    s_restart_required_label = NULL;
     s_wifi_enabled_switch = NULL;
     s_wifi_info_label = NULL;
     s_wifi_scan_button = NULL;
@@ -1033,6 +1037,47 @@ static void settings_screen_format_size(
     }
 }
 
+static void settings_screen_refresh_restart_required(void)
+{
+    if (s_restart_required_label == NULL) {
+        return;
+    }
+
+    bool restart_required = false;
+
+    const esp_err_t result =
+        settings_service_get_restart_required(
+            &restart_required
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGD(
+            TAG,
+            "Failed to get restart-required state: %s",
+            esp_err_to_name(result)
+        );
+
+        lv_obj_add_flag(
+            s_restart_required_label,
+            LV_OBJ_FLAG_HIDDEN
+        );
+
+        return;
+    }
+
+    if (restart_required) {
+        lv_obj_remove_flag(
+            s_restart_required_label,
+            LV_OBJ_FLAG_HIDDEN
+        );
+    } else {
+        lv_obj_add_flag(
+            s_restart_required_label,
+            LV_OBJ_FLAG_HIDDEN
+        );
+    }
+}
+
 static esp_err_t settings_screen_refresh(void)
 {
     app_settings_t settings;
@@ -1079,6 +1124,18 @@ static esp_err_t settings_screen_refresh(void)
         s_animations_switch,
         settings.ui.animations_enabled
     );
+
+    if (s_theme_dropdown != NULL) {
+        lv_dropdown_set_selected(
+            s_theme_dropdown,
+            settings.ui.theme_mode ==
+                UI_THEME_MODE_DARK
+                    ? 1U
+                    : 0U
+        );
+    }
+
+    settings_screen_refresh_restart_required();
 
     settings_screen_refresh_wifi_info(
         &settings
@@ -1529,6 +1586,56 @@ static void animations_switch_event_cb(
 
         (void)settings_screen_refresh();
     }
+}
+
+static void theme_dropdown_event_cb(
+    lv_event_t *event
+)
+{
+    if (s_updating_controls) {
+        return;
+    }
+
+    lv_obj_t *dropdown =
+        lv_event_get_target_obj(
+            event
+        );
+
+    if (dropdown == NULL) {
+        return;
+    }
+
+    const uint32_t selected =
+        lv_dropdown_get_selected(
+            dropdown
+        );
+
+    const ui_theme_mode_t theme_mode =
+        (selected == 1U)
+            ? UI_THEME_MODE_DARK
+            : UI_THEME_MODE_LIGHT;
+
+    const esp_err_t result =
+        settings_service_set_theme_mode(
+            theme_mode
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to select GUI theme: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)settings_screen_refresh();
+        return;
+    }
+
+    /*
+     * Selecting the currently applied theme again clears the pending
+     * restart state, so always query the settings service.
+     */
+    settings_screen_refresh_restart_required();
 }
 
 static esp_err_t wifi_credentials_submit_cb(
@@ -2251,6 +2358,163 @@ static lv_obj_t *settings_screen_create_switch_card(
     return switch_obj;
 }
 
+static esp_err_t settings_screen_create_theme_card(
+    lv_obj_t *parent
+)
+{
+    if (parent == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    lv_obj_t *card =
+        lv_obj_create(
+            parent
+        );
+
+    if (card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        card,
+        LV_PCT(100),
+        SETTINGS_ROW_CARD_HEIGHT
+    );
+
+    settings_screen_style_card(
+        card
+    );
+
+    lv_obj_t *label =
+        lv_label_create(
+            card
+        );
+
+    if (label == NULL) {
+        lv_obj_delete(card);
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_label_set_text(
+        label,
+        "Color theme"
+    );
+
+    lv_obj_add_style(
+        label,
+        gui_styles_text_small(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_align(
+        label,
+        LV_ALIGN_TOP_LEFT,
+        0,
+        0
+    );
+
+    s_restart_required_label =
+        lv_label_create(
+            card
+        );
+
+    if (s_restart_required_label == NULL) {
+        lv_obj_delete(card);
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_label_set_text(
+        s_restart_required_label,
+        "Restart required"
+    );
+
+    lv_obj_add_style(
+        s_restart_required_label,
+        gui_styles_text_small(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        s_restart_required_label,
+        theme->colors.warning,
+        LV_PART_MAIN
+    );
+
+    lv_obj_align(
+        s_restart_required_label,
+        LV_ALIGN_BOTTOM_LEFT,
+        0,
+        0
+    );
+
+    lv_obj_add_flag(
+        s_restart_required_label,
+        LV_OBJ_FLAG_HIDDEN
+    );
+
+    s_theme_dropdown =
+        lv_dropdown_create(
+            card
+        );
+
+    if (s_theme_dropdown == NULL) {
+        lv_obj_delete(card);
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_dropdown_set_options(
+        s_theme_dropdown,
+        "Light\nDark"
+    );
+
+    lv_dropdown_set_symbol(
+        s_theme_dropdown,
+        LV_SYMBOL_DOWN
+    );
+
+    lv_obj_set_size(
+        s_theme_dropdown,
+        120,
+        GUI_THEME_CONTROL_HEIGHT
+    );
+
+    lv_obj_add_style(
+        s_theme_dropdown,
+        gui_styles_input(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_add_style(
+        s_theme_dropdown,
+        gui_styles_input_focused(),
+        LV_PART_MAIN |
+        LV_STATE_FOCUSED
+    );
+
+    lv_obj_align(
+        s_theme_dropdown,
+        LV_ALIGN_RIGHT_MID,
+        0,
+        0
+    );
+
+    lv_obj_add_event_cb(
+        s_theme_dropdown,
+        theme_dropdown_event_cb,
+        LV_EVENT_VALUE_CHANGED,
+        NULL
+    );
+
+    return ESP_OK;
+}
+
 static esp_err_t settings_screen_create_general_tab(
     lv_obj_t *tab
 )
@@ -2448,6 +2712,15 @@ static esp_err_t settings_screen_create_general_tab(
 
     if (s_animations_switch == NULL) {
         return ESP_ERR_NO_MEM;
+    }
+
+    const esp_err_t theme_result =
+        settings_screen_create_theme_card(
+            tab
+        );
+
+    if (theme_result != ESP_OK) {
+        return theme_result;
     }
 
     return ESP_OK;
@@ -3531,6 +3804,8 @@ lv_obj_t *settings_screen_create(void)
     s_sd_logging_switch = NULL;
     s_storage_info_label = NULL;
     s_animations_switch = NULL;
+    s_theme_dropdown = NULL;
+    s_restart_required_label = NULL;
     s_wifi_enabled_switch = NULL;
     s_wifi_info_label = NULL;
     s_wifi_scan_button = NULL;
@@ -3698,6 +3973,8 @@ void settings_screen_destroy(
     s_sd_logging_switch = NULL;
     s_storage_info_label = NULL;
     s_animations_switch = NULL;
+    s_theme_dropdown = NULL;
+    s_restart_required_label = NULL;
     s_wifi_enabled_switch = NULL;
     s_wifi_info_label = NULL;
     s_wifi_scan_button = NULL;

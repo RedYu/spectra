@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "cJSON.h"
 #include "esp_log.h"
@@ -16,6 +17,20 @@
 
 static const char *TAG =
     "web_settings_api";
+
+static const char *web_settings_api_theme_mode_to_string(
+    ui_theme_mode_t theme_mode
+)
+{
+    switch (theme_mode) {
+        case UI_THEME_MODE_DARK:
+            return "dark";
+
+        case UI_THEME_MODE_LIGHT:
+        default:
+            return "light";
+    }
+}
 
 static app_settings_t *web_settings_api_allocate_settings(void)
 {
@@ -320,6 +335,15 @@ static esp_err_t web_settings_api_get_handler(
             ui,
             "animations_enabled",
             settings->ui.animations_enabled
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddStringToObject(
+            ui,
+            "theme",
+            web_settings_api_theme_mode_to_string(
+                settings->ui.theme_mode
+            )
         ) != NULL);
 
     valid = valid &&
@@ -722,6 +746,53 @@ static esp_err_t web_settings_api_put_handler(
                     cJSON_IsTrue(
                         animations_enabled
                     )
+                );
+
+            if (result != ESP_OK) {
+                goto apply_failed;
+            }
+
+            applied = true;
+        }
+
+        const cJSON *theme =
+            cJSON_GetObjectItemCaseSensitive(
+                ui,
+                "theme"
+            );
+
+        if (theme != NULL) {
+            if (!cJSON_IsString(theme) ||
+                (theme->valuestring == NULL)) {
+
+                goto invalid_settings;
+            }
+
+            ui_theme_mode_t theme_mode;
+
+            if (strcmp(
+                    theme->valuestring,
+                    "light"
+                ) == 0) {
+
+                theme_mode =
+                    UI_THEME_MODE_LIGHT;
+
+            } else if (strcmp(
+                        theme->valuestring,
+                        "dark"
+                    ) == 0) {
+
+                theme_mode =
+                    UI_THEME_MODE_DARK;
+
+            } else {
+                goto invalid_settings;
+            }
+
+            result =
+                settings_service_set_theme_mode(
+                    theme_mode
                 );
 
             if (result != ESP_OK) {

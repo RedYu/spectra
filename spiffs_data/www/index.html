@@ -443,7 +443,7 @@
                         id="device-title"
                         class="brand-title"
                     >
-                        Spectra
+                        spectra
                     </div>
 
                     <div
@@ -1008,8 +1008,8 @@
         function updateSystem(system) {
             const title =
                 system.device_name
-                    ? `${system.device_id} (${system.device_name})`
-                    : system.device_id || "Spectra";
+                    ? `${system.device_id}`
+                    : system.device_id || "spectra";
 
             setText(
                 "device-title",
@@ -1019,7 +1019,7 @@
             setText(
                 "device-subtitle",
                 system.firmware_version
-                    ? `Firmware ${system.firmware_version}`
+                    ? `${system.device_name}`
                     : "CAN Analyzer"
             );
 

@@ -349,6 +349,24 @@ esp_err_t settings_service_set_theme_mode(
     ui_theme_mode_t theme_mode
 );
 
+/**
+ * @brief Record the GUI theme applied during application startup.
+ *
+ * Call this function only after the GUI theme has been initialized
+ * successfully. The stored value is used to determine whether changing
+ * the configured theme requires a device restart.
+ *
+ * @param[in] theme_mode Theme mode currently used by the GUI.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if theme_mode is
+ * invalid, ESP_ERR_INVALID_STATE if the service is not initialized,
+ * ESP_ERR_TIMEOUT if the service lock cannot be acquired, otherwise an
+ * ESP-IDF error code.
+ */
+esp_err_t settings_service_mark_theme_applied(
+    ui_theme_mode_t theme_mode
+);
+
 #ifdef __cplusplus
 }
 #endif

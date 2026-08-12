@@ -38,6 +38,9 @@ static const char *CONFIG_FILE_PATH_TMP =
 static bool s_initialized = false;
 static SemaphoreHandle_t s_mutex = NULL;
 
+static ui_theme_mode_t s_applied_theme_mode =
+    SETTINGS_UI_THEME_MODE_DEFAULT;
+
 /*
  * TODO:
  * Move internal-storage write, remove and rename operations to
@@ -2461,7 +2464,6 @@ esp_err_t settings_service_set_theme_mode(
     return result;
 }
 
-
 esp_err_t settings_service_apply(void)
 {
     const esp_err_t lock_result =
@@ -3185,6 +3187,10 @@ esp_err_t settings_service_get_restart_required(
         return result;
     }
 
+    const bool theme_restart_required =
+        settings.ui.theme_mode !=
+        s_applied_theme_mode;
+
     usb_network_service_info_t usb_info;
 
     result =
@@ -3192,15 +3198,21 @@ esp_err_t settings_service_get_restart_required(
             &usb_info
         );
 
+    bool usb_restart_required = false;
+
     if (result == ESP_OK) {
         const bool usb_active =
             usb_info.initialized &&
             usb_info.started;
 
-        *restart_required =
+        usb_restart_required =
             settings.usb_rndis.enabled !=
             usb_active;
     }
+
+    *restart_required =
+        usb_restart_required ||
+        theme_restart_required;
 
     settings_service_unlock();
 
@@ -3369,4 +3381,34 @@ esp_err_t settings_service_set_log_tag_levels(
     settings_service_unlock();
 
     return result;
+}
+
+esp_err_t settings_service_mark_theme_applied(
+    ui_theme_mode_t theme_mode
+)
+{
+    if ((theme_mode != UI_THEME_MODE_LIGHT) &&
+        (theme_mode != UI_THEME_MODE_DARK)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (!s_initialized) {
+        settings_service_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_applied_theme_mode =
+        theme_mode;
+
+    settings_service_unlock();
+
+    return ESP_OK;
 }

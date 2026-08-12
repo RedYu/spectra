@@ -242,6 +242,22 @@ lv_obj_t *splash_screen_create(void)
         SPLASH_LOGO_OFFSET_Y
     );
 
+    if ((theme != NULL) &&
+        (theme->mode == GUI_THEME_MODE_DARK)) {
+
+        lv_obj_set_style_image_recolor(
+            logo_image,
+            lv_color_white(),
+            LV_PART_MAIN
+        );
+
+        lv_obj_set_style_image_recolor_opa(
+            logo_image,
+            LV_OPA_COVER,
+            LV_PART_MAIN
+        );
+    }
+
     s_context.status_label =
         lv_label_create(screen);
 

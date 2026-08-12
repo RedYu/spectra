@@ -272,6 +272,68 @@
             cursor: not-allowed;
         }
 
+        .select-control {
+            position: relative;
+            width: 180px;
+            margin-left: auto;
+        }
+
+        .theme-select {
+            width: 100%;
+            min-height: 42px;
+            padding: 9px 42px 9px 14px;
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            outline: none;
+            appearance: none;
+            -webkit-appearance: none;
+            background: var(--input);
+            color: var(--text);
+            font: inherit;
+            font-size: 14px;
+            cursor: pointer;
+            transition:
+                border-color 150ms ease,
+                box-shadow 150ms ease,
+                background 150ms ease;
+        }
+
+        .theme-select:hover:not(:disabled) {
+            border-color: #3c4a5a;
+            background: var(--surface-hover);
+        }
+
+        .theme-select:focus {
+            border-color: var(--accent);
+            box-shadow:
+                0 0 0 3px rgba(59, 130, 246, 0.14);
+        }
+
+        .theme-select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .select-arrow {
+            position: absolute;
+            top: 50%;
+            right: 14px;
+            color: var(--muted);
+            font-size: 16px;
+            line-height: 1;
+            pointer-events: none;
+            transform: translateY(-55%);
+        }
+
+        .select-control:focus-within .select-arrow {
+            color: var(--accent);
+        }
+
+        .theme-select option {
+            background: var(--surface);
+            color: var(--text);
+        }
+
         .password-control {
             display: flex;
             gap: 8px;
@@ -608,6 +670,10 @@
         }
 
         @media (max-width: 700px) {
+            .select-control {
+                width: 100%;
+            }
+
             .header-content {
                 align-items: flex-start;
                 flex-direction: column;
@@ -676,14 +742,14 @@
                         id="device-title"
                         class="brand-title"
                     >
-                        Spectra
+                        spectra
                     </div>
 
                     <div
                         id="device-subtitle"
                         class="brand-subtitle"
                     >
-                        Device settings
+                        CAN Analyzer
                     </div>
                 </div>
             </div>
@@ -836,6 +902,39 @@
 
                             <span class="switch-slider"></span>
                         </label>
+                    </div>
+                </div>
+                
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Color theme
+                        </div>
+
+                        <div class="setting-description">
+                            The selected theme is applied after restarting the device
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <div class="select-control">
+                            <select
+                                id="theme"
+                                class="theme-select"
+                            >
+                                <option value="light">
+                                    Light
+                                </option>
+
+                                <option value="dark">
+                                    Dark
+                                </option>
+                            </select>
+
+                            <span class="select-arrow">
+                                ▾
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1349,6 +1448,9 @@
             animations:
                 document.getElementById("animations"),
 
+            theme:
+                document.getElementById("theme"),
+
             sdLogging:
                 document.getElementById("sd-logging"),
 
@@ -1444,6 +1546,12 @@
                 operationBusy;
 
             elements.save.disabled =
+                operationBusy;
+
+            elements.animations.disabled =
+                operationBusy;
+            
+            elements.theme.disabled =
                 operationBusy;
 
             elements.clearStaCredentials.disabled =
@@ -1926,6 +2034,11 @@
             elements.animations.checked =
                 ui.animations_enabled === true;
 
+            elements.theme.value =
+                ui.theme === "dark"
+                    ? "dark"
+                    : "light";
+
             elements.sdLogging.checked =
                 logging.sd_enabled === true;
 
@@ -2067,20 +2180,33 @@
         function createSettingsPayload() {
             const wifiSta = {
                 enabled:
-                    elements.wifiStaEnabled.checked,
-
-                ssid:
-                    elements.wifiStaSsid.value.trim()
+                    elements.wifiStaEnabled.checked
             };
 
+            const wifiStaSsid =
+                elements.wifiStaSsid.value.trim();
+
+            const wifiStaPassword =
+                elements.wifiStaPassword.value;
+
             if (elements.wifiStaOpen.checked) {
+                /*
+                 * An open network still requires both fields in the API request.
+                 */
+                wifiSta.ssid =
+                    wifiStaSsid;
+
                 wifiSta.password = "";
 
-            } else if (
-                elements.wifiStaPassword.value.length > 0
-            ) {
+            } else if (wifiStaPassword.length > 0) {
+                /*
+                 * Replace stored credentials only when a new password was entered.
+                 */
+                wifiSta.ssid =
+                    wifiStaSsid;
+
                 wifiSta.password =
-                    elements.wifiStaPassword.value;
+                    wifiStaPassword;
             }
 
             return {
@@ -2114,7 +2240,10 @@
 
                 ui: {
                     animations_enabled:
-                        elements.animations.checked
+                        elements.animations.checked,
+
+                    theme:
+                        elements.theme.value
                 },
 
                 network: {
