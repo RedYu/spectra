@@ -8,16 +8,13 @@
 
 #include "system_model.h"
 #include "storage_sd_service.h"
+#include "system_service.h"
 #include "web_api_common.h"
+
+#define WEB_SYSTEM_RESTART_DELAY_MS  (500U)
 
 static const char *TAG =
     "web_system_api";
-
-/*
- * TODO:
- * Stop returning the SoftAP password in the general settings response
- * after API authentication and device authorization are implemented.
- */
 
 static const char *web_system_api_reset_reason_name(
     esp_reset_reason_t reason
@@ -392,6 +389,51 @@ static esp_err_t web_system_api_get_handler(
     return result;
 }
 
+static esp_err_t web_system_api_restart_handler(
+    httpd_req_t *request
+)
+{
+    if (request == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t result =
+        system_service_schedule_restart(
+            WEB_SYSTEM_RESTART_DELAY_MS
+        );
+
+    if (result == ESP_ERR_INVALID_STATE) {
+        return web_api_send_message(
+            request,
+            "409 Conflict",
+            false,
+            "Restart is already scheduled"
+        );
+    }
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to schedule restart: %s",
+            esp_err_to_name(result)
+        );
+
+        return web_api_send_message(
+            request,
+            "500 Internal Server Error",
+            false,
+            "Failed to schedule restart"
+        );
+    }
+
+    return web_api_send_message(
+        request,
+        "202 Accepted",
+        true,
+        "Graceful restart scheduled"
+    );
+}
+
 esp_err_t web_system_api_register(
     httpd_handle_t server
 )
@@ -400,7 +442,7 @@ esp_err_t web_system_api_register(
         return ESP_ERR_INVALID_ARG;
     }
 
-    static const httpd_uri_t uri = {
+    static const httpd_uri_t system_get_uri = {
         .uri = "/api/system",
         .method = HTTP_GET,
         .handler =
@@ -408,10 +450,18 @@ esp_err_t web_system_api_register(
         .user_ctx = NULL,
     };
 
-    const esp_err_t result =
+    static const httpd_uri_t restart_post_uri = {
+        .uri = "/api/system/restart",
+        .method = HTTP_POST,
+        .handler =
+            web_system_api_restart_handler,
+        .user_ctx = NULL,
+    };
+
+    esp_err_t result =
         httpd_register_uri_handler(
             server,
-            &uri
+            &system_get_uri
         );
 
     if (result != ESP_OK) {
@@ -420,7 +470,34 @@ esp_err_t web_system_api_register(
             "Failed to register GET /api/system: %s",
             esp_err_to_name(result)
         );
+
+        return result;
     }
 
-    return result;
+    result =
+        httpd_register_uri_handler(
+            server,
+            &restart_post_uri
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to register POST /api/system/restart: %s",
+            esp_err_to_name(result)
+        );
+
+        /*
+         * Roll back the handler registered by this API module.
+         */
+        (void)httpd_unregister_uri_handler(
+            server,
+            "/api/system",
+            HTTP_GET
+        );
+
+        return result;
+    }
+
+    return ESP_OK;
 }

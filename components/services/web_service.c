@@ -12,6 +12,8 @@
 #include "web_files_api.h"
 #include "web_network_api.h"
 
+#define WEB_SERVICE_MAX_URI_HANDLERS  (32U)
+
 static const char *TAG = "web_service";
 
 static httpd_handle_t s_server = NULL;
@@ -27,7 +29,7 @@ esp_err_t web_service_start(void)
 
     config.server_port = 80U;
     config.ctrl_port = 32768U;
-    config.max_uri_handlers = 16U;
+    config.max_uri_handlers = WEB_SERVICE_MAX_URI_HANDLERS;
     config.stack_size = 6144U;
     config.max_open_sockets = 3U;
     config.backlog_conn = 2U;

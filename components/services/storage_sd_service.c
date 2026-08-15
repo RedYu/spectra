@@ -31,6 +31,7 @@ static storage_sd_state_t s_state =
 
 static SemaphoreHandle_t s_mutex = NULL;
 static bool s_started = false;
+static bool s_shutdown_requested = false;
 
 static size_t s_open_file_count = 0U;
 
@@ -193,6 +194,15 @@ static esp_err_t storage_sd_service_stat_path(
 static esp_err_t storage_sd_service_validate_state_locked(void)
 {
     if (!s_started) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (s_shutdown_requested) {
+        ESP_LOGW(
+            TAG,
+            "SD operation rejected during shutdown"
+        );
+
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1556,6 +1566,12 @@ esp_err_t storage_sd_service_mount(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (s_shutdown_requested) {
+        storage_sd_service_mutex_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
     const esp_err_t result =
         sd_card_driver_mount();
 
@@ -1617,7 +1633,11 @@ esp_err_t storage_sd_service_unmount(void)
         return state_result;
     }
 
-    (void)current_state;
+    if (current_state !=
+        STORAGE_SD_STATE_MOUNTED) {
+
+        return ESP_OK;
+    }
 
     /*
      * Logging service may call storage_sd_service_flush/close,
@@ -1678,6 +1698,50 @@ esp_err_t storage_sd_service_unmount(void)
     return result;
 }
 
+esp_err_t storage_sd_service_prepare_shutdown(void)
+{
+    /*
+     * Logging must flush and close its file while regular SD operations
+     * are still accepted. Repeated preparation calls are harmless.
+     */
+    const esp_err_t logging_result =
+        logging_service_prepare_shutdown();
+
+    if (logging_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to prepare SD logging for shutdown: %s",
+            esp_err_to_name(logging_result)
+        );
+
+        return logging_result;
+    }
+
+    const esp_err_t lock_result =
+        storage_sd_service_mutex_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (!s_started) {
+        storage_sd_service_mutex_unlock();
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /*
+     * All subsequent open, read, write, seek, flush, directory and
+     * filesystem operations are rejected. close() remains available
+     * for handles opened before this point.
+     */
+    s_shutdown_requested = true;
+
+    storage_sd_service_mutex_unlock();
+
+    return storage_sd_service_unmount();
+}
+
 esp_err_t storage_sd_service_start(void)
 {
     if (s_mutex == NULL) {
@@ -1708,6 +1772,7 @@ esp_err_t storage_sd_service_start(void)
         return init_result;
     }
 
+    s_shutdown_requested = false;
     s_started = true;
 
     storage_sd_service_mutex_unlock();

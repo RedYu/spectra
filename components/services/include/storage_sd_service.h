@@ -259,6 +259,25 @@ esp_err_t storage_sd_service_get_info(
     storage_sd_info_t *info
 );
 
+/**
+ * @brief Prepare the SD-card service for device shutdown.
+ *
+ * Stops service-owned file users, blocks new filesystem operations
+ * and unmounts the SD-card filesystem.
+ *
+ * Previously opened external file handles must be closed before this
+ * function is called. Closing an existing handle remains allowed while
+ * shutdown preparation is in progress.
+ *
+ * After successful preparation, the service cannot be mounted or used
+ * again until the device restarts.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not started or external files remain open, ESP_ERR_TIMEOUT if a
+ * required lock cannot be acquired, otherwise an ESP-IDF error code.
+ */
+esp_err_t storage_sd_service_prepare_shutdown(void);
+
 #ifdef __cplusplus
 }
 #endif

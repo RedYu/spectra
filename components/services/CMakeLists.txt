@@ -16,6 +16,7 @@ idf_component_register(
         "mdns_service.c"
         "power_service.c"
         "web_content_service.c"
+        "shutdown_service.c"
 
         "web_api/web_api_common.c"
         "web_api/web_system_api.c"

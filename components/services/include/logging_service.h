@@ -25,11 +25,13 @@ esp_err_t logging_service_init(void);
  * @brief Enable log recording to the SD card.
  *
  * The SD card must already be mounted. The log file is opened in append
- * mode, preserving existing contents.
+ * mode, preserving existing contents. File logging cannot be enabled
+ * after shutdown preparation has started.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
- * not initialized, file logging is already enabled, or the SD card is
- * not mounted, otherwise an ESP-IDF error code.
+ * not initialized, file logging is already enabled, shutdown
+ * preparation has started, or the SD card is not mounted, otherwise an
+ * ESP-IDF error code.
  */
 esp_err_t logging_service_enable_file(void);
 
@@ -115,6 +117,21 @@ esp_err_t logging_service_set_tag_levels(
     const char *debug_tags,
     const char *disabled_tags
 );
+
+/**
+ * @brief Prepare the logging service for device shutdown.
+ *
+ * New file-log messages and attempts to reopen the log file are
+ * rejected. Previously queued messages are written before the file is
+ * flushed and closed.
+ *
+ * UART logging remains available until the device restarts. Repeated
+ * calls are accepted and keep file logging disabled.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not initialized, otherwise an ESP-IDF error code.
+ */
+esp_err_t logging_service_prepare_shutdown(void);
 
 #ifdef __cplusplus
 }

@@ -1874,8 +1874,8 @@ esp_err_t wifi_service_stop(void)
     wifi_service_scan_unlock();
 
     /*
-     * Prevent the disconnect event from starting a new connection
-     * while the driver is being stopped intentionally.
+     * Prevent disconnect events from scheduling another Station
+     * connection while Wi-Fi is being stopped intentionally.
      */
     const bool reconnect_was_allowed =
         atomic_exchange(
@@ -1885,6 +1885,62 @@ esp_err_t wifi_service_stop(void)
 
     wifi_service_cancel_reconnect();
 
+    esp_err_t disconnect_result = ESP_OK;
+
+    /*
+     * Explicitly deauthenticate all SoftAP clients before stopping the
+     * driver. AID 0 selects every associated station.
+     */
+    if (atomic_load(&s_ap_enabled)) {
+        const esp_err_t ap_result =
+            esp_wifi_deauth_sta(
+                0U
+            );
+
+        if ((ap_result != ESP_OK) &&
+            (ap_result != ESP_ERR_WIFI_NOT_STARTED)) {
+
+            ESP_LOGW(
+                TAG,
+                "Failed to disconnect SoftAP clients: %s",
+                esp_err_to_name(ap_result)
+            );
+
+            disconnect_result =
+                ap_result;
+        }
+    }
+
+    /*
+     * Disconnect the Station interface from the external access point.
+     */
+    if (atomic_load(&s_sta_enabled) &&
+        atomic_load(&s_sta_connected)) {
+
+        const esp_err_t sta_result =
+            esp_wifi_disconnect();
+
+        if ((sta_result != ESP_OK) &&
+            (sta_result != ESP_ERR_WIFI_NOT_STARTED)) {
+
+            ESP_LOGW(
+                TAG,
+                "Failed to disconnect Station interface: %s",
+                esp_err_to_name(sta_result)
+            );
+
+            if (disconnect_result == ESP_OK) {
+                disconnect_result =
+                    sta_result;
+            }
+        }
+    }
+
+    /*
+     * esp_wifi_stop() completes shutdown of every interface in APSTA,
+     * AP or STA mode. Continue even if an explicit disconnect above
+     * failed because stopping the driver is the important final action.
+     */
     result =
         esp_wifi_stop();
 
@@ -1893,6 +1949,22 @@ esp_err_t wifi_service_stop(void)
             &s_reconnect_allowed,
             reconnect_was_allowed
         );
+
+        if (reconnect_was_allowed &&
+            atomic_load(&s_sta_enabled)) {
+
+            const esp_err_t reconnect_result =
+                wifi_service_schedule_reconnect();
+
+            if (reconnect_result != ESP_OK) {
+                ESP_LOGW(
+                    TAG,
+                    "Failed to restore Station reconnect after "
+                    "Wi-Fi stop failure: %s",
+                    esp_err_to_name(reconnect_result)
+                );
+            }
+        }
 
         wifi_service_unlock();
 
@@ -1905,6 +1977,14 @@ esp_err_t wifi_service_stop(void)
     );
 
     s_started = false;
+
+    if (disconnect_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Wi-Fi stopped after a disconnect warning: %s",
+            esp_err_to_name(disconnect_result)
+        );
+    }
 
     ESP_LOGI(
         TAG,

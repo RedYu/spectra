@@ -3,9 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdatomic.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "esp_system.h"
@@ -25,14 +23,13 @@
 #include "app_config.h"
 #include "board_config.h"
 #include "system_model.h"
+#include "shutdown_service.h"
 
 #define SYSTEM_TASK_STACK_SIZE      (3072U)
 #define SYSTEM_TASK_PRIORITY        (2U)
 #define SYSTEM_UPDATE_INTERVAL_MS   (1000U)
 #define SYSTEM_TASK_STATUS_EXTRA_COUNT  (4U)
 
-#define SYSTEM_RESTART_TASK_STACK_SIZE  (2048U)
-#define SYSTEM_RESTART_TASK_PRIORITY    (3U)
 #define SYSTEM_RESTART_DELAY_MAX_MS     (60000U)
 
 #define SYSTEM_TEMPERATURE_MIN_C             (10)
@@ -54,9 +51,6 @@ static temperature_sensor_handle_t
     s_temperature_sensor = NULL;
 
 static uint32_t s_temperature_update_counter = 0U;
-
-static atomic_bool s_restart_scheduled =
-    ATOMIC_VAR_INIT(false);
 
 #if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
 
@@ -298,7 +292,9 @@ static uint8_t system_service_get_cpu_usage(void)
     if ((received_task_count == 0U) ||
         (total_run_time == 0U)) {
 
-        free(task_status);
+        heap_caps_free(
+            task_status
+        );
         return 0U;
     }
 
@@ -364,7 +360,9 @@ static uint8_t system_service_get_cpu_usage(void)
         }
     }
 
-    free(task_status);
+    heap_caps_free(
+        task_status
+    );
 
     for (UBaseType_t core = 0U;
          core < CONFIG_FREERTOS_NUMBER_OF_CORES;
@@ -538,47 +536,6 @@ static esp_err_t system_service_update_runtime(void)
     }
 
     return ESP_OK;
-}
-
-static void system_service_restart_task(
-    void *argument
-)
-{
-    const uint32_t delay_ms =
-        (uint32_t)(uintptr_t)argument;
-
-    if (delay_ms > 0U) {
-        vTaskDelay(
-            pdMS_TO_TICKS(
-                delay_ms
-            )
-        );
-    }
-
-    ESP_LOGW(
-        TAG,
-        "Restarting device"
-    );
-
-    /*
-     * Give the logging backend a short opportunity to transmit the
-     * final message before restarting.
-     */
-    vTaskDelay(
-        pdMS_TO_TICKS(50U)
-    );
-
-    esp_restart();
-
-    /*
-     * esp_restart() is not expected to return.
-     */
-    atomic_store(
-        &s_restart_scheduled,
-        false
-    );
-
-    vTaskDelete(NULL);
 }
 
 static void system_service_task(
@@ -858,21 +815,6 @@ void system_service_stop(void)
     );
 }
 
-/*
- * TODO:
- * Add a coordinated restart preparation phase. Before restarting, all
- * services that buffer persistent data should be asked to flush and
- * close their resources. This includes file logging, settings storage
- * and active SD-card operations.
- *
- * The restart task currently assumes that the caller has already saved
- * settings, flushed persistent logs and completed any HTTP response.
- *
- * Consider adding restart cancellation and status-query APIs if restart
- * scheduling later becomes accessible from multiple application
- * components.
- */
-
 esp_err_t system_service_schedule_restart(
     uint32_t delay_ms
 )
@@ -883,39 +825,24 @@ esp_err_t system_service_schedule_restart(
         return ESP_ERR_INVALID_ARG;
     }
 
-    bool expected = false;
-
-    if (!atomic_compare_exchange_strong(
-            &s_restart_scheduled,
-            &expected,
-            true
-        )) {
-
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    const BaseType_t task_result =
-        xTaskCreate(
-            system_service_restart_task,
-            "restart_task",
-            SYSTEM_RESTART_TASK_STACK_SIZE,
-            (void *)(uintptr_t)delay_ms,
-            SYSTEM_RESTART_TASK_PRIORITY,
-            NULL
+    const esp_err_t result =
+        shutdown_service_schedule_restart(
+            delay_ms
         );
 
-    if (task_result != pdPASS) {
-        atomic_store(
-            &s_restart_scheduled,
-            false
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to schedule graceful restart: %s",
+            esp_err_to_name(result)
         );
 
-        return ESP_ERR_NO_MEM;
+        return result;
     }
 
     ESP_LOGW(
         TAG,
-        "Device restart scheduled in %u ms",
+        "Graceful device restart scheduled in %u ms",
         (unsigned int)delay_ms
     );
 

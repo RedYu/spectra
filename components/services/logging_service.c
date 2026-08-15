@@ -31,6 +31,9 @@
 #define LOGGING_TAG_LIST_MAX_LENGTH        (256U)
 #define LOGGING_TAG_MAX_LENGTH             (64U)
 
+static const char *TAG =
+    "logging_service";
+
 typedef enum
 {
     LOGGING_QUEUE_ITEM_MESSAGE,
@@ -65,6 +68,9 @@ static atomic_bool s_file_open =
     ATOMIC_VAR_INIT(false);
 
 static atomic_bool s_accept_file_messages =
+    ATOMIC_VAR_INIT(false);
+
+static atomic_bool s_shutdown_requested =
     ATOMIC_VAR_INIT(false);
 
 static atomic_uint_fast32_t s_active_callbacks =
@@ -217,6 +223,11 @@ esp_err_t logging_service_init(void)
     );
 
     atomic_store(
+        &s_shutdown_requested,
+        false
+    );
+
+    atomic_store(
         &s_active_callbacks,
         0U
     );
@@ -253,7 +264,7 @@ esp_err_t logging_service_init(void)
             s_log_queue
         );
 
-        free(
+        heap_caps_free(
             s_tag_levels
         );
 
@@ -286,11 +297,21 @@ esp_err_t logging_service_enable_file(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (atomic_load(&s_shutdown_requested)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     const esp_err_t lock_result =
         logging_service_control_lock();
 
     if (lock_result != ESP_OK) {
         return lock_result;
+    }
+
+    if (atomic_load(&s_shutdown_requested)) {
+        logging_service_control_unlock();
+
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (atomic_load(&s_file_open)) {
@@ -366,6 +387,35 @@ esp_err_t logging_service_disable_file(void)
         );
 
     logging_service_control_unlock();
+
+    return result;
+}
+
+esp_err_t logging_service_prepare_shutdown(void)
+{
+    if (!atomic_load(&s_initialized)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /*
+     * Prevent settings callbacks or other tasks from reopening the log
+     * file while graceful shutdown is in progress.
+     */
+    atomic_store(
+        &s_shutdown_requested,
+        true
+    );
+
+    const esp_err_t result =
+        logging_service_disable_file();
+
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to close file logging during shutdown: %s",
+            esp_err_to_name(result)
+        );
+    }
 
     return result;
 }

@@ -22,6 +22,7 @@
 #include "usb_network_service.h"
 #include "storage_service.h"
 #include "storage_sd_service.h"
+#include "system_service.h"
 
 #include "widgets/toolbar.h"
 #include "widgets/wifi_credentials_dialog.h"
@@ -38,7 +39,7 @@
 #define CONTENT_ROW_PADDING \
     GUI_THEME_SPACE_MD
 
-#define BRIGHTNESS_CARD_HEIGHT          (110)
+#define BRIGHTNESS_CARD_HEIGHT          (82)
 #define SETTINGS_ROW_CARD_HEIGHT        (70)
 
 #define CARD_PADDING \
@@ -52,6 +53,8 @@
 #define WIFI_SCAN_NETWORK_MIN_WIDTH     (160)
 
 #define SETTINGS_STATUS_REFRESH_PERIOD_MS  (1000U)
+
+#define SETTINGS_SCREEN_RESTART_DELAY_MS  (500U)
 
 static const char *TAG = "settings_screen";
 
@@ -1514,6 +1517,95 @@ static void brightness_slider_event_cb(
     (void)settings_screen_refresh();
 }
 
+static void settings_screen_restart_event_cb(
+    lv_event_t *event
+)
+{
+    if (lv_event_get_code(event) !=
+        LV_EVENT_CLICKED) {
+
+        return;
+    }
+
+    lv_obj_t *button =
+        lv_event_get_target(event);
+
+    /*
+     * Prevent repeated presses while the restart is pending.
+     */
+    lv_obj_add_state(
+        button,
+        LV_STATE_DISABLED
+    );
+
+    const esp_err_t result =
+        system_service_schedule_restart(
+            SETTINGS_SCREEN_RESTART_DELAY_MS
+        );
+
+    if (result == ESP_OK) {
+        settings_screen_stop_status_refresh();
+
+        lv_obj_t *label =
+            lv_obj_get_child(
+                button,
+                0
+            );
+
+        if (label != NULL) {
+            lv_label_set_text(
+                label,
+                "Restarting..."
+            );
+        }
+
+        ESP_LOGI(
+            TAG,
+            "Graceful restart requested"
+        );
+
+        return;
+    }
+
+    if (result == ESP_ERR_INVALID_STATE) {
+        lv_obj_t *label =
+            lv_obj_get_child(
+                button,
+                0
+            );
+
+        if (label != NULL) {
+            lv_label_set_text(
+                label,
+                "Restart pending..."
+            );
+        }
+
+        settings_screen_stop_status_refresh();
+
+        ESP_LOGW(
+            TAG,
+            "Restart is already scheduled"
+        );
+
+        return;
+    }
+
+    /*
+     * Scheduling failed, so allow another attempt.
+     */
+    lv_obj_remove_state(
+        button,
+        LV_STATE_DISABLED
+    );
+
+    ESP_LOGE(
+        TAG,
+        "Failed to schedule restart: %s",
+        esp_err_to_name(result)
+    );
+}
+
 static void sd_logging_switch_event_cb(
     lv_event_t *event
 )
@@ -2273,6 +2365,80 @@ static void settings_screen_style_tab(
     );
 }
 
+static lv_obj_t *settings_screen_create_restart_button(
+    lv_obj_t *parent
+)
+{
+    if (parent == NULL) {
+        return NULL;
+    }
+
+    lv_obj_t *button =
+        lv_button_create(
+            parent
+        );
+
+    if (button == NULL) {
+        return NULL;
+    }
+
+    lv_obj_set_width(
+        button,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_height(
+        button,
+        GUI_THEME_CONTROL_HEIGHT
+    );
+
+    lv_obj_add_style(
+        button,
+        gui_styles_button_base(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_add_style(
+        button,
+        gui_styles_button_danger(),
+        LV_PART_MAIN |
+        LV_STATE_DEFAULT
+    );
+
+    lv_obj_add_style(
+        button,
+        gui_styles_button_disabled(),
+        LV_PART_MAIN |
+        LV_STATE_DISABLED
+    );
+
+    lv_obj_add_event_cb(
+        button,
+        settings_screen_restart_event_cb,
+        LV_EVENT_CLICKED,
+        NULL
+    );
+
+    lv_obj_t *label =
+        lv_label_create(
+            button
+        );
+
+    if (label == NULL) {
+        lv_obj_delete(button);
+        return NULL;
+    }
+
+    lv_label_set_text(
+        label,
+        "Restart device"
+    );
+
+    lv_obj_center(label);
+
+    return button;
+}
+
 static lv_obj_t *settings_screen_create_switch_card(
     lv_obj_t *parent,
     const char *text,
@@ -2415,7 +2581,7 @@ static esp_err_t settings_screen_create_theme_card(
 
     lv_obj_align(
         label,
-        LV_ALIGN_TOP_LEFT,
+        LV_ALIGN_LEFT_MID,
         0,
         0
     );
@@ -2636,7 +2802,7 @@ static esp_err_t settings_screen_create_general_tab(
         s_brightness_slider,
         LV_ALIGN_BOTTOM_MID,
         0,
-        -6
+        0
     );
 
     lv_slider_set_range(
@@ -3532,6 +3698,15 @@ static esp_err_t settings_screen_create_system_tab(
         6,
         LV_PART_MAIN
     );
+
+    lv_obj_t *restart_button =
+        settings_screen_create_restart_button(
+            tab
+        );
+
+    if (restart_button == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
 
     return ESP_OK;
 }

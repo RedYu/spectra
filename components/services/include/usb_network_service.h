@@ -69,6 +69,21 @@ typedef struct
 esp_err_t usb_network_service_init(void);
 
 /**
+ * @brief Stop the USB RNDIS service.
+ *
+ * Stops the USB network interface and DHCP server, releases the
+ * ESP-NETIF instance and uninstalls the service-owned TinyUSB driver.
+ *
+ * This operation is intended for the final coordinated device-shutdown
+ * sequence. Starting the service again after it has been stopped is not
+ * currently supported without restarting the device.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not initialized, otherwise an ESP-IDF error code.
+ */
+esp_err_t usb_network_service_stop(void);
+
+/**
  * @brief Get current USB RNDIS interface information.
  *
  * @param[out] info Destination information structure.

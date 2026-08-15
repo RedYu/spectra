@@ -62,10 +62,10 @@ static const char *TAG = "usb_network_service";
 
 /*
  * TODO:
- * Protect s_initialized and s_usb_netif with a mutex or atomic state
- * before adding runtime USB RNDIS stop or deinitialization. The current
- * implementation is safe only because initialization occurs during
- * startup and these values are not modified afterward.
+ * Protect service state with a mutex before supporting arbitrary
+ * runtime stop/start operations. The current stop operation is intended
+ * for the final coordinated device-shutdown sequence, after web and
+ * other USB-network users have already stopped.
  */
 
 static esp_netif_t *s_usb_netif = NULL;
@@ -286,7 +286,7 @@ static void usb_network_free_rx_buffer(
 {
     (void)handle;
 
-    free(buffer);
+    heap_caps_free(buffer);
 }
 
 static esp_err_t usb_network_receive_callback(
@@ -786,6 +786,88 @@ esp_err_t usb_network_service_init(void)
     ESP_LOGI(
         TAG,
         "USB RNDIS service initialized"
+    );
+
+    return ESP_OK;
+}
+
+esp_err_t usb_network_service_stop(void)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Stopping USB RNDIS service"
+    );
+
+    /*
+     * Publish the stopped state before releasing resources so status
+     * readers do not report an active interface during shutdown.
+     */
+    s_initialized = false;
+
+    atomic_store(
+        &s_host_connected,
+        false
+    );
+
+    /*
+     * Detach the global pointer before stopping TinyUSB networking.
+     * New receive callbacks will reject packets while the network
+     * interface is being released.
+     *
+     * Runtime-safe synchronization with a callback already in progress
+     * remains a future improvement. The current stop operation is used
+     * only during the final coordinated device shutdown.
+     */
+    esp_netif_t *netif =
+        s_usb_netif;
+
+    s_usb_netif = NULL;
+
+    /*
+     * Stop TinyUSB network callbacks before destroying esp_netif.
+     */
+    tinyusb_net_deinit();
+
+    if (netif != NULL) {
+        /*
+         * This stops the interface and its DHCP server.
+         */
+        esp_netif_action_stop(
+            netif,
+            NULL,
+            0,
+            NULL
+        );
+
+        esp_netif_destroy(
+            netif
+        );
+    }
+
+    /*
+     * The TinyUSB driver is owned by this service and the current USB
+     * configuration contains only the RNDIS function.
+     */
+    const esp_err_t result =
+        tinyusb_driver_uninstall();
+
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to uninstall TinyUSB driver: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "USB RNDIS service stopped"
     );
 
     return ESP_OK;
