@@ -7,6 +7,7 @@ idf_component_register(
         "axp313a_driver.c"
         "battery_adc_driver.c"
         "buzzer_driver.c"
+        "can_twai_driver.c"
 
     INCLUDE_DIRS
         "include"
@@ -25,6 +26,7 @@ idf_component_register(
         esp_driver_spi
         esp_driver_i2c
         esp_driver_ledc
+        esp_driver_twai
         esp_timer
         esp_lcd_ili9488
         esp_adc

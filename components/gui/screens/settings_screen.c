@@ -24,6 +24,7 @@
 #include "storage_service.h"
 #include "storage_sd_service.h"
 #include "system_service.h"
+#include "can_service.h"
 
 #include "widgets/toolbar.h"
 #include "widgets/wifi_credentials_dialog.h"
@@ -107,6 +108,24 @@ static lv_obj_t *s_system_info_label = NULL;
 
 static bool s_updating_controls = false;
 
+static lv_obj_t *s_can_enabled_switch = NULL;
+static lv_obj_t *s_can_bitrate_dropdown = NULL;
+static lv_obj_t *s_can_listen_only_switch = NULL;
+static lv_obj_t *s_can_info_label = NULL;
+
+static const uint32_t s_can_bitrates[] = {
+    50000U,
+    100000U,
+    125000U,
+    250000U,
+    500000U,
+    800000U,
+    1000000U,
+};
+
+#define SETTINGS_CAN_BITRATE_COUNT \
+    (sizeof(s_can_bitrates) / sizeof(s_can_bitrates[0]))
+
 static void settings_screen_refresh_usb_rndis_info(
     const app_settings_t *settings
 );
@@ -148,6 +167,17 @@ static void settings_screen_refresh_storage_info(void);
 
 static void settings_screen_refresh_system_info(void);
 
+static esp_err_t settings_screen_refresh(void);
+
+static void settings_screen_refresh_can_info(
+    const app_settings_t *settings
+);
+
+static void settings_screen_set_switch_state(
+    lv_obj_t *switch_object,
+    bool checked
+);
+
 static void settings_screen_status_refresh_timer_cb(
     lv_timer_t *timer
 )
@@ -187,7 +217,227 @@ static void settings_screen_status_refresh_timer_cb(
 
     settings_screen_refresh_system_info();
 
+    settings_screen_refresh_can_info(
+        &settings
+    );
+
     s_updating_controls = false;
+}
+
+static uint16_t settings_screen_can_bitrate_to_index(
+    uint32_t bitrate
+)
+{
+    for (uint16_t index = 0U;
+         index < SETTINGS_CAN_BITRATE_COUNT;
+         ++index) {
+
+        if (s_can_bitrates[index] ==
+            bitrate) {
+
+            return index;
+        }
+    }
+
+    /*
+     * 500 kbit/s.
+     */
+    return 4U;
+}
+
+static void can_settings_event_cb(
+    lv_event_t *event
+)
+{
+    (void)event;
+
+    if (s_updating_controls ||
+        (s_can_enabled_switch == NULL) ||
+        (s_can_bitrate_dropdown == NULL) ||
+        (s_can_listen_only_switch == NULL)) {
+
+        return;
+    }
+
+    const uint16_t bitrate_index =
+        lv_dropdown_get_selected(
+            s_can_bitrate_dropdown
+        );
+
+    if (bitrate_index >=
+        SETTINGS_CAN_BITRATE_COUNT) {
+
+        (void)settings_screen_refresh();
+        return;
+    }
+
+    const bool enabled =
+        lv_obj_has_state(
+            s_can_enabled_switch,
+            LV_STATE_CHECKED
+        );
+
+    const bool listen_only =
+        lv_obj_has_state(
+            s_can_listen_only_switch,
+            LV_STATE_CHECKED
+        );
+
+    const esp_err_t result =
+        settings_service_set_can_primary(
+            enabled,
+            s_can_bitrates[bitrate_index],
+            listen_only
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply primary CAN settings: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)settings_screen_refresh();
+        return;
+    }
+
+    (void)settings_screen_refresh();
+}
+
+static const char *settings_screen_can_state_to_string(
+    can_twai_state_t state
+)
+{
+    switch (state) {
+        case CAN_TWAI_STATE_STOPPED:
+            return "Stopped";
+
+        case CAN_TWAI_STATE_ERROR_ACTIVE:
+            return "Active";
+
+        case CAN_TWAI_STATE_ERROR_WARNING:
+            return "Warning";
+
+        case CAN_TWAI_STATE_ERROR_PASSIVE:
+            return "Error passive";
+
+        case CAN_TWAI_STATE_BUS_OFF:
+            return "Bus off";
+
+        case CAN_TWAI_STATE_RECOVERING:
+            return "Recovering";
+
+        case CAN_TWAI_STATE_UNKNOWN:
+        default:
+            return "Unknown";
+    }
+}
+
+static void settings_screen_refresh_can_info(
+    const app_settings_t *settings
+)
+{
+    if (settings == NULL) {
+        return;
+    }
+
+    settings_screen_set_switch_state(
+        s_can_enabled_switch,
+        settings->can_primary.enabled
+    );
+
+    settings_screen_set_switch_state(
+        s_can_listen_only_switch,
+        settings->can_primary.listen_only
+    );
+
+    if (s_can_bitrate_dropdown != NULL) {
+        lv_dropdown_set_selected(
+            s_can_bitrate_dropdown,
+            settings_screen_can_bitrate_to_index(
+                settings->can_primary.bitrate
+            )
+        );
+    }
+
+    if (s_can_bitrate_dropdown != NULL) {
+        if (settings->can_primary.enabled) {
+            lv_obj_remove_state(
+                s_can_bitrate_dropdown,
+                LV_STATE_DISABLED
+            );
+        } else {
+            lv_obj_add_state(
+                s_can_bitrate_dropdown,
+                LV_STATE_DISABLED
+            );
+        }
+    }
+
+    if (s_can_listen_only_switch != NULL) {
+        if (settings->can_primary.enabled) {
+            lv_obj_remove_state(
+                s_can_listen_only_switch,
+                LV_STATE_DISABLED
+            );
+        } else {
+            lv_obj_add_state(
+                s_can_listen_only_switch,
+                LV_STATE_DISABLED
+            );
+        }
+    }
+
+    if (s_can_info_label == NULL) {
+        return;
+    }
+
+    if (!settings->can_primary.enabled) {
+        lv_label_set_text_fmt(
+            s_can_info_label,
+            "State: Disabled\n"
+            "Configured bitrate: %lu bit/s",
+            (unsigned long)settings->can_primary.bitrate
+        );
+
+        return;
+    }
+
+    can_twai_driver_info_t info;
+
+    const esp_err_t result =
+        can_service_get_info(
+            &info
+        );
+
+    if (result != ESP_OK) {
+        lv_label_set_text_fmt(
+            s_can_info_label,
+            "State: Unavailable\n"
+            "Error: %s",
+            esp_err_to_name(result)
+        );
+
+        return;
+    }
+
+    lv_label_set_text_fmt(
+        s_can_info_label,
+        "State: %s\n"
+        "Bitrate: %lu bit/s\n"
+        "RX: %lu   TX: %lu   Dropped: %lu\n"
+        "TEC: %u   REC: %u   Bus errors: %lu",
+        settings_screen_can_state_to_string(
+            info.state
+        ),
+        (unsigned long)info.bitrate,
+        (unsigned long)info.received_frames,
+        (unsigned long)info.transmitted_frames,
+        (unsigned long)info.dropped_rx_frames,
+        (unsigned int)info.transmit_error_count,
+        (unsigned int)info.receive_error_count,
+        (unsigned long)info.bus_error_count
+    );
 }
 
 static void settings_screen_start_status_refresh(void)
@@ -1158,6 +1408,10 @@ static esp_err_t settings_screen_refresh(void)
     settings_screen_refresh_storage_info();
 
     settings_screen_refresh_system_info();
+
+    settings_screen_refresh_can_info(
+        &settings
+    );
 
     s_updating_controls = false;
 
@@ -3465,6 +3719,182 @@ static esp_err_t settings_screen_create_wifi_tab(
     return ESP_OK;
 }
 
+static esp_err_t settings_screen_create_can_tab(
+    lv_obj_t *tab
+)
+{
+    if (tab == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    settings_screen_style_tab(
+        tab
+    );
+
+    s_can_enabled_switch =
+        settings_screen_create_switch_card(
+            tab,
+            "Primary CAN",
+            can_settings_event_cb
+        );
+
+    if (s_can_enabled_switch == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_t *bitrate_card =
+        lv_obj_create(tab);
+
+    if (bitrate_card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        bitrate_card,
+        LV_PCT(100),
+        SETTINGS_ROW_CARD_HEIGHT
+    );
+
+    settings_screen_style_card(
+        bitrate_card
+    );
+
+    lv_obj_t *bitrate_label =
+        lv_label_create(
+            bitrate_card
+        );
+
+    if (bitrate_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_label_set_text(
+        bitrate_label,
+        "Bitrate"
+    );
+
+    lv_obj_add_style(
+        bitrate_label,
+        gui_styles_text_small(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_align(
+        bitrate_label,
+        LV_ALIGN_LEFT_MID,
+        0,
+        0
+    );
+
+    s_can_bitrate_dropdown =
+        lv_dropdown_create(
+            bitrate_card
+        );
+
+    if (s_can_bitrate_dropdown == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_dropdown_set_options(
+        s_can_bitrate_dropdown,
+        "50 kbit/s\n"
+        "100 kbit/s\n"
+        "125 kbit/s\n"
+        "250 kbit/s\n"
+        "500 kbit/s\n"
+        "800 kbit/s\n"
+        "1 Mbit/s"
+    );
+
+    lv_obj_set_width(
+        s_can_bitrate_dropdown,
+        150
+    );
+
+    lv_obj_add_style(
+        s_can_bitrate_dropdown,
+        gui_styles_input(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_align(
+        s_can_bitrate_dropdown,
+        LV_ALIGN_RIGHT_MID,
+        0,
+        0
+    );
+
+    gui_feedback_attach(
+        s_can_bitrate_dropdown
+    );
+
+    lv_obj_add_event_cb(
+        s_can_bitrate_dropdown,
+        can_settings_event_cb,
+        LV_EVENT_VALUE_CHANGED,
+        NULL
+    );
+
+    s_can_listen_only_switch =
+        settings_screen_create_switch_card(
+            tab,
+            "Safe listen-only mode",
+            can_settings_event_cb
+        );
+
+    if (s_can_listen_only_switch == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_t *info_card =
+        lv_obj_create(tab);
+
+    if (info_card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        info_card,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_height(
+        info_card,
+        LV_SIZE_CONTENT
+    );
+
+    settings_screen_style_card(
+        info_card
+    );
+
+    s_can_info_label =
+        lv_label_create(
+            info_card
+        );
+
+    if (s_can_info_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        s_can_info_label,
+        LV_PCT(100)
+    );
+
+    lv_label_set_text(
+        s_can_info_label,
+        "State: Loading..."
+    );
+
+    lv_obj_add_style(
+        s_can_info_label,
+        gui_styles_text_small(),
+        LV_PART_MAIN
+    );
+
+    return ESP_OK;
+}
+
 static esp_err_t settings_screen_create_usb_tab(
     lv_obj_t *tab
 )
@@ -3900,6 +4330,12 @@ static esp_err_t settings_screen_create_tabs(
             "Wi-Fi"
         );
 
+    lv_obj_t *can_tab =
+        lv_tabview_add_tab(
+            s_tabview,
+            "CAN"
+        );
+
     lv_obj_t *usb_tab =
         lv_tabview_add_tab(
             s_tabview,
@@ -3920,6 +4356,7 @@ static esp_err_t settings_screen_create_tabs(
 
     if ((general_tab == NULL) ||
         (wifi_tab == NULL) ||
+        (can_tab == NULL) ||
         (usb_tab == NULL) ||
         (storage_tab == NULL) ||
         (system_tab == NULL)) {
@@ -3939,6 +4376,15 @@ static esp_err_t settings_screen_create_tabs(
     result =
         settings_screen_create_wifi_tab(
             wifi_tab
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        settings_screen_create_can_tab(
+            can_tab
         );
 
     if (result != ESP_OK) {
@@ -4010,6 +4456,10 @@ lv_obj_t *settings_screen_create(void)
     s_wifi_scan_results_displayed = false;
     s_wifi_sta_enabled_switch = NULL;
     s_wifi_sta_info_label = NULL;
+    s_can_enabled_switch = NULL;
+    s_can_bitrate_dropdown = NULL;
+    s_can_listen_only_switch = NULL;
+    s_can_info_label = NULL;
     s_usb_rndis_enabled_switch = NULL;
     s_usb_rndis_info_label = NULL;
     s_system_info_label = NULL;
@@ -4181,6 +4631,10 @@ void settings_screen_destroy(
     s_wifi_sta_info_label = NULL;
     s_usb_rndis_enabled_switch = NULL;
     s_usb_rndis_info_label = NULL;
+    s_can_enabled_switch = NULL;
+    s_can_bitrate_dropdown = NULL;
+    s_can_listen_only_switch = NULL;
+    s_can_info_label = NULL;
     s_system_info_label = NULL;
     s_updating_controls = false;
 

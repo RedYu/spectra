@@ -14,8 +14,9 @@ extern "C" {
 /**
  * @brief Initialize the settings service.
  *
- * Loads saved settings, applies default values when necessary and
- * updates the settings model.
+ * Loads saved settings, applies default values when necessary, updates
+ * the settings model and applies the resulting configuration to the
+ * application services.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if already
  * initialized, ESP_ERR_NO_MEM if the service mutex cannot be created,
@@ -25,11 +26,14 @@ extern "C" {
 esp_err_t settings_service_init(void);
 
 /**
- * @brief Reload settings from persistent storage.
+ * @brief Reload and apply settings from persistent storage.
  *
- * Replaces the current settings model with the stored settings.
- * Default settings are used when the configuration file is missing
- * or contains invalid data.
+ * Replaces the current settings model with the stored settings and
+ * applies them to the application services. Default settings are used
+ * when the configuration file is missing or contains invalid data.
+ *
+ * Reloading may temporarily interrupt services whose runtime
+ * configuration has changed.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
  * not initialized, ESP_ERR_TIMEOUT if a required lock cannot be
@@ -263,7 +267,7 @@ esp_err_t settings_service_save(void);
  * @brief Apply the current settings to application services.
  *
  * Applies display brightness, SD-card logging, per-tag logging levels,
- * GUI animations and the configured Wi-Fi SoftAP and Station states.
+ * GUI animations, Wi-Fi states and the primary CAN configuration.
  *
  * STA credentials are loaded separately from NVS and must match the
  * SSID and credential identifier stored in the settings model.
@@ -281,7 +285,8 @@ esp_err_t settings_service_apply(void);
  * @brief Check whether applying saved settings requires a restart.
  *
  * A restart is required when the requested USB RNDIS state differs
- * from the currently active USB configuration.
+ * from the active USB configuration or when the configured GUI theme
+ * differs from the currently applied theme.
  *
  * @param[out] restart_required Set to true when the device must be
  * restarted to apply all current settings.
@@ -365,6 +370,31 @@ esp_err_t settings_service_set_theme_mode(
  */
 esp_err_t settings_service_mark_theme_applied(
     ui_theme_mode_t theme_mode
+);
+
+/**
+ * @brief Configure and immediately apply the primary CAN interface.
+ *
+ * Enabling starts the CAN service. Disabling stops it. Changing the
+ * bitrate or operating mode recreates the TWAI controller without
+ * restarting the device.
+ *
+ * The settings are updated in memory but are not automatically saved;
+ * call settings_service_save() after this function succeeds.
+ *
+ * @param[in] enabled True to enable the primary CAN interface.
+ * @param[in] bitrate Classical CAN bitrate in bits per second.
+ * @param[in] listen_only True for passive monitoring.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if the configuration
+ * is invalid, ESP_ERR_INVALID_STATE if a required service is not
+ * initialized, ESP_ERR_TIMEOUT if a lock cannot be acquired, otherwise
+ * an ESP-IDF error code.
+ */
+esp_err_t settings_service_set_can_primary(
+    bool enabled,
+    uint32_t bitrate,
+    bool listen_only
 );
 
 #ifdef __cplusplus

@@ -29,6 +29,7 @@
 #include "mdns_service.h"
 #include "internet_service.h"
 #include "crash_dump_service.h"
+#include "can_service.h"
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
@@ -645,6 +646,30 @@ static void startup_task(
 
         vTaskDelete(NULL);
         return;
+    }
+
+    if (settings.can_primary.enabled) {
+        (void)gui_service_set_boot_progress(
+            70U,
+            can_service_is_running()
+                ? "Primary CAN ready"
+                : "Primary CAN unavailable"
+        );
+
+        if (!can_service_is_running()) {
+            startup_warning = true;
+
+            ESP_LOGW(
+                TAG,
+                "Primary CAN is enabled but not running"
+            );
+        }
+
+    } else {
+        (void)gui_service_set_boot_progress(
+            70U,
+            "Primary CAN disabled"
+        );
     }
 
     (void)gui_service_set_boot_progress(

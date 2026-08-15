@@ -61,6 +61,28 @@ extern "C" {
 #define SETTINGS_UI_THEME_MODE_DEFAULT \
     UI_THEME_MODE_LIGHT
 
+#define SETTINGS_CAN_PRIMARY_ENABLED_DEFAULT       (false)
+#define SETTINGS_CAN_PRIMARY_BITRATE_DEFAULT       (500000U)
+#define SETTINGS_CAN_PRIMARY_LISTEN_ONLY_DEFAULT   (true)
+
+/**
+ * @brief Primary Classical CAN interface settings.
+ *
+ * The bitrate is expressed in bits per second. Changes to enabled,
+ * bitrate and listen_only can be applied at runtime without restarting
+ * the device.
+ *
+ * Listen-only mode prevents transmission and acknowledgement and is
+ * recommended when connecting to an unknown vehicle CAN bus.
+ */
+typedef struct
+{
+    bool enabled;
+    uint32_t bitrate;
+    bool listen_only;
+
+} can_primary_settings_t;
+
 typedef struct
 {
     char target[SETTINGS_DEVICE_TARGET_MAX_LENGTH];
@@ -182,6 +204,8 @@ typedef struct
     wifi_ap_settings_t wifi_ap;
     wifi_sta_settings_t wifi_sta;
     usb_rndis_settings_t usb_rndis;
+
+    can_primary_settings_t can_primary;
 
 } app_settings_t;
 

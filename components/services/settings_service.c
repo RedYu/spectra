@@ -22,6 +22,7 @@
 #include "wifi_service.h"
 #include "wifi_credentials_service.h"
 #include "usb_network_service.h"
+#include "can_service.h"
 
 #define SETTINGS_JSON_INDENT_SPACES  (4U)
 
@@ -1098,6 +1099,65 @@ static esp_err_t parse_config(
     parsed_settings->usb_rndis.enabled =
         cJSON_IsTrue(usb_enabled);
 
+    const cJSON *can =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "can"
+        );
+
+    if (can != NULL) {
+        if (!cJSON_IsObject(can)) {
+            result = ESP_ERR_INVALID_RESPONSE;
+            goto cleanup;
+        }
+
+        const cJSON *primary =
+            cJSON_GetObjectItemCaseSensitive(
+                can,
+                "primary"
+            );
+
+        if (!cJSON_IsObject(primary)) {
+            result = ESP_ERR_INVALID_RESPONSE;
+            goto cleanup;
+        }
+
+        const cJSON *enabled =
+            cJSON_GetObjectItemCaseSensitive(
+                primary,
+                "enabled"
+            );
+
+        const cJSON *bitrate =
+            cJSON_GetObjectItemCaseSensitive(
+                primary,
+                "bitrate"
+            );
+
+        const cJSON *listen_only =
+            cJSON_GetObjectItemCaseSensitive(
+                primary,
+                "listen_only"
+            );
+
+        if (!cJSON_IsBool(enabled) ||
+            !cJSON_IsNumber(bitrate) ||
+            !cJSON_IsBool(listen_only)) {
+
+            result = ESP_ERR_INVALID_RESPONSE;
+            goto cleanup;
+        }
+
+        parsed_settings->can_primary.enabled =
+            cJSON_IsTrue(enabled);
+
+        parsed_settings->can_primary.bitrate =
+            (uint32_t)bitrate->valuedouble;
+
+        parsed_settings->can_primary.listen_only =
+            cJSON_IsTrue(listen_only);
+    }
+
     /*
      * All configuration values are valid.
      *
@@ -1393,6 +1453,45 @@ static cJSON *settings_service_create_json(
             "enabled",
             settings->usb_rndis.enabled
         ) == NULL) {
+
+        goto error;
+    }
+
+    cJSON *can =
+        cJSON_AddObjectToObject(
+            root,
+            "can"
+        );
+
+    if (can == NULL) {
+        goto error;
+    }
+
+    cJSON *primary =
+        cJSON_AddObjectToObject(
+            can,
+            "primary"
+        );
+
+    if (primary == NULL) {
+        goto error;
+    }
+
+    if ((cJSON_AddBoolToObject(
+            primary,
+            "enabled",
+            settings->can_primary.enabled
+        ) == NULL) ||
+        (cJSON_AddNumberToObject(
+            primary,
+            "bitrate",
+            settings->can_primary.bitrate
+        ) == NULL) ||
+        (cJSON_AddBoolToObject(
+            primary,
+            "listen_only",
+            settings->can_primary.listen_only
+        ) == NULL)) {
 
         goto error;
     }
@@ -2072,6 +2171,111 @@ static esp_err_t settings_service_apply_wifi_states(
     return ESP_OK;
 }
 
+static void settings_service_build_can_config(
+    const can_primary_settings_t *settings,
+    can_service_config_t *config
+)
+{
+    if ((settings == NULL) ||
+        (config == NULL)) {
+
+        return;
+    }
+
+    memset(
+        config,
+        0,
+        sizeof(*config)
+    );
+
+    config->driver.bitrate =
+        settings->bitrate;
+
+    config->driver.sample_point_permill =
+        800U;
+
+    config->driver.mode =
+        settings->listen_only
+            ? CAN_TWAI_MODE_LISTEN_ONLY
+            : CAN_TWAI_MODE_NORMAL;
+
+    config->driver.tx_queue_depth =
+        8U;
+
+    config->driver.rx_queue_length =
+        64U;
+
+    config->driver.transmit_retry_count =
+        3;
+}
+
+static esp_err_t settings_service_apply_can_primary(
+    const can_primary_settings_t *settings
+)
+{
+    if (settings == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!settings->enabled) {
+        if (!can_service_is_running()) {
+            return ESP_OK;
+        }
+
+        return can_service_stop();
+    }
+
+    can_service_config_t config;
+
+    settings_service_build_can_config(
+        settings,
+        &config
+    );
+
+    if (!can_service_is_running()) {
+        return can_service_start(
+            &config
+        );
+    }
+
+    can_twai_driver_info_t current_info;
+
+    const esp_err_t info_result =
+        can_service_get_info(
+            &current_info
+        );
+
+    if (info_result != ESP_OK) {
+        return info_result;
+    }
+
+    /*
+     * Do not interrupt CAN reception when the requested runtime
+     * configuration is already active.
+     */
+    if ((current_info.bitrate ==
+         config.driver.bitrate) &&
+        (current_info.sample_point_permill ==
+         config.driver.sample_point_permill) &&
+        (current_info.mode ==
+         config.driver.mode)) {
+
+        return ESP_OK;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Applying new primary CAN configuration: "
+        "bitrate=%lu, mode=%u",
+        (unsigned long)config.driver.bitrate,
+        (unsigned int)config.driver.mode
+    );
+
+    return can_service_reconfigure(
+        &config.driver
+    );
+}
+
 static esp_err_t settings_service_apply_internal(void)
 {
     app_settings_t *settings =
@@ -2186,6 +2390,21 @@ static esp_err_t settings_service_apply_internal(void)
         );
 
     if (result != ESP_OK) {
+        goto cleanup;
+    }
+
+    result =
+        settings_service_apply_can_primary(
+            &settings->can_primary
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply primary CAN settings: %s",
+            esp_err_to_name(result)
+        );
+
         goto cleanup;
     }
 
@@ -2309,6 +2528,18 @@ static esp_err_t settings_service_apply_internal(void)
         settings->usb_rndis.enabled
             ? "enabled"
             : "disabled"
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Primary CAN: enabled=%s, bitrate=%lu, mode=%s",
+        settings->can_primary.enabled
+            ? "true"
+            : "false",
+        (unsigned long)settings->can_primary.bitrate,
+        settings->can_primary.listen_only
+            ? "listen-only"
+            : "normal"
     );
 
     result = ESP_OK;
@@ -3412,3 +3643,105 @@ esp_err_t settings_service_mark_theme_applied(
 
     return ESP_OK;
 }
+
+esp_err_t settings_service_set_can_primary(
+    bool enabled,
+    uint32_t bitrate,
+    bool listen_only
+)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (!s_initialized) {
+        settings_service_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    app_settings_t previous;
+
+    esp_err_t result =
+        settings_model_get(
+            &previous
+        );
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+        return result;
+    }
+
+    if ((previous.can_primary.enabled ==
+        enabled) &&
+        (previous.can_primary.bitrate ==
+        bitrate) &&
+        (previous.can_primary.listen_only ==
+        listen_only)) {
+
+        settings_service_unlock();
+        return ESP_OK;
+    }
+
+    app_settings_t updated =
+        previous;
+
+    updated.can_primary.enabled =
+        enabled;
+
+    updated.can_primary.bitrate =
+        bitrate;
+
+    updated.can_primary.listen_only =
+        listen_only;
+
+    /*
+     * settings_model_set() performs bitrate and model validation.
+     */
+    result =
+        settings_model_set(
+            &updated
+        );
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+        return result;
+    }
+
+    result =
+        settings_service_apply_can_primary(
+            &updated.can_primary
+        );
+
+    if (result != ESP_OK) {
+        /*
+         * Restore both the settings model and runtime configuration.
+         */
+        (void)settings_model_set(
+            &previous
+        );
+
+        const esp_err_t rollback_result =
+            settings_service_apply_can_primary(
+                &previous.can_primary
+            );
+
+        if (rollback_result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to restore previous CAN settings: %s",
+                esp_err_to_name(rollback_result)
+            );
+        }
+
+        settings_service_unlock();
+        return result;
+    }
+
+    settings_service_unlock();
+
+    return ESP_OK;
+}
+

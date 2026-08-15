@@ -11,7 +11,7 @@
         "sd_enabled": true,
 
         "tag_levels": {
-            "warning": "tusb_desc,dns_redirect_server,wifi,wifi_init,esp-x509-crt-bundle",
+            "warning": "tusb_desc,dns_redirect_server,wifi,wifi_init,esp-x509-crt-bundle,can_twai_driver,can_service",
             "info": "",
             "debug": "",
             "disabled": "memory"
@@ -34,6 +34,13 @@
         },
         "usb_rndis": {
             "enabled": false
+        }
+    },
+    "can": {
+        "primary": {
+            "enabled": false,
+            "bitrate": 500000,
+            "listen_only": true
         }
     }
 }

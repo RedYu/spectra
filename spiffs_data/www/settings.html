@@ -1398,6 +1398,94 @@
                 </div>
             </div>
         </section>
+        <section class="card">
+            <header class="card-header">
+                <h2>Primary CAN</h2>
+
+                <p>
+                    Configure the ESP32-S3 Classical CAN interface
+                </p>
+            </header>
+
+            <div class="card-content">
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            CAN enabled
+                        </div>
+
+                        <div class="setting-description">
+                            Start the primary TWAI interface
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input
+                                id="can-primary-enabled"
+                                type="checkbox"
+                            >
+
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Bitrate
+                        </div>
+
+                        <div class="setting-description">
+                            Classical CAN bus speed
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <select
+                            id="can-primary-bitrate"
+                            class="theme-select"
+                        >
+                            <option value="50000">50 kbit/s</option>
+                            <option value="100000">100 kbit/s</option>
+                            <option value="125000">125 kbit/s</option>
+                            <option value="250000">250 kbit/s</option>
+                            <option value="500000">500 kbit/s</option>
+                            <option value="800000">800 kbit/s</option>
+                            <option value="1000000">1 Mbit/s</option>
+                        </select>
+
+                        <span class="select-arrow">
+                            ▾
+                        </span>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">
+                            Listen only
+                        </div>
+
+                        <div class="setting-description">
+                            Receive CAN frames without transmitting acknowledgements
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input
+                                id="can-primary-listen-only"
+                                type="checkbox"
+                            >
+
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </section>
     </main>
 
     <footer class="action-bar">
@@ -1544,6 +1632,21 @@
             usbRndisEnabled:
                 document.getElementById("usb-rndis-enabled"),
 
+            canPrimaryEnabled:
+                document.getElementById(
+                    "can-primary-enabled"
+                ),
+
+            canPrimaryBitrate:
+                document.getElementById(
+                    "can-primary-bitrate"
+                ),
+
+            canPrimaryListenOnly:
+                document.getElementById(
+                    "can-primary-listen-only"
+                ),
+
             restart:
                 document.getElementById("restart"),
 
@@ -1587,6 +1690,11 @@
             elements.scanWifi.disabled =
                 operationBusy ||
                 scanRunning;
+
+            elements.canPrimaryEnabled.disabled =
+                operationBusy;
+
+            updateCanControls();
         }
 
         function setBusy(busy) {
@@ -1629,6 +1737,18 @@
                 .getElementById("show-ap-password")
                 .disabled =
                     elements.wifiApPassword.disabled;
+        }
+
+        function updateCanControls() {
+            const disabled =
+                operationBusy ||
+                !elements.canPrimaryEnabled.checked;
+
+            elements.canPrimaryBitrate.disabled =
+                disabled;
+
+            elements.canPrimaryListenOnly.disabled =
+                disabled;
         }
 
         function updateStaControls() {
@@ -2030,6 +2150,12 @@
             const network =
                 settings.network || {};
 
+            const can =
+                settings.can || {};
+
+            const canPrimary =
+                can.primary || {};
+
             const wifiAp =
                 network.wifi_ap || {};
 
@@ -2125,6 +2251,17 @@
             elements.usbRndisEnabled.checked =
                 usbRndis.enabled === true;
 
+            elements.canPrimaryEnabled.checked =
+                canPrimary.enabled === true;
+
+            elements.canPrimaryBitrate.value =
+                String(
+                    canPrimary.bitrate ?? 500000
+                );
+
+            elements.canPrimaryListenOnly.checked =
+                canPrimary.listen_only !== false;
+
             elements.restartNotice.classList.toggle(
                 "visible",
                 settings.restart_required === true
@@ -2136,6 +2273,8 @@
 
             elements.clearStaCredentials.disabled =
                 !credentialsConfigured;
+
+            updateCanControls();
         }
 
         function validateSettings() {
@@ -2292,6 +2431,21 @@
                     usb_rndis: {
                         enabled:
                             elements.usbRndisEnabled.checked
+                    }
+                },
+
+                can: {
+                    primary: {
+                        enabled:
+                            elements.canPrimaryEnabled.checked,
+
+                        bitrate:
+                            Number(
+                                elements.canPrimaryBitrate.value
+                            ),
+
+                        listen_only:
+                            elements.canPrimaryListenOnly.checked
                     }
                 }
             };
@@ -2578,6 +2732,11 @@
 
                 updateStaControls();
             }
+        );
+
+        elements.canPrimaryEnabled.addEventListener(
+            "change",
+            updateCanControls
         );
 
         document

@@ -249,6 +249,20 @@ static esp_err_t web_settings_api_get_handler(
             )
             : NULL;
 
+    cJSON *can =
+        cJSON_AddObjectToObject(
+            response,
+            "can"
+        );
+
+    cJSON *can_primary =
+        can != NULL
+            ? cJSON_AddObjectToObject(
+                can,
+                "primary"
+            )
+            : NULL;
+
     bool valid =
         (device != NULL) &&
         (display != NULL) &&
@@ -258,7 +272,9 @@ static esp_err_t web_settings_api_get_handler(
         (network != NULL) &&
         (wifi_ap != NULL) &&
         (wifi_sta != NULL) &&
-        (usb_rndis != NULL);
+        (usb_rndis != NULL) &&
+        (can != NULL) &&
+        (can_primary != NULL);
 
     valid = valid &&
         (cJSON_AddNumberToObject(
@@ -404,6 +420,27 @@ static esp_err_t web_settings_api_get_handler(
             usb_rndis,
             "enabled",
             settings->usb_rndis.enabled
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            can_primary,
+            "enabled",
+            settings->can_primary.enabled
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddNumberToObject(
+            can_primary,
+            "bitrate",
+            settings->can_primary.bitrate
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            can_primary,
+            "listen_only",
+            settings->can_primary.listen_only
         ) != NULL);
 
     /*
@@ -1000,6 +1037,137 @@ static esp_err_t web_settings_api_put_handler(
         }
     }
 
+    const cJSON *can =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "can"
+        );
+
+    if (can != NULL) {
+        if (!cJSON_IsObject(can)) {
+            goto invalid_settings;
+        }
+
+        const cJSON *primary =
+            cJSON_GetObjectItemCaseSensitive(
+                can,
+                "primary"
+            );
+
+        if (primary != NULL) {
+            if (!cJSON_IsObject(primary)) {
+                goto invalid_settings;
+            }
+
+            const cJSON *enabled =
+                cJSON_GetObjectItemCaseSensitive(
+                    primary,
+                    "enabled"
+                );
+
+            const cJSON *bitrate =
+                cJSON_GetObjectItemCaseSensitive(
+                    primary,
+                    "bitrate"
+                );
+
+            const cJSON *listen_only =
+                cJSON_GetObjectItemCaseSensitive(
+                    primary,
+                    "listen_only"
+                );
+
+            if ((enabled == NULL) &&
+                (bitrate == NULL) &&
+                (listen_only == NULL)) {
+
+                goto invalid_settings;
+            }
+
+            if ((enabled != NULL) &&
+                !cJSON_IsBool(enabled)) {
+
+                goto invalid_settings;
+            }
+
+            if ((bitrate != NULL) &&
+                (!cJSON_IsNumber(bitrate) ||
+                 (bitrate->valuedouble < 0.0) ||
+                 (bitrate->valuedouble >
+                  (double)UINT32_MAX) ||
+                 (bitrate->valuedouble !=
+                  (double)bitrate->valueint))) {
+
+                goto invalid_settings;
+            }
+
+            if ((listen_only != NULL) &&
+                !cJSON_IsBool(listen_only)) {
+
+                goto invalid_settings;
+            }
+
+            /*
+            * Preserve CAN fields omitted from this partial request.
+            */
+            app_settings_t *current_settings =
+                web_settings_api_allocate_settings();
+
+            if (current_settings == NULL) {
+                result = ESP_ERR_NO_MEM;
+                goto apply_failed;
+            }
+
+            result =
+                settings_model_get(
+                    current_settings
+                );
+
+            if (result != ESP_OK) {
+                heap_caps_free(
+                    current_settings
+                );
+
+                goto apply_failed;
+            }
+
+            const bool requested_enabled =
+                enabled != NULL
+                    ? cJSON_IsTrue(enabled)
+                    : current_settings->
+                        can_primary.enabled;
+
+            const uint32_t requested_bitrate =
+                bitrate != NULL
+                    ? (uint32_t)bitrate->valuedouble
+                    : current_settings->
+                        can_primary.bitrate;
+
+            const bool requested_listen_only =
+                listen_only != NULL
+                    ? cJSON_IsTrue(listen_only)
+                    : current_settings->
+                        can_primary.listen_only;
+
+            heap_caps_free(
+                current_settings
+            );
+
+            result =
+                settings_service_set_can_primary(
+                    requested_enabled,
+                    requested_bitrate,
+                    requested_listen_only
+                );
+
+            if (result != ESP_OK) {
+                goto apply_failed;
+            }
+
+            applied = true;
+        }
+    }
+
     if (!applied) {
         goto invalid_settings;
     }
@@ -1268,6 +1436,8 @@ esp_err_t web_settings_api_register(
             "Failed to register POST /api/settings/save: %s",
             esp_err_to_name(result)
         );
+
+        return result;
     }
 
     result = httpd_register_uri_handler(

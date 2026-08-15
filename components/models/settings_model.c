@@ -12,6 +12,25 @@
 static app_settings_t s_settings;
 static SemaphoreHandle_t s_mutex = NULL;
 
+static bool settings_model_can_bitrate_valid(
+    uint32_t bitrate
+)
+{
+    switch (bitrate) {
+        case 50000U:
+        case 100000U:
+        case 125000U:
+        case 250000U:
+        case 500000U:
+        case 800000U:
+        case 1000000U:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
 static esp_err_t settings_model_validate(
     app_settings_t *settings
 )
@@ -175,6 +194,17 @@ static esp_err_t settings_model_validate(
         }
     }
 
+    /*
+     * Keep a valid bitrate even while CAN is disabled so the interface can
+     * be enabled later without requiring an additional configuration step.
+     */
+    if (!settings_model_can_bitrate_valid(
+            settings->can_primary.bitrate
+        )) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
     return ESP_OK;
 }
 
@@ -300,6 +330,15 @@ esp_err_t settings_model_set_defaults(
 
     settings->usb_rndis.enabled =
         SETTINGS_USB_RNDIS_ENABLED_DEFAULT;
+
+    settings->can_primary.enabled =
+        SETTINGS_CAN_PRIMARY_ENABLED_DEFAULT;
+
+    settings->can_primary.bitrate =
+        SETTINGS_CAN_PRIMARY_BITRATE_DEFAULT;
+
+    settings->can_primary.listen_only =
+        SETTINGS_CAN_PRIMARY_LISTEN_ONLY_DEFAULT;
 
     return ESP_OK;
 }

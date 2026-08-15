@@ -19,6 +19,7 @@ idf_component_register(
         "shutdown_service.c"
         "battery_service.c"
         "buzzer_service.c"
+        "can_service.c"
 
         "web_api/web_api_common.c"
         "web_api/web_system_api.c"

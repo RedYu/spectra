@@ -20,6 +20,7 @@
 #include "system_service.h"
 #include "battery_service.h"
 #include "buzzer_service.h"
+#include "can_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
 #define SHUTDOWN_SERVICE_TASK_PRIORITY    (5U)
@@ -70,8 +71,7 @@ static void shutdown_service_task(
     }
 
     /*
-     * Stop the buzzer after the asynchronous shutdown signal has had
-     * time to play while the other services were being terminated.
+     * Stop network consumers before shutting down the network interfaces.
      */
     internet_service_stop();
     mdns_service_stop();
@@ -91,6 +91,25 @@ static void shutdown_service_task(
             "Failed to stop web service: %s",
             esp_err_to_name(web_result)
         );
+    }
+
+    /*
+     * Stop CAN reception and abort pending transmissions after the web
+     * interface has stopped accepting CAN-related requests.
+     */
+    if (can_service_is_running()) {
+        const esp_err_t can_result =
+            can_service_stop();
+
+        if ((can_result != ESP_OK) &&
+            (can_result != ESP_ERR_INVALID_STATE)) {
+
+            ESP_LOGW(
+                TAG,
+                "Failed to stop primary CAN service: %s",
+                esp_err_to_name(can_result)
+            );
+        }
     }
 
     /*

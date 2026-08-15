@@ -18,6 +18,7 @@
 #include "screen_manager.h"
 #include "usb_network_service.h"
 #include "wifi_service.h"
+#include "can_service.h"
 
 #define MAIN_TOOLBAR_HEIGHT \
     GUI_THEME_TOOLBAR_HEIGHT
@@ -67,6 +68,9 @@ typedef struct
     lv_obj_t *capture_button;
     lv_obj_t *capture_button_label;
     lv_obj_t *monitor_button;
+
+    uint32_t can_previous_frame_count;
+    bool can_frame_counter_initialized;
 
     lv_timer_t *update_timer;
 
@@ -344,6 +348,211 @@ static esp_err_t main_screen_create_action_row(
     return ESP_OK;
 }
 
+static const char *main_screen_can_state_to_string(
+    can_twai_state_t state
+)
+{
+    switch (state) {
+        case CAN_TWAI_STATE_STOPPED:
+            return "Stopped";
+
+        case CAN_TWAI_STATE_ERROR_ACTIVE:
+            return "Active";
+
+        case CAN_TWAI_STATE_ERROR_WARNING:
+            return "Warning";
+
+        case CAN_TWAI_STATE_ERROR_PASSIVE:
+            return "Error passive";
+
+        case CAN_TWAI_STATE_BUS_OFF:
+            return "Bus off";
+
+        case CAN_TWAI_STATE_RECOVERING:
+            return "Recovering";
+
+        case CAN_TWAI_STATE_UNKNOWN:
+        default:
+            return "Unknown";
+    }
+}
+
+static const char *main_screen_can_mode_to_string(
+    can_twai_mode_t mode
+)
+{
+    switch (mode) {
+        case CAN_TWAI_MODE_NORMAL:
+            return "Normal";
+
+        case CAN_TWAI_MODE_LISTEN_ONLY:
+            return "Listen only";
+
+        case CAN_TWAI_MODE_SELF_TEST:
+            return "Self test";
+
+        default:
+            return "Unknown";
+    }
+}
+
+static void main_screen_update_primary_can(void)
+{
+    const size_t channel = 0U;
+
+    if ((s_context.can_state_label[channel] == NULL) ||
+        (s_context.can_bitrate_label[channel] == NULL) ||
+        (s_context.can_load_label[channel] == NULL) ||
+        (s_context.can_frames_label[channel] == NULL) ||
+        (s_context.can_errors_label[channel] == NULL)) {
+
+        return;
+    }
+
+    can_twai_driver_info_t info = {0};
+
+    if (!can_service_is_running() ||
+        (can_service_get_info(&info) != ESP_OK)) {
+
+        lv_label_set_text(
+            s_context.can_state_label[channel],
+            "State: Disabled"
+        );
+
+        lv_label_set_text(
+            s_context.can_bitrate_label[channel],
+            "Bitrate: N/A"
+        );
+
+        lv_label_set_text(
+            s_context.can_load_label[channel],
+            "Mode: N/A"
+        );
+
+        lv_label_set_text(
+            s_context.can_frames_label[channel],
+            "Frames/s: 0"
+        );
+
+        lv_label_set_text(
+            s_context.can_errors_label[channel],
+            "Errors: 0"
+        );
+
+        s_context.can_previous_frame_count = 0U;
+        s_context.can_frame_counter_initialized = false;
+
+        return;
+    }
+
+    lv_label_set_text_fmt(
+        s_context.can_state_label[channel],
+        "State: %s",
+        main_screen_can_state_to_string(
+            info.state
+        )
+    );
+
+    lv_label_set_text_fmt(
+        s_context.can_bitrate_label[channel],
+        "Bitrate: %lu kbit/s",
+        (unsigned long)(
+            info.bitrate / 1000U
+        )
+    );
+
+    lv_label_set_text_fmt(
+        s_context.can_load_label[channel],
+        "Mode: %s",
+        main_screen_can_mode_to_string(
+            info.mode
+        )
+    );
+
+    const uint32_t total_frames =
+        info.received_frames +
+        info.transmitted_frames;
+
+    uint32_t frames_per_second = 0U;
+
+    if (s_context.can_frame_counter_initialized) {
+        if (total_frames >=
+            s_context.can_previous_frame_count) {
+
+            frames_per_second =
+                total_frames -
+                s_context.can_previous_frame_count;
+        } else {
+            /*
+             * Counters were reset during CAN reconfiguration.
+             */
+            frames_per_second =
+                total_frames;
+        }
+    }
+
+    s_context.can_previous_frame_count =
+        total_frames;
+
+    s_context.can_frame_counter_initialized =
+        true;
+
+    lv_label_set_text_fmt(
+        s_context.can_frames_label[channel],
+        "Frames/s: %lu",
+        (unsigned long)frames_per_second
+    );
+
+    const uint32_t error_count =
+        info.dropped_rx_frames +
+        info.arbitration_lost_count +
+        info.bit_error_count +
+        info.form_error_count +
+        info.stuff_error_count +
+        info.bus_error_count +
+        info.acknowledgement_error_count;
+
+    lv_label_set_text_fmt(
+        s_context.can_errors_label[channel],
+        "Errors: %lu",
+        (unsigned long)error_count
+    );
+}
+
+static void main_screen_update_secondary_can(void)
+{
+    const size_t channel = 1U;
+
+    if (s_context.can_state_label[channel] == NULL) {
+        return;
+    }
+
+    lv_label_set_text(
+        s_context.can_state_label[channel],
+        "State: Not available"
+    );
+
+    lv_label_set_text(
+        s_context.can_bitrate_label[channel],
+        "Bitrate: CAN FD"
+    );
+
+    lv_label_set_text(
+        s_context.can_load_label[channel],
+        "Mode: MCP2518FD"
+    );
+
+    lv_label_set_text(
+        s_context.can_frames_label[channel],
+        "Frames/s: 0"
+    );
+
+    lv_label_set_text(
+        s_context.can_errors_label[channel],
+        "Errors: 0"
+    );
+}
+
 static void main_screen_update(void)
 {
     if (s_context.root == NULL) {
@@ -424,10 +633,8 @@ static void main_screen_update(void)
         );
     }
 
-    /*
-     * CAN and recording information will be updated here after the
-     * dashboard model is implemented.
-     */
+    main_screen_update_primary_can();
+    main_screen_update_secondary_can();
 }
 
 static void main_screen_update_timer_cb(
@@ -929,7 +1136,7 @@ static esp_err_t main_screen_create_can_row(
         main_screen_create_can_card(
             row,
             0U,
-            "CAN 1"
+            "Primary CAN"
         );
 
     if (result != ESP_OK) {
@@ -939,7 +1146,7 @@ static esp_err_t main_screen_create_can_row(
     return main_screen_create_can_card(
         row,
         1U,
-        "CAN 2"
+        "CAN FD"
     );
 }
 
