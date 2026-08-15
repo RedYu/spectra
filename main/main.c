@@ -15,6 +15,7 @@
 #include "system_service.h"
 #include "power_service.h"
 #include "battery_service.h"
+#include "buzzer_service.h"
 #include "storage_service.h"
 #include "storage_sd_service.h"
 #include "settings_model.h"
@@ -456,6 +457,16 @@ static void startup_task(
         startup_warning = true;
     }
 
+    result = start_service(
+        "Buzzer",
+        buzzer_service_start,
+        SERVICE_OPTIONAL
+    );
+
+    if (result != ESP_OK) {
+        startup_warning = true;
+    }
+
     result = network_service_init();
 
     if (result != ESP_OK) {
@@ -791,6 +802,23 @@ static void startup_task(
             TAG,
             "Application startup completed"
         );
+    }
+
+    if (buzzer_service_is_running()) {
+        const esp_err_t buzzer_result =
+            buzzer_service_play(
+                startup_warning
+                    ? BUZZER_SIGNAL_WARNING
+                    : BUZZER_SIGNAL_STARTUP
+            );
+
+        if (buzzer_result != ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Failed to queue startup buzzer signal: %s",
+                esp_err_to_name(buzzer_result)
+            );
+        }
     }
 
     vTaskDelete(NULL);

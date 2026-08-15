@@ -9,6 +9,7 @@
 #include "widgets/modal_dialog.h"
 #include "widgets/sd_card_modal.h"
 #include "assets/gui_images.h"
+#include "gui_feedback.h"
 #include "gui_styles.h"
 #include "gui_theme.h"
 
@@ -150,6 +151,10 @@ static lv_obj_t *main_screen_create_action_button(
     if (button == NULL) {
         return NULL;
     }
+
+    gui_feedback_attach(
+        button
+    );
 
     lv_obj_add_style(
         button,

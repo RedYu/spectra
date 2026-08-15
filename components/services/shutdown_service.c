@@ -19,6 +19,7 @@
 #include "wifi_service.h"
 #include "system_service.h"
 #include "battery_service.h"
+#include "buzzer_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
 #define SHUTDOWN_SERVICE_TASK_PRIORITY    (5U)
@@ -50,8 +51,27 @@ static void shutdown_service_task(
     );
 
     /*
-     * Stop network consumers before shutting down interfaces.
-     * internet_service_stop() must wait until its task terminates.
+     * Start the shutdown signal early. It plays asynchronously while
+     * the remaining application services are being stopped.
+     */
+    if (buzzer_service_is_running()) {
+        const esp_err_t buzzer_play_result =
+            buzzer_service_play(
+                BUZZER_SIGNAL_SHUTDOWN
+            );
+
+        if (buzzer_play_result != ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Failed to queue shutdown signal: %s",
+                esp_err_to_name(buzzer_play_result)
+            );
+        }
+    }
+
+    /*
+     * Stop the buzzer after the asynchronous shutdown signal has had
+     * time to play while the other services were being terminated.
      */
     internet_service_stop();
     mdns_service_stop();
@@ -124,6 +144,23 @@ static void shutdown_service_task(
             TAG,
             "Failed to stop battery service: %s",
             esp_err_to_name(battery_result)
+        );
+    }
+
+    /*
+     * Stop the buzzer after the asynchronous shutdown signal has had time
+     * to play while the other services were being terminated.
+     */
+    const esp_err_t buzzer_result =
+        buzzer_service_stop();
+
+    if ((buzzer_result != ESP_OK) &&
+        (buzzer_result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGW(
+            TAG,
+            "Failed to stop buzzer service: %s",
+            esp_err_to_name(buzzer_result)
         );
     }
 

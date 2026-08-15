@@ -63,9 +63,15 @@
 /*
  * Passive low-level-trigger buzzer.
  */
-#define BUZZER_PIN_SIGNAL             GPIO_NUM_8
-#define BUZZER_ACTIVE_LEVEL           (0)
-#define BUZZER_INACTIVE_LEVEL         (1)
+#define BUZZER_PIN_SIGNAL              GPIO_NUM_8
+#define BUZZER_ACTIVE_LEVEL            (0)
+#define BUZZER_INACTIVE_LEVEL          (1)
+#define BUZZER_LEDC_TIMER              LEDC_TIMER_1
+#define BUZZER_LEDC_CHANNEL            LEDC_CHANNEL_1
+#define BUZZER_LEDC_SPEED_MODE         LEDC_LOW_SPEED_MODE
+#define BUZZER_LEDC_DUTY_RESOLUTION    LEDC_TIMER_10_BIT
+#define BUZZER_LEDC_DUTY_50_PERCENT    (512U)
+#define BUZZER_DEFAULT_FREQUENCY_HZ    (2000U)
 
 /*
  * Battery-voltage measurement.

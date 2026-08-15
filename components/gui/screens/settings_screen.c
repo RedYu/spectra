@@ -12,6 +12,7 @@
 #include "assets/gui_images.h"
 #include "board_config.h"
 #include "gui_config.h"
+#include "gui_feedback.h"
 #include "gui_styles.h"
 #include "gui_theme.h"
 #include "screen_manager.h"
@@ -2382,6 +2383,10 @@ static lv_obj_t *settings_screen_create_restart_button(
         return NULL;
     }
 
+    gui_feedback_attach(
+        button
+    );
+
     lv_obj_set_width(
         button,
         LV_PCT(100)
@@ -2502,6 +2507,10 @@ static lv_obj_t *settings_screen_create_switch_card(
         lv_obj_delete(card);
         return NULL;
     }
+
+    gui_feedback_attach(
+        switch_obj
+    );
 
     settings_screen_style_switch(
         switch_obj
@@ -2634,6 +2643,10 @@ static esp_err_t settings_screen_create_theme_card(
         lv_obj_delete(card);
         return ESP_ERR_NO_MEM;
     }
+
+    gui_feedback_attach(
+        s_theme_dropdown
+    );
 
     lv_dropdown_set_options(
         s_theme_dropdown,
@@ -3186,6 +3199,10 @@ static esp_err_t settings_screen_create_wifi_tab(
     if (s_wifi_scan_button == NULL) {
         return ESP_ERR_NO_MEM;
     }
+
+    gui_feedback_attach(
+        s_wifi_scan_button
+    );
 
     lv_obj_add_style(
         s_wifi_scan_button,
@@ -3788,6 +3805,10 @@ static esp_err_t settings_screen_create_tabs(
         );
 
     if (tab_bar != NULL) {
+        gui_feedback_attach(
+            tab_bar
+        );
+
         lv_obj_add_style(
             tab_bar,
             gui_styles_text_small(),

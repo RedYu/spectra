@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "assets/gui_images.h"
+#include "gui_feedback.h"
 #include "gui_styles.h"
 #include "gui_theme.h"
 
@@ -195,6 +196,10 @@ static lv_obj_t *toolbar_button_create(
     );
 
     if (callback != NULL) {
+        gui_feedback_attach(
+            button
+        );
+
         lv_obj_add_event_cb(
             button,
             toolbar_button_event_cb,
@@ -320,6 +325,10 @@ static lv_obj_t *toolbar_text_button_create(
     );
 
     if (callback != NULL) {
+        gui_feedback_attach(
+            button
+        );
+
         lv_obj_add_event_cb(
             button,
             toolbar_button_event_cb,

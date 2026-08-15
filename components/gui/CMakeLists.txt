@@ -3,6 +3,7 @@ idf_component_register(
         "gui_theme.c"
         "gui_styles.c"
         "gui_config.c"
+        "gui_feedback.c"
         "screen_manager.c"
 
         "screens/splash_screen.c"
