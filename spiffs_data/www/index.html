@@ -298,6 +298,11 @@
             color: var(--success);
         }
 
+        .card-badge.danger {
+            background: rgba(240, 82, 82, 0.12);
+            color: var(--danger);
+        }
+
         .card-badge.warning {
             background: rgba(246, 173, 85, 0.12);
             color: var(--warning);
@@ -731,6 +736,16 @@
                     <div class="information-row">
                         <dt>Controller</dt>
                         <dd id="power-controller">-</dd>
+                    </div>
+
+                    <div class="information-row">
+                        <dt>Charger</dt>
+                        <dd id="power-charger">-</dd>
+                    </div>
+
+                    <div class="information-row">
+                        <dt>Battery</dt>
+                        <dd id="power-battery">-</dd>
                     </div>
 
                     <div class="information-row">
@@ -1297,7 +1312,125 @@
             );
         }
 
+        function updateBattery(battery) {
+            setText(
+                "power-charger",
+                battery.charger || "ETA6003"
+            );
+
+            const element =
+                document.getElementById(
+                    "power-battery"
+                );
+
+            if (element === null) {
+                return {
+                    low: false,
+                    critical: false
+                };
+            }
+
+            element.classList.remove(
+                "value-success",
+                "value-warning",
+                "value-danger"
+            );
+
+            if (battery.service_running !== true) {
+                setText(
+                    "power-battery",
+                    "Service unavailable"
+                );
+
+                return {
+                    low: false,
+                    critical: false
+                };
+            }
+
+            if (battery.measurement_valid !== true) {
+                setText(
+                    "power-battery",
+                    "Measuring"
+                );
+
+                return {
+                    low: false,
+                    critical: false
+                };
+            }
+
+            if (battery.present !== true) {
+                setText(
+                    "power-battery",
+                    "Not installed"
+                );
+
+                return {
+                    low: false,
+                    critical: false
+                };
+            }
+
+            const voltageMv =
+                Number(battery.voltage_mv);
+
+            const level =
+                Math.max(
+                    0,
+                    Math.min(
+                        100,
+                        Number(
+                            battery.level_percent
+                        ) || 0
+                    )
+                );
+
+            const voltageText =
+                Number.isFinite(voltageMv)
+                    ? `${(
+                        voltageMv / 1000
+                    ).toFixed(2)} V`
+                    : "-";
+
+            setText(
+                "power-battery",
+                `${level}% · ${voltageText}`
+            );
+
+            const critical =
+                level <= 10;
+
+            const low =
+                level <= 20;
+
+            element.classList.toggle(
+                "value-success",
+                !low
+            );
+
+            element.classList.toggle(
+                "value-warning",
+                low && !critical
+            );
+
+            element.classList.toggle(
+                "value-danger",
+                critical
+            );
+
+            return {
+                low,
+                critical
+            };
+        }
+
         function updatePower(power) {
+            const batteryState =
+                updateBattery(
+                    power.battery || {}
+                );
+
             const dcdc1 =
                 getPowerOutput(power, "dcdc1");
 
@@ -1383,7 +1516,8 @@
             const powerWarning =
                 temperatureIrq ||
                 dcdc2UndervoltageIrq ||
-                dcdc3UndervoltageIrq;
+                dcdc3UndervoltageIrq ||
+                batteryState.low;
 
             setText(
                 "power-temperature",
@@ -1410,12 +1544,16 @@
 
             setBadge(
                 "power-badge",
-                powerWarning
-                    ? "Warning"
-                    : "Normal",
-                powerWarning
-                    ? "warning"
-                    : "success"
+                batteryState.critical
+                    ? "Battery critical"
+                    : powerWarning
+                        ? "Warning"
+                        : "Normal",
+                batteryState.critical
+                    ? "danger"
+                    : powerWarning
+                        ? "warning"
+                        : "success"
             );
         }
 

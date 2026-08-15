@@ -39,3 +39,42 @@
 #define TOUCH_SWAP_XY   true
 #define TOUCH_MIRROR_X  false
 #define TOUCH_MIRROR_Y  false
+
+/*
+ * Primary Classical CAN interface using the ESP32-S3 TWAI
+ * controller and an external TCAN1042HGV transceiver.
+ */
+#define CAN_PRIMARY_PIN_TX            GPIO_NUM_5
+#define CAN_PRIMARY_PIN_RX            GPIO_NUM_6
+
+/*
+ * Secondary CAN FD interface using a dedicated SPI3 bus,
+ * MCP2518FD controller and TCAN1042HGV transceiver.
+ */
+#define CAN_FD_SPI_HOST               SPI3_HOST
+#define CAN_FD_SPI_CLOCK_HZ           (10 * 1000 * 1000)
+
+#define CAN_FD_PIN_MOSI               GPIO_NUM_11
+#define CAN_FD_PIN_MISO               GPIO_NUM_14
+#define CAN_FD_PIN_SCLK               GPIO_NUM_12
+#define CAN_FD_PIN_CS                 GPIO_NUM_10
+#define CAN_FD_PIN_INT                GPIO_NUM_7
+
+/*
+ * Passive low-level-trigger buzzer.
+ */
+#define BUZZER_PIN_SIGNAL             GPIO_NUM_8
+#define BUZZER_ACTIVE_LEVEL           (0)
+#define BUZZER_INACTIVE_LEVEL         (1)
+
+/*
+ * Battery-voltage measurement.
+ *
+ * GPIO4 corresponds to ADC1 channel 3 on ESP32-S3.
+ */
+#define BATTERY_PIN_VOLTAGE            GPIO_NUM_4
+
+#define BATTERY_DIVIDER_HIGH_OHM       (100000U)
+#define BATTERY_DIVIDER_LOW_OHM        (100000U)
+
+#define BATTERY_FILTER_CAPACITOR_NF    (100U)

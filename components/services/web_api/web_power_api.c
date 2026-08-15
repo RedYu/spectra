@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 
+#include "battery_service.h"
 #include "power_service.h"
 #include "web_api_common.h"
 
@@ -488,6 +489,66 @@ static bool web_power_api_add_raw_registers(
         ) != NULL);
 }
 
+static bool web_power_api_add_battery(
+    cJSON *response,
+    const battery_service_info_t *battery,
+    bool service_running
+)
+{
+    if ((response == NULL) ||
+        (battery == NULL)) {
+
+        return false;
+    }
+
+    cJSON *battery_json =
+        cJSON_AddObjectToObject(
+            response,
+            "battery"
+        );
+
+    if (battery_json == NULL) {
+        return false;
+    }
+
+    return
+        (cJSON_AddStringToObject(
+            battery_json,
+            "charger",
+            "ETA6003"
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            battery_json,
+            "service_running",
+            service_running
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            battery_json,
+            "measurement_valid",
+            battery->measurement_valid
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            battery_json,
+            "present",
+            battery->battery_present
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            battery_json,
+            "voltage_mv",
+            battery->voltage_mv
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            battery_json,
+            "level_percent",
+            battery->level_percent
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            battery_json,
+            "last_update_ms",
+            (double)battery->last_update_ms
+        ) != NULL);
+}
+
 static esp_err_t web_power_api_get_handler(
     httpd_req_t *request
 )
@@ -515,6 +576,26 @@ static esp_err_t web_power_api_get_handler(
             "503 Service Unavailable",
             false,
             "Power service is not available"
+        );
+    }
+
+    battery_service_info_t battery = {0};
+
+    const esp_err_t battery_result =
+        battery_service_get_info(
+            &battery
+        );
+
+    const bool battery_service_running =
+        battery_service_is_running();
+
+    if ((battery_result != ESP_OK) &&
+        (battery_result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGW(
+            TAG,
+            "Failed to get battery information: %s",
+            esp_err_to_name(battery_result)
         );
     }
 
@@ -586,6 +667,13 @@ static esp_err_t web_power_api_get_handler(
         web_power_api_add_wakeup(
             response,
             &power.configuration
+        );
+
+    valid = valid &&
+        web_power_api_add_battery(
+            response,
+            &battery,
+            battery_service_running
         );
 
     valid = valid &&

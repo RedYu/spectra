@@ -14,6 +14,7 @@
 #include "system_model.h"
 #include "system_service.h"
 #include "power_service.h"
+#include "battery_service.h"
 #include "storage_service.h"
 #include "storage_sd_service.h"
 #include "settings_model.h"
@@ -445,6 +446,16 @@ static void startup_task(
         return;
     }
 
+    result = start_service(
+        "Battery",
+        battery_service_start,
+        SERVICE_OPTIONAL
+    );
+
+    if (result != ESP_OK) {
+        startup_warning = true;
+    }
+
     result = network_service_init();
 
     if (result != ESP_OK) {
@@ -734,6 +745,27 @@ static void startup_task(
         (void)gui_service_set_boot_progress(
             97U,
             "Connectivity monitor ready"
+        );
+    }
+
+    battery_service_info_t battery_info;
+
+    const esp_err_t battery_info_result =
+        battery_service_get_info(
+            &battery_info
+        );
+
+    if ((battery_info_result == ESP_OK) &&
+        battery_info.measurement_valid) {
+
+        ESP_LOGI(
+            TAG,
+            "Battery: voltage=%u mV, level=%u%%, present=%s",
+            (unsigned int)battery_info.voltage_mv,
+            (unsigned int)battery_info.level_percent,
+            battery_info.battery_present
+                ? "yes"
+                : "no"
         );
     }
 

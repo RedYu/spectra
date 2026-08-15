@@ -5,6 +5,7 @@ idf_component_register(
         "display_driver.c"
         "touch_driver.c"
         "axp313a_driver.c"
+        "battery_adc_driver.c"
 
     INCLUDE_DIRS
         "include"
@@ -24,6 +25,6 @@ idf_component_register(
         esp_driver_i2c
         esp_timer
         esp_lcd_ili9488
+        esp_adc
         app
-
 )

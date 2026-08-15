@@ -18,6 +18,7 @@
 #include "web_service.h"
 #include "wifi_service.h"
 #include "system_service.h"
+#include "battery_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
 #define SHUTDOWN_SERVICE_TASK_PRIORITY    (5U)
@@ -108,6 +109,23 @@ static void shutdown_service_task(
      * Stop periodic runtime and temperature updates.
      */
     system_service_stop();
+
+    /*
+     * Stop battery measurements and release ADC resources after all
+     * potential battery-information consumers have been stopped.
+     */
+    const esp_err_t battery_result =
+        battery_service_stop();
+
+    if ((battery_result != ESP_OK) &&
+        (battery_result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGW(
+            TAG,
+            "Failed to stop battery service: %s",
+            esp_err_to_name(battery_result)
+        );
+    }
 
     /*
      * Drain queued log messages, flush and close the log file.
