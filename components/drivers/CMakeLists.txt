@@ -8,6 +8,7 @@ idf_component_register(
         "battery_adc_driver.c"
         "buzzer_driver.c"
         "can_twai_driver.c"
+        "can_fd_mcp2518fd_driver.c"
 
     INCLUDE_DIRS
         "include"

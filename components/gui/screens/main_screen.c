@@ -1146,7 +1146,7 @@ static esp_err_t main_screen_create_can_row(
     return main_screen_create_can_card(
         row,
         1U,
-        "CAN FD"
+        "Secondary CAN"
     );
 }
 
