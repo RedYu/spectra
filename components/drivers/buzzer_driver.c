@@ -36,6 +36,51 @@ static const char *TAG =
 static bool s_initialized = false;
 static bool s_active = false;
 
+static esp_err_t buzzer_driver_deconfigure_timer(void)
+{
+    esp_err_t result =
+        ledc_timer_pause(
+            BUZZER_LEDC_SPEED_MODE,
+            BUZZER_LEDC_TIMER
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to pause buzzer timer: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    const ledc_timer_config_t timer_config = {
+        .speed_mode =
+            BUZZER_LEDC_SPEED_MODE,
+
+        .timer_num =
+            BUZZER_LEDC_TIMER,
+
+        .deconfigure =
+            true,
+    };
+
+    result =
+        ledc_timer_config(
+            &timer_config
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to deconfigure buzzer timer: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    return result;
+}
+
 esp_err_t buzzer_driver_init(void)
 {
     if (s_initialized) {
@@ -124,20 +169,7 @@ esp_err_t buzzer_driver_init(void)
             esp_err_to_name(result)
         );
 
-        const ledc_timer_config_t deconfigure = {
-            .speed_mode =
-                BUZZER_LEDC_SPEED_MODE,
-
-            .timer_num =
-                BUZZER_LEDC_TIMER,
-
-            .deconfigure =
-                true,
-        };
-
-        (void)ledc_timer_config(
-            &deconfigure
-        );
+        (void)buzzer_driver_deconfigure_timer();
 
         return result;
     }
@@ -159,20 +191,7 @@ esp_err_t buzzer_driver_init(void)
             esp_err_to_name(result)
         );
 
-        const ledc_timer_config_t deconfigure = {
-            .speed_mode =
-                BUZZER_LEDC_SPEED_MODE,
-
-            .timer_num =
-                BUZZER_LEDC_TIMER,
-
-            .deconfigure =
-                true,
-        };
-
-        (void)ledc_timer_config(
-            &deconfigure
-        );
+        (void)buzzer_driver_deconfigure_timer();
 
         return result;
     }
@@ -202,29 +221,10 @@ esp_err_t buzzer_driver_deinit(void)
         return result;
     }
 
-    const ledc_timer_config_t timer_config = {
-        .speed_mode =
-            BUZZER_LEDC_SPEED_MODE,
-
-        .timer_num =
-            BUZZER_LEDC_TIMER,
-
-        .deconfigure =
-            true,
-    };
-
     result =
-        ledc_timer_config(
-            &timer_config
-        );
+        buzzer_driver_deconfigure_timer();
 
     if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to deconfigure buzzer timer: %s",
-            esp_err_to_name(result)
-        );
-
         return result;
     }
 
@@ -233,7 +233,7 @@ esp_err_t buzzer_driver_deinit(void)
 
     ESP_LOGI(
         TAG,
-        "Passive buzzer deinitialized"
+        "Buzzer driver deinitialized"
     );
 
     return ESP_OK;
@@ -253,25 +253,24 @@ esp_err_t buzzer_driver_start_tone(
         return ESP_ERR_INVALID_ARG;
     }
 
-    esp_err_t result =
+    const uint32_t configured_frequency =
         ledc_set_freq(
             BUZZER_LEDC_SPEED_MODE,
             BUZZER_LEDC_TIMER,
             frequency_hz
         );
 
-    if (result != ESP_OK) {
+    if (configured_frequency == 0U) {
         ESP_LOGE(
             TAG,
-            "Failed to set buzzer frequency to %lu Hz: %s",
-            (unsigned long)frequency_hz,
-            esp_err_to_name(result)
+            "Failed to set buzzer frequency to %lu Hz",
+            (unsigned long)frequency_hz
         );
 
-        return result;
+        return ESP_FAIL;
     }
 
-    result =
+    esp_err_t result =
         ledc_set_duty(
             BUZZER_LEDC_SPEED_MODE,
             BUZZER_LEDC_CHANNEL,

@@ -21,9 +21,12 @@
 #include "battery_service.h"
 #include "buzzer_service.h"
 #include "can_service.h"
+#include "settings_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
 #define SHUTDOWN_SERVICE_TASK_PRIORITY    (5U)
+
+#define SHUTDOWN_SERVICE_BUZZER_WAIT_MS   (700U)
 
 static const char *TAG =
     "shutdown_service";
@@ -52,10 +55,23 @@ static void shutdown_service_task(
     );
 
     /*
-     * Start the shutdown signal early. It plays asynchronously while
-     * the remaining application services are being stopped.
+     * Discard pending UI feedback and allow the shutdown signal to
+     * finish before application services begin terminating.
      */
     if (buzzer_service_is_running()) {
+        const esp_err_t cancel_result =
+            buzzer_service_cancel();
+
+        if ((cancel_result != ESP_OK) &&
+            (cancel_result != ESP_ERR_INVALID_STATE)) {
+
+            ESP_LOGW(
+                TAG,
+                "Failed to cancel pending buzzer signals: %s",
+                esp_err_to_name(cancel_result)
+            );
+        }
+
         const esp_err_t buzzer_play_result =
             buzzer_service_play(
                 BUZZER_SIGNAL_SHUTDOWN
@@ -66,6 +82,14 @@ static void shutdown_service_task(
                 TAG,
                 "Failed to queue shutdown signal: %s",
                 esp_err_to_name(buzzer_play_result)
+            );
+        } else{
+            /*
+            * Allow the asynchronous shutdown signal to finish before the
+            * buzzer service is stopped.
+            */
+            vTaskDelay(
+                pdMS_TO_TICKS(SHUTDOWN_SERVICE_BUZZER_WAIT_MS)
             );
         }
     }
@@ -90,6 +114,17 @@ static void shutdown_service_task(
             TAG,
             "Failed to stop web service: %s",
             esp_err_to_name(web_result)
+        );
+    }
+
+    const esp_err_t settings_result =
+        settings_service_save();
+
+    if (settings_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to save settings before restart: %s",
+            esp_err_to_name(settings_result)
         );
     }
 
@@ -167,8 +202,8 @@ static void shutdown_service_task(
     }
 
     /*
-     * Stop the buzzer after the asynchronous shutdown signal has had time
-     * to play while the other services were being terminated.
+     * The shutdown signal has already finished, so the buzzer can now be
+     * stopped and its LEDC resources released.
      */
     const esp_err_t buzzer_result =
         buzzer_service_stop();

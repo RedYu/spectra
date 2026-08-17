@@ -51,6 +51,33 @@ static const char *TAG =
  * functions become callable concurrently from multiple tasks.
  */
 
+/*
+ * TODO: Add synchronous playback-completion support.
+ *
+ * Implement:
+ *
+ *     esp_err_t buzzer_service_wait_idle(
+ *         uint32_t timeout_ms
+ *     );
+ *
+ * The service should report an idle event after the active pattern and
+ * all queued signals have completed. This allows graceful shutdown to
+ * play BUZZER_SIGNAL_SHUTDOWN completely before stopping the buzzer
+ * service without relying on a fixed delay.
+ *
+ * Consider adding:
+ *
+ *     esp_err_t buzzer_service_play_and_wait(
+ *         buzzer_signal_t signal,
+ *         uint32_t timeout_ms
+ *     );
+ *
+ * Waiting must be implemented using a FreeRTOS event group or task
+ * notification and must not block the buzzer playback task itself.
+ * Cancellation and service shutdown must unblock waiting callers and
+ * return an appropriate error.
+ */
+ 
 static QueueHandle_t s_queue = NULL;
 static EventGroupHandle_t s_events = NULL;
 static TaskHandle_t s_task = NULL;
@@ -378,8 +405,6 @@ static void buzzer_service_task(
             break;
         }
     }
-
-    (void)buzzer_driver_stop();
 
     const esp_err_t result =
         buzzer_driver_deinit();
