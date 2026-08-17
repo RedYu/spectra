@@ -30,7 +30,7 @@
         "wifi_sta": {
             "enabled": true,
             "ssid": "PLAY_Swiatlowod_49A8",
-            "credential_id": "626eb54c164270d2"
+            "credential_id": "f2357139ce3b9362"
         },
         "usb_rndis": {
             "enabled": false

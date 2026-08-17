@@ -1785,6 +1785,36 @@ static void settings_screen_restart_event_cb(
     lv_obj_t *button =
         lv_event_get_target(event);
 
+    if (button == NULL) {
+        return;
+    }
+
+    const esp_err_t save_result =
+        settings_service_save();
+
+    if (save_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to save settings before restart: %s",
+            esp_err_to_name(save_result)
+        );
+
+        lv_obj_t *label =
+            lv_obj_get_child(
+                button,
+                0
+            );
+
+        if (label != NULL) {
+            lv_label_set_text(
+                label,
+                "Save failed"
+            );
+        }
+
+        return;
+    }
+    
     /*
      * Prevent repeated presses while the restart is pending.
      */
