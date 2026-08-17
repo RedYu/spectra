@@ -47,14 +47,18 @@ typedef struct
 } battery_level_point_t;
 
 static const battery_level_point_t s_level_table[] = {
-    { 3300U,   0U },
-    { 3500U,   5U },
-    { 3600U,  10U },
-    { 3700U,  20U },
-    { 3800U,  40U },
-    { 3900U,  60U },
-    { 4000U,  75U },
-    { 4100U,  90U },
+    { 2850U,   0U },
+    { 3000U,   2U },
+    { 3200U,   5U },
+    { 3300U,  10U },
+    { 3400U,  15U },
+    { 3500U,  22U },
+    { 3600U,  30U },
+    { 3700U,  42U },
+    { 3800U,  55U },
+    { 3900U,  70U },
+    { 4000U,  82U },
+    { 4100U,  92U },
     { 4200U, 100U },
 };
 
