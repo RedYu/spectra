@@ -13,6 +13,9 @@ on:
 
   workflow_dispatch:
 
+env:
+  ESP_IDF_VFS_FIX: 4a5d1af3de15fa291169652a9e8068f660715000
+
 jobs:
   build:
     name: Build firmware
@@ -32,12 +35,29 @@ jobs:
         shell: bash
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$IDF_PATH"
+
+      - name: Apply ESP-IDF VFS fix
+        shell: bash
+        run: |
+          git -C "$IDF_PATH" fetch \
+            --no-recurse-submodules \
+            origin \
+            "$ESP_IDF_VFS_FIX"
+
+          git -C "$IDF_PATH" cherry-pick \
+            --no-commit \
+            "$ESP_IDF_VFS_FIX"
+
+          git -C "$IDF_PATH" diff --check
+          git -C "$IDF_PATH" diff --stat
 
       - name: Show ESP-IDF version
         shell: bash
         run: |
-          source /opt/esp/idf/export.sh
+          source "$IDF_PATH/export.sh"
           idf.py --version
+          git -C "$IDF_PATH" status --short
 
       - name: Show firmware version
         shell: bash
@@ -47,7 +67,7 @@ jobs:
       - name: Build project
         shell: bash
         run: |
-          source /opt/esp/idf/export.sh
+          source "$IDF_PATH/export.sh"
           idf.py build
 
       - name: Upload firmware artifacts
