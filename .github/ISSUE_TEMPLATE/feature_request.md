@@ -30,19 +30,44 @@ Describe how the feature should work from the user's perspective.
 
 Describe a possible technical approach, if you have one. This section is optional; alternative implementations may be considered.
 
+## Resource Impact
+
+Provide estimates when known:
+
+- Internal RAM:
+- PSRAM:
+- Flash:
+- Task stack:
+- CPU load:
+- Network or CAN throughput:
+- Additional hardware:
+
+## Dependencies
+
+List related issues, pull requests, hardware revisions, external
+libraries, protocols, or upstream ESP-IDF changes.
+
+- Depends on:
+- Blocks:
+- Related to:
+
 ## Affected Areas
 
-- [ ] Board support or hardware drivers
+- [ ] Board support or shared buses
+- [ ] Hardware drivers
 - [ ] Display, touch, or LVGL port
-- [ ] GUI screens or widgets
+- [ ] GUI screens, widgets, themes, or styles
 - [ ] Models or application services
 - [ ] Internal storage or SD card
-- [ ] Logging
-- [ ] USB networking
-- [ ] DHCP or DNS
-- [ ] Web UI or HTTP API
-- [ ] CAN or automotive protocols
+- [ ] Logging or crash dumps
+- [ ] Power management, battery, or buzzer
+- [ ] Wi-Fi, USB RNDIS, DNS, or mDNS
+- [ ] Web UI or REST API
+- [ ] Classical CAN/TWAI
+- [ ] CAN FD/MCP2518FD
+- [ ] Automotive protocols (DBC, UDS, OBD-II, XCP, LIN)
 - [ ] OTA or firmware management
+- [ ] Backend or remote connectivity
 - [ ] Build system or CI
 - [ ] Documentation
 - [ ] Other

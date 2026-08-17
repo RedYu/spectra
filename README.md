@@ -3,7 +3,7 @@
 <div align="center">
 
 ![ESP-IDF Build](https://github.com/RedYu/spectra/actions/workflows/build.yml/badge.svg)
-![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.x-E7352C?logo=espressif)
+![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.0.2%20%2B%20VFS%20fix-E7352C?logo=espressif)
 ![LVGL](https://img.shields.io/badge/LVGL-v9-00AEEF)
 ![Platform](https://img.shields.io/badge/Platform-ESP32--S3-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -27,7 +27,7 @@ The project is designed for real-time monitoring, recording, and analysis of aut
 
 - ESP-IDF 6.x and FreeRTOS
 - LVGL 9 graphical interface
-- ILI9488 480×320 display over SPI with DMA
+- ILI9488 480x320 display over SPI with DMA
 - GT911 capacitive touch controller over a shared I²C bus
 - Centralized screen manager with lazy creation and navigation history
 - Splash, main, and settings screens
@@ -73,8 +73,8 @@ The project is designed for real-time monitoring, recording, and analysis of aut
 | Component | Description |
 | --- | --- |
 | MCU | ESP32-S3, 240 MHz |
-| Display | ILI9488, 480×320, SPI |
-| Touch | GT911, shared I²C bus |
+| Display | ILI9488, 480x320, SPI |
+| Touch | GT911, shared I2C bus |
 | Primary CAN | ESP32-S3 TWAI with TCAN1042HGV transceiver |
 | Secondary CAN FD | MCP2518FD with TCAN1042HGV, planned |
 | Power management | AXP313A PMIC |
@@ -311,10 +311,36 @@ http://spectra.device/files
 
 ### Requirements
 
-- ESP-IDF 6.x
+- ESP-IDF `v6.0.2`
+- Required upstream VFS fix:
+  `4a5d1af3de15fa291169652a9e8068f660715000`
 - Python and tools installed by ESP-IDF
 - ESP32-S3 target hardware
 - ILI9488 display and GT911 touch controller for the complete GUI
+
+> [!IMPORTANT]
+> The original ESP-IDF `v6.0.2` release contains a null-pointer
+> dereference in `esp_vfs_select()`. It can crash the HTTP server when
+> the SD-card FAT filesystem is unregistered.
+>
+> Spectra currently requires the corresponding upstream VFS fix to be
+> applied on top of ESP-IDF `v6.0.2`.
+
+### Prepare ESP-IDF
+
+Check out ESP-IDF `v6.0.2` and apply the required upstream VFS fix:
+
+```bash
+cd /path/to/esp-idf
+
+git switch --detach v6.0.2
+git switch -c v6.0.2-vfs-fix
+
+git fetch --no-recurse-submodules origin \
+    4a5d1af3de15fa291169652a9e8068f660715000
+
+git cherry-pick FETCH_HEAD
+```
 
 ### Configure
 

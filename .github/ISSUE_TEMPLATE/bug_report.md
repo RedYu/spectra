@@ -57,6 +57,9 @@ Did this work in an earlier version or commit?
 
 - Spectra version or Git commit:
 - ESP-IDF version (`idf.py --version`):
+- ESP-IDF commit (`git -C "$IDF_PATH" rev-parse HEAD`):
+- ESP-IDF description (`git -C "$IDF_PATH" describe --tags --always --dirty`):
+- Applied ESP-IDF patches or cherry-picked commits:
 - LVGL version:
 - Host operating system:
 - Compiler/toolchain version:
@@ -72,6 +75,9 @@ Did this work in an earlier version or commit?
 - [ ] GUI navigation
 - [ ] Internal storage
 - [ ] SD card
+- [ ] SD-card mount or unmount
+- [ ] ESP-IDF or VFS
+- [ ] Crash dump or panic
 - [ ] Settings
 - [ ] Logging
 - [ ] USB RNDIS
@@ -89,6 +95,22 @@ Paste the smallest complete log that shows the problem, including several lines 
 Paste relevant serial, build, browser-console, or network logs here.
 ```
 
+## Crash Information
+
+Complete this section for crashes, panics, watchdog resets, or stack
+overflows.
+
+- Panic type:
+- Crashed task:
+- Crashed CPU core:
+- Exception address:
+- ELF SHA-256:
+- Core-dump SHA-256:
+
+```text
+Paste the complete register dump and decoded backtrace here.
+```
+
 ## Screenshots or Recordings
 
 Attach screenshots, browser developer-tool output, packet captures, or a short recording when they help explain the problem.
@@ -103,3 +125,5 @@ Add any other information that may help reproduce or diagnose the issue.
 - [ ] I can reproduce the issue using the steps above
 - [ ] I tested a clean build when practical
 - [ ] I removed passwords, private keys, serial numbers, MAC addresses, and other sensitive information from logs
+- [ ] The ELF file or core dump matches the affected firmware build
+- [ ] I reported all local ESP-IDF patches and cherry-picked commits

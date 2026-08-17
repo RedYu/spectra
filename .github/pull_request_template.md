@@ -21,15 +21,21 @@ Closes #
 
 ## Affected Areas
 
-- [ ] Board support or hardware drivers
+- [ ] Board support or shared buses
+- [ ] Hardware drivers
 - [ ] Display, touch, or LVGL port
-- [ ] GUI screens or widgets
+- [ ] GUI screens, widgets, themes, or styles
 - [ ] Models or application services
 - [ ] Internal storage or SD card
-- [ ] Logging
-- [ ] USB, networking, DNS, or DHCP
-- [ ] Web UI or HTTP API
-- [ ] CAN or automotive protocols
+- [ ] Logging or crash dumps
+- [ ] Power management, battery, or buzzer
+- [ ] Wi-Fi, USB RNDIS, DNS, or mDNS
+- [ ] Web UI or REST API
+- [ ] Classical CAN/TWAI
+- [ ] CAN FD/MCP2518FD
+- [ ] Automotive protocols
+- [ ] OTA or firmware management
+- [ ] Backend connectivity
 - [ ] Build system or CI
 - [ ] Documentation only
 
@@ -37,14 +43,29 @@ Closes #
 
 Describe important design decisions, resource ownership, synchronization, compatibility considerations, or limitations.
 
+## Resource Impact
+
+Describe measured or expected changes.
+
+- Internal RAM:
+- PSRAM:
+- Flash:
+- Task stack:
+- CPU load:
+- Network or CAN throughput:
+
 ## Testing
 
 Describe exactly how the change was verified. Include commands, hardware actions, and expected results.
 
 ### Test Environment
 
+- Spectra commit:
 - ESP-IDF version:
+- ESP-IDF commit:
+- Applied ESP-IDF patches or cherry-picked commits:
 - Target board or hardware revision:
+- Flash and PSRAM size:
 - Relevant peripherals:
 - Relevant configuration changes:
 
@@ -71,6 +92,16 @@ Check only the items relevant to this pull request.
 - [ ] Logging tested
 - [ ] CAN functionality tested
 - [ ] Not applicable — documentation or non-runtime change
+- [ ] Light and Dark GUI themes tested
+- [ ] Graceful restart tested
+- [ ] SD-card removal while the web server is running tested
+- [ ] Power-management and battery reporting tested
+- [ ] Buzzer output and GUI feedback tested
+- [ ] Wi-Fi SoftAP and Station modes tested
+- [ ] Internet connectivity state tested
+- [ ] Classical CAN receive and transmit tested
+- [ ] CAN runtime reconfiguration tested
+- [ ] CAN FD receive and transmit tested
 
 ## Screenshots or Logs
 
@@ -95,3 +126,7 @@ Write `None` when this pull request has no breaking changes.
 - [ ] No credentials, private keys, local paths, or build artifacts are included
 - [ ] Documentation and `CHANGELOG.md` were updated when necessary
 - [ ] Commits use clear Conventional Commit messages
+- [ ] New tasks have measured stack headroom
+- [ ] ISR callbacks perform only ISR-safe operations
+- [ ] Changes to persistent settings preserve backward compatibility
+- [ ] ESP-IDF patches or local framework modifications are documented
