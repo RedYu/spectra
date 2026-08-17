@@ -85,6 +85,63 @@ typedef struct
 } can_twai_frame_t;
 
 /**
+ * @brief Completed transmission information.
+ *
+ * The structure is valid only during the confirmation callback.
+ */
+typedef struct
+{
+    uint32_t transmission_id;
+    uint32_t identifier;
+
+    bool extended;
+    bool remote;
+    bool successful;
+
+    /**
+     * Context supplied to can_twai_driver_transmit_tracked().
+     */
+    void *transmission_context;
+
+} can_twai_tx_confirmation_t;
+
+/**
+ * @brief Transmission confirmation callback.
+ *
+ * The callback runs in interrupt context. It must not block, allocate
+ * memory, perform logging or call regular FreeRTOS APIs.
+ *
+ * @return True when the callback woke a higher-priority task.
+ */
+typedef bool (*can_twai_tx_confirmation_cb_t)(
+    const can_twai_tx_confirmation_t *confirmation,
+    void *callback_context
+);
+
+/**
+ * @brief Hardware acceptance-filter configuration.
+ *
+ * ESP32-S3 provides one hardware mask filter. Frames are accepted when:
+ *
+ *     (received_id & mask) == (identifier & mask)
+ *
+ * A zero mask accepts every identifier. The frame format is selected
+ * using the extended field.
+ */
+typedef struct
+{
+    uint32_t identifier;
+    uint32_t mask;
+
+    /**
+     * True for 29-bit extended identifiers, false for 11-bit standard
+     * identifiers.
+     */
+    bool extended;
+
+} can_twai_acceptance_filter_t;
+
+/**
  * @brief Primary TWAI driver configuration.
  */
 typedef struct
@@ -115,6 +172,24 @@ typedef struct
      */
     int8_t transmit_retry_count;
 
+    /**
+     * Hardware receive acceptance filter.
+     *
+     * Use identifier=0 and mask=0 to accept all CAN frames.
+     */
+    can_twai_acceptance_filter_t acceptance_filter;
+
+    /**
+     * Optional tracked-transmission completion callback.
+     */
+    can_twai_tx_confirmation_cb_t
+        tx_confirmation_callback;
+
+    /**
+     * Common context passed to tx_confirmation_callback.
+     */
+    void *tx_confirmation_context;
+
 } can_twai_driver_config_t;
 
 /**
@@ -131,7 +206,12 @@ typedef struct
     uint32_t bitrate;
     uint16_t sample_point_permill;
 
+    /*
+     * Legacy counters retained for API compatibility.
+     */
     uint32_t transmitted_frames;
+    uint32_t failed_transmissions;
+
     uint32_t received_frames;
     uint32_t dropped_rx_frames;
 
@@ -143,6 +223,26 @@ typedef struct
     uint16_t receive_error_count;
     uint32_t bus_error_count;
     uint32_t acknowledgement_error_count;
+
+    /**
+     * Driver-owned transmission-slot statistics.
+     */
+    uint32_t tx_slots_used;
+    uint32_t tx_slots_peak;
+    uint32_t tx_slots_capacity;
+
+    /**
+     * Application RX queue statistics.
+     */
+    uint32_t rx_queue_current;
+    uint32_t rx_queue_peak;
+    uint32_t rx_queue_capacity;
+
+    /**
+     * Extended transmission-result statistics.
+     */
+    uint32_t successful_transmissions;
+    uint32_t aborted_transmissions;
 
 } can_twai_driver_info_t;
 
@@ -184,6 +284,46 @@ esp_err_t can_twai_driver_start(void);
 esp_err_t can_twai_driver_stop(void);
 
 /**
+ * @brief Reconfigure the initialized TWAI controller.
+ *
+ * The controller is stopped and its hardware node, receive queue and
+ * transmission slots are recreated. The previous running state and
+ * accumulated statistics are preserved.
+ *
+ * If the new configuration cannot be applied, the driver attempts to
+ * restore the previous configuration.
+ *
+ * No task may call can_twai_driver_transmit() or remain blocked inside
+ * can_twai_driver_receive() while this function executes.
+ *
+ * @param[in] config New complete driver configuration.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if config is invalid,
+ * ESP_ERR_INVALID_STATE if the driver is not initialized, otherwise an
+ * ESP-IDF error code.
+ */
+esp_err_t can_twai_driver_reconfigure(
+    const can_twai_driver_config_t *config
+);
+
+/**
+ * @brief Change the hardware acceptance filter.
+ *
+ * When the controller is running, it is temporarily stopped. Pending
+ * transmissions and queued received frames are discarded. The previous
+ * running state is restored after applying the filter.
+ *
+ * @param[in] filter New acceptance-filter configuration.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if filter is invalid,
+ * ESP_ERR_INVALID_STATE if the driver is not initialized, otherwise an
+ * ESP-IDF error code.
+ */
+esp_err_t can_twai_driver_set_acceptance_filter(
+    const can_twai_acceptance_filter_t *filter
+);
+
+/**
  * @brief Stop and release all TWAI driver resources.
  *
  * Calling this function when the driver is not initialized has no
@@ -211,6 +351,33 @@ esp_err_t can_twai_driver_deinit(void);
 esp_err_t can_twai_driver_transmit(
     const can_twai_frame_t *frame,
     uint32_t timeout_ms
+);
+
+/**
+ * @brief Queue a tracked Classical CAN frame for transmission.
+ *
+ * A unique non-zero transmission identifier is assigned after the
+ * frame has been accepted by the TWAI driver. Completion is reported
+ * through the configured tx_confirmation_callback.
+ *
+ * The transmission context must remain valid until the confirmation
+ * callback executes.
+ *
+ * @param[in] frame Frame to transmit.
+ * @param[in] transmission_context Per-transmission context.
+ * @param[in] timeout_ms Maximum time to wait for a TX slot.
+ * @param[out] transmission_id Assigned transmission identifier.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for invalid arguments,
+ * ESP_ERR_INVALID_STATE if the driver is not running,
+ * ESP_ERR_TIMEOUT when no TX slot becomes available, otherwise an
+ * ESP-IDF error code.
+ */
+esp_err_t can_twai_driver_transmit_tracked(
+    const can_twai_frame_t *frame,
+    void *transmission_context,
+    uint32_t timeout_ms,
+    uint32_t *transmission_id
 );
 
 /**

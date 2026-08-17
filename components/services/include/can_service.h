@@ -38,6 +38,20 @@ typedef void (*can_service_receive_cb_t)(
 );
 
 /**
+ * @brief Completed CAN transmission callback.
+ *
+ * The callback runs in the CAN service task context and may use normal
+ * FreeRTOS APIs. It must not call can_service_stop() or
+ * can_service_reconfigure().
+ *
+ * The confirmation pointer remains valid only during the callback.
+ */
+typedef void (*can_service_tx_confirmation_cb_t)(
+    const can_twai_tx_confirmation_t *confirmation,
+    void *context
+);
+
+/**
  * @brief Primary CAN service configuration.
  */
 typedef struct
@@ -57,7 +71,28 @@ typedef struct
      */
     void *receive_context;
 
+    /**
+     * Optional tracked-transmission completion callback.
+     */
+    can_service_tx_confirmation_cb_t
+        tx_confirmation_callback;
+
+    /**
+     * Optional TX confirmation callback context.
+     */
+    void *tx_confirmation_context;
+
 } can_service_config_t;
+
+typedef struct
+{
+    uint32_t confirmation_queue_current;
+    uint32_t confirmation_queue_peak;
+    uint32_t confirmation_queue_capacity;
+
+    uint32_t dropped_tx_confirmations;
+
+} can_service_queue_statistics_t;
 
 /**
  * @brief Start the primary CAN service.
@@ -131,6 +166,18 @@ esp_err_t can_service_transmit(
 );
 
 /**
+ * @brief Queue a tracked CAN frame for transmission.
+ *
+ * Completion is delivered through the service TX confirmation callback.
+ */
+esp_err_t can_service_transmit_tracked(
+    const can_twai_frame_t *frame,
+    void *transmission_context,
+    uint32_t timeout_ms,
+    uint32_t *transmission_id
+);
+
+/**
  * @brief Request recovery after the CAN controller enters bus-off.
  *
  * Recovery is asynchronous. Its current state can be inspected using
@@ -153,6 +200,25 @@ esp_err_t can_service_recover(void);
  */
 esp_err_t can_service_get_info(
     can_twai_driver_info_t *info
+);
+
+/**
+ * @brief Copy TX confirmation queue statistics.
+ *
+ * Peak and dropped-confirmation counters accumulate from the most
+ * recent can_service_start() call and are preserved across runtime
+ * driver reconfiguration.
+ *
+ * The historical peak may exceed the current capacity when a runtime
+ * reconfiguration reduces the TX queue depth.
+ *
+ * @param[out] statistics Destination statistics structure.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if statistics is
+ * NULL, or ESP_ERR_INVALID_STATE if the CAN service is not running.
+ */
+esp_err_t can_service_get_queue_statistics(
+    can_service_queue_statistics_t *statistics
 );
 
 /**

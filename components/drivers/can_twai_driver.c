@@ -1,5 +1,6 @@
 #include "can_twai_driver.h"
 
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,12 +25,18 @@ typedef struct
         CAN_TWAI_CLASSIC_DATA_MAX_LENGTH
     ];
 
+    uint32_t transmission_id;
+    void *transmission_context;
+
+    bool confirmation_requested;
     bool in_use;
 
 } can_twai_tx_slot_t;
 
 static const char *TAG =
     "can_twai_driver";
+
+static uint32_t s_next_transmission_id = 1U;
 
 static twai_node_handle_t s_node = NULL;
 
@@ -44,6 +51,29 @@ static can_twai_driver_info_t s_info;
 
 static portMUX_TYPE s_lock =
     portMUX_INITIALIZER_UNLOCKED;
+
+
+static uint32_t can_twai_driver_next_transmission_id(void)
+{
+    uint32_t transmission_id;
+
+    portENTER_CRITICAL(
+        &s_lock
+    );
+
+    transmission_id =
+        s_next_transmission_id++;
+
+    if (s_next_transmission_id == 0U) {
+        s_next_transmission_id = 1U;
+    }
+
+    portEXIT_CRITICAL(
+        &s_lock
+    );
+
+    return transmission_id;
+}
 
 static can_twai_state_t can_twai_driver_map_state(
     twai_error_state_t state
@@ -65,6 +95,30 @@ static can_twai_state_t can_twai_driver_map_state(
         default:
             return CAN_TWAI_STATE_UNKNOWN;
     }
+}
+
+static bool can_twai_driver_validate_filter(
+    const can_twai_acceptance_filter_t *filter
+)
+{
+    if (filter == NULL) {
+        return false;
+    }
+
+    const uint32_t identifier_max =
+        filter->extended
+            ? CAN_TWAI_EXTENDED_ID_MAX
+            : CAN_TWAI_STANDARD_ID_MAX;
+
+    if ((filter->identifier & ~identifier_max) != 0U) {
+        return false;
+    }
+
+    if ((filter->mask & ~identifier_max) != 0U) {
+        return false;
+    }
+
+    return true;
 }
 
 static bool can_twai_driver_validate_config(
@@ -104,10 +158,19 @@ static bool can_twai_driver_validate_config(
         return false;
     }
 
+    if (!can_twai_driver_validate_filter(
+            &config->acceptance_filter
+        )) {
+
+        return false;
+    }
+
     return true;
 }
 
-static void can_twai_driver_reset_tx_slots(void)
+static void can_twai_driver_reset_tx_slots(
+    bool count_aborted
+)
 {
     if ((s_tx_slots == NULL) ||
         (s_tx_slots_available == NULL)) {
@@ -121,6 +184,8 @@ static void can_twai_driver_reset_tx_slots(void)
            ) == pdTRUE) {
     }
 
+    uint32_t aborted_count = 0U;
+
     portENTER_CRITICAL(
         &s_lock
     );
@@ -129,7 +194,21 @@ static void can_twai_driver_reset_tx_slots(void)
          index < s_tx_slot_count;
          ++index) {
 
+        if (s_tx_slots[index].in_use) {
+            ++aborted_count;
+        }
+
         s_tx_slots[index].in_use = false;
+        s_tx_slots[index].confirmation_requested = false;
+        s_tx_slots[index].transmission_id = 0U;
+        s_tx_slots[index].transmission_context = NULL;
+    }
+
+    s_info.tx_slots_used = 0U;
+
+    if (count_aborted) {
+        s_info.aborted_transmissions +=
+            aborted_count;
     }
 
     portEXIT_CRITICAL(
@@ -162,6 +241,16 @@ can_twai_driver_allocate_tx_slot(void)
         if (!s_tx_slots[index].in_use) {
             s_tx_slots[index].in_use = true;
             slot = &s_tx_slots[index];
+
+            ++s_info.tx_slots_used;
+
+            if (s_info.tx_slots_used >
+                s_info.tx_slots_peak) {
+
+                s_info.tx_slots_peak =
+                    s_info.tx_slots_used;
+            }
+
             break;
         }
     }
@@ -185,7 +274,13 @@ static void can_twai_driver_release_tx_slot(
         &s_lock
     );
 
-    slot->in_use = false;
+    if (slot->in_use) {
+        slot->in_use = false;
+
+        if (s_info.tx_slots_used > 0U) {
+            --s_info.tx_slots_used;
+        }
+    }
 
     portEXIT_CRITICAL(
         &s_lock
@@ -214,10 +309,16 @@ static bool can_twai_driver_tx_done_callback(
         return false;
     }
 
-    can_twai_tx_slot_t *completed_slot = NULL;
-
     BaseType_t higher_priority_task_woken =
         pdFALSE;
+
+    can_twai_tx_confirmation_t confirmation = {0};
+
+    can_twai_tx_confirmation_cb_t callback = NULL;
+    void *callback_context = NULL;
+
+    bool confirmation_requested = false;
+    bool slot_found = false;
 
     portENTER_CRITICAL_ISR(
         &s_lock
@@ -227,20 +328,59 @@ static bool can_twai_driver_tx_done_callback(
          index < s_tx_slot_count;
          ++index) {
 
-        if ((&s_tx_slots[index].native_frame ==
-            event_data->done_tx_frame) &&
-            s_tx_slots[index].in_use) {
+        can_twai_tx_slot_t *slot =
+            &s_tx_slots[index];
 
-            completed_slot =
-                &s_tx_slots[index];
+        if ((&slot->native_frame ==
+             event_data->done_tx_frame) &&
+            slot->in_use) {
 
-            completed_slot->in_use =
-                false;
+            confirmation.transmission_id =
+                slot->transmission_id;
+
+            confirmation.identifier =
+                slot->native_frame.header.id;
+
+            confirmation.extended =
+                slot->native_frame.header.ide;
+
+            confirmation.remote =
+                slot->native_frame.header.rtr;
+
+            confirmation.successful =
+                event_data->is_tx_success;
+
+            confirmation.transmission_context =
+                slot->transmission_context;
+
+            confirmation_requested =
+                slot->confirmation_requested;
+
+            callback =
+                s_config.tx_confirmation_callback;
+
+            callback_context =
+                s_config.tx_confirmation_context;
+
+            
+            slot->in_use = false;
+
+            if (s_info.tx_slots_used > 0U) {
+                --s_info.tx_slots_used;
+            }
+
+            slot->confirmation_requested = false;
+            slot->transmission_id = 0U;
+            slot->transmission_context = NULL;
 
             if (event_data->is_tx_success) {
                 ++s_info.transmitted_frames;
+                ++s_info.successful_transmissions;
+            } else {
+                ++s_info.failed_transmissions;
             }
 
+            slot_found = true;
             break;
         }
     }
@@ -249,13 +389,35 @@ static bool can_twai_driver_tx_done_callback(
         &s_lock
     );
 
-    if ((completed_slot != NULL) &&
+    if (slot_found &&
+        confirmation_requested &&
+        (callback != NULL)) {
+
+        if (callback(
+                &confirmation,
+                callback_context
+            )) {
+
+            higher_priority_task_woken =
+                pdTRUE;
+        }
+    }
+
+    if (slot_found &&
         (s_tx_slots_available != NULL)) {
+
+        BaseType_t semaphore_task_woken =
+            pdFALSE;
 
         (void)xSemaphoreGiveFromISR(
             s_tx_slots_available,
-            &higher_priority_task_woken
+            &semaphore_task_woken
         );
+
+        if (semaphore_task_woken == pdTRUE) {
+            higher_priority_task_woken =
+                pdTRUE;
+        }
     }
 
     return higher_priority_task_woken ==
@@ -348,11 +510,23 @@ static bool can_twai_driver_rx_done_callback(
             &higher_priority_task_woken
         ) == pdTRUE) {
 
+        const UBaseType_t queue_current =
+            uxQueueMessagesWaitingFromISR(
+                s_rx_queue
+            );
+
         portENTER_CRITICAL_ISR(
             &s_lock
         );
 
         ++s_info.received_frames;
+
+        if ((uint32_t)queue_current >
+            s_info.rx_queue_peak) {
+
+            s_info.rx_queue_peak =
+                (uint32_t)queue_current;
+        }
 
         portEXIT_CRITICAL_ISR(
             &s_lock
@@ -445,6 +619,111 @@ static bool can_twai_driver_error_callback(
     );
 
     return false;
+}
+
+static esp_err_t can_twai_driver_apply_acceptance_filter(
+    const can_twai_acceptance_filter_t *filter
+)
+{
+    if ((filter == NULL) ||
+        (s_node == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const twai_mask_filter_config_t filter_config = {
+        .id =
+            filter->identifier,
+
+        .mask =
+            filter->mask,
+
+        .is_ext =
+            filter->extended,
+
+        .no_classic = false,
+        .no_fd = true,
+        .dual_filter = false,
+    };
+
+    return twai_node_config_mask_filter(
+        s_node,
+        0U,
+        &filter_config
+    );
+}
+
+static void can_twai_driver_restore_statistics(
+    const can_twai_driver_info_t *previous_info
+)
+{
+    if (previous_info == NULL) {
+        return;
+    }
+
+    portENTER_CRITICAL(
+        &s_lock
+    );
+
+    s_info.transmitted_frames =
+        previous_info->transmitted_frames;
+
+    s_info.received_frames =
+        previous_info->received_frames;
+
+    s_info.dropped_rx_frames =
+        previous_info->dropped_rx_frames;
+
+    s_info.arbitration_lost_count =
+        previous_info->arbitration_lost_count;
+
+    s_info.bit_error_count =
+        previous_info->bit_error_count;
+
+    s_info.form_error_count =
+        previous_info->form_error_count;
+
+    s_info.stuff_error_count =
+        previous_info->stuff_error_count;
+
+    s_info.transmit_error_count =
+        previous_info->transmit_error_count;
+
+    s_info.receive_error_count =
+        previous_info->receive_error_count;
+
+    s_info.bus_error_count =
+        previous_info->bus_error_count;
+
+    s_info.acknowledgement_error_count =
+        previous_info->acknowledgement_error_count;
+
+    s_info.successful_transmissions =
+        previous_info->successful_transmissions;
+
+    s_info.failed_transmissions =
+        previous_info->failed_transmissions;
+
+    s_info.aborted_transmissions =
+        previous_info->aborted_transmissions;
+
+    if (previous_info->tx_slots_peak >
+        s_info.tx_slots_peak) {
+
+        s_info.tx_slots_peak =
+            previous_info->tx_slots_peak;
+    }
+
+    if (previous_info->rx_queue_peak >
+        s_info.rx_queue_peak) {
+
+        s_info.rx_queue_peak =
+            previous_info->rx_queue_peak;
+    }
+
+    portEXIT_CRITICAL(
+        &s_lock
+    );
 }
 
 esp_err_t can_twai_driver_init(
@@ -596,6 +875,27 @@ esp_err_t can_twai_driver_init(
         goto initialization_failed;
     }
 
+    result =
+        can_twai_driver_apply_acceptance_filter(
+            &config->acceptance_filter
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to configure TWAI acceptance filter: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)twai_node_delete(
+            s_node
+        );
+
+        s_node = NULL;
+
+        goto initialization_failed;
+    }
+
     const twai_event_callbacks_t callbacks = {
         .on_tx_done =
             can_twai_driver_tx_done_callback,
@@ -647,18 +947,28 @@ esp_err_t can_twai_driver_init(
     s_info.sample_point_permill =
         config->sample_point_permill;
 
+    s_info.tx_slots_capacity =
+        config->tx_queue_depth;
+
+    s_info.rx_queue_capacity =
+        config->rx_queue_length;
+
     portEXIT_CRITICAL(
         &s_lock
     );
 
     ESP_LOGI(
         TAG,
-        "Primary TWAI initialized: TX=%d, RX=%d, "
-        "bitrate=%lu, mode=%u",
-        (int)CAN_PRIMARY_PIN_TX,
-        (int)CAN_PRIMARY_PIN_RX,
+        "TWAI initialized: bitrate=%lu, "
+        "filter=%s ID=0x%08lX mask=0x%08lX",
         (unsigned long)config->bitrate,
-        (unsigned int)config->mode
+        config->acceptance_filter.extended
+            ? "extended"
+            : "standard",
+        (unsigned long)
+            config->acceptance_filter.identifier,
+        (unsigned long)
+            config->acceptance_filter.mask
     );
 
     return ESP_OK;
@@ -713,7 +1023,7 @@ esp_err_t can_twai_driver_start(void)
         s_rx_queue
     );
 
-    can_twai_driver_reset_tx_slots();
+    can_twai_driver_reset_tx_slots(false);
 
     /*
      * Establish an initial state before enabling the node. ISR
@@ -804,7 +1114,7 @@ esp_err_t can_twai_driver_stop(void)
         s_rx_queue
     );
 
-    can_twai_driver_reset_tx_slots();
+    can_twai_driver_reset_tx_slots(true);
 
     portENTER_CRITICAL(
         &s_lock
@@ -920,9 +1230,226 @@ esp_err_t can_twai_driver_deinit(void)
     return ESP_OK;
 }
 
-esp_err_t can_twai_driver_transmit(
+static bool can_twai_driver_filters_equal(
+    const can_twai_acceptance_filter_t *first,
+    const can_twai_acceptance_filter_t *second
+)
+{
+    if ((first == NULL) ||
+        (second == NULL)) {
+
+        return false;
+    }
+
+    return
+        (first->identifier == second->identifier) &&
+        (first->mask == second->mask) &&
+        (first->extended == second->extended);
+}
+
+static bool can_twai_driver_configs_equal(
+    const can_twai_driver_config_t *first,
+    const can_twai_driver_config_t *second
+)
+{
+    if ((first == NULL) ||
+        (second == NULL)) {
+
+        return false;
+    }
+
+    return
+        (first->bitrate == second->bitrate) &&
+        (first->sample_point_permill ==
+         second->sample_point_permill) &&
+        (first->mode == second->mode) &&
+        (first->tx_queue_depth ==
+         second->tx_queue_depth) &&
+        (first->rx_queue_length ==
+         second->rx_queue_length) &&
+        (first->transmit_retry_count ==
+         second->transmit_retry_count) &&
+        (first->tx_confirmation_callback ==
+         second->tx_confirmation_callback) &&
+        (first->tx_confirmation_context ==
+         second->tx_confirmation_context) &&
+        can_twai_driver_filters_equal(
+            &first->acceptance_filter,
+            &second->acceptance_filter
+        );
+}
+
+esp_err_t can_twai_driver_reconfigure(
+    const can_twai_driver_config_t *config
+)
+{
+    if (!can_twai_driver_validate_config(
+            config
+        )) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    can_twai_driver_info_t previous_info;
+
+    portENTER_CRITICAL(
+        &s_lock
+    );
+
+    previous_info = s_info;
+
+    portEXIT_CRITICAL(
+        &s_lock
+    );
+
+    if (!previous_info.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const can_twai_driver_config_t previous_config =
+        s_config;
+
+    if (can_twai_driver_configs_equal(
+            &previous_config,
+            config
+        )) {
+
+        return ESP_OK;
+    }
+
+    const bool was_started =
+        previous_info.started;
+
+    if (was_started) {
+        const esp_err_t stop_result =
+            can_twai_driver_stop();
+
+        if (stop_result != ESP_OK) {
+            return stop_result;
+        }
+
+        portENTER_CRITICAL(
+            &s_lock
+        );
+
+        previous_info = s_info;
+
+        portEXIT_CRITICAL(
+            &s_lock
+        );
+    }
+
+    esp_err_t result =
+        can_twai_driver_deinit();
+
+    if (result != ESP_OK) {
+        /*
+         * Deinitialization failed before the old configuration was
+         * completely removed. Try to return it to the running state.
+         */
+        if (was_started &&
+            can_twai_driver_is_initialized() &&
+            !can_twai_driver_is_started()) {
+
+            (void)can_twai_driver_start();
+        }
+
+        return result;
+    }
+
+    result =
+        can_twai_driver_init(
+            config
+        );
+
+    if (result == ESP_OK) {
+        if (was_started) {
+            result =
+                can_twai_driver_start();
+        }
+
+        if (result == ESP_OK) {
+            can_twai_driver_restore_statistics(
+                &previous_info
+            );
+
+            ESP_LOGI(
+                TAG,
+                "TWAI reconfigured: bitrate=%lu, "
+                "mode=%u, TX queue=%u, RX queue=%u",
+                (unsigned long)config->bitrate,
+                (unsigned int)config->mode,
+                (unsigned int)config->tx_queue_depth,
+                (unsigned int)config->rx_queue_length
+            );
+
+            return ESP_OK;
+        }
+
+        /*
+         * The new node was created, but it could not be started.
+         */
+        ESP_LOGE(
+            TAG,
+            "Failed to start reconfigured TWAI: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)can_twai_driver_deinit();
+    } else {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize new TWAI configuration: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    const esp_err_t original_result =
+        result;
+
+    ESP_LOGW(
+        TAG,
+        "Restoring previous TWAI configuration"
+    );
+
+    esp_err_t restore_result =
+        can_twai_driver_init(
+            &previous_config
+        );
+
+    if ((restore_result == ESP_OK) &&
+        was_started) {
+
+        restore_result =
+            can_twai_driver_start();
+    }
+
+    if (restore_result == ESP_OK) {
+        can_twai_driver_restore_statistics(
+            &previous_info
+        );
+
+        ESP_LOGI(
+            TAG,
+            "Previous TWAI configuration restored"
+        );
+    } else {
+        ESP_LOGE(
+            TAG,
+            "Failed to restore previous TWAI configuration: %s",
+            esp_err_to_name(restore_result)
+        );
+    }
+
+    return original_result;
+}
+
+static esp_err_t can_twai_driver_transmit_internal(
     const can_twai_frame_t *frame,
-    uint32_t timeout_ms
+    void *transmission_context,
+    bool confirmation_requested,
+    uint32_t timeout_ms,
+    uint32_t *transmission_id
 )
 {
     if (frame == NULL) {
@@ -978,6 +1505,25 @@ esp_err_t can_twai_driver_transmit(
         );
 
         return ESP_FAIL;
+    }
+
+    const uint32_t assigned_transmission_id =
+        confirmation_requested
+            ? can_twai_driver_next_transmission_id()
+            : 0U;
+
+    slot->confirmation_requested =
+        confirmation_requested;
+
+    slot->transmission_context =
+        transmission_context;
+
+    slot->transmission_id =
+        assigned_transmission_id;
+
+    if (transmission_id != NULL) {
+        *transmission_id =
+            assigned_transmission_id;
     }
 
     memset(
@@ -1036,6 +1582,18 @@ esp_err_t can_twai_driver_transmit(
         );
 
     if (result != ESP_OK) {
+        /*
+         * No completion callback will be generated because the frame
+         * was not accepted by the hardware driver.
+         */
+        if (transmission_id != NULL) {
+            *transmission_id = 0U;
+        }
+
+        slot->confirmation_requested = false;
+        slot->transmission_id = 0U;
+        slot->transmission_context = NULL;
+
         can_twai_driver_release_tx_slot(
             slot
         );
@@ -1044,9 +1602,61 @@ esp_err_t can_twai_driver_transmit(
     }
 
     /*
-     * The slot remains allocated until on_tx_done is called.
+     * Do not read slot fields here. A fast TX completion callback may
+     * already have released and cleared the slot.
      */
     return ESP_OK;
+}
+
+esp_err_t can_twai_driver_transmit(
+    const can_twai_frame_t *frame,
+    uint32_t timeout_ms
+)
+{
+    return can_twai_driver_transmit_internal(
+        frame,
+        NULL,
+        false,
+        timeout_ms,
+        NULL
+    );
+}
+
+esp_err_t can_twai_driver_transmit_tracked(
+    const can_twai_frame_t *frame,
+    void *transmission_context,
+    uint32_t timeout_ms,
+    uint32_t *transmission_id
+)
+{
+    if (transmission_id == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *transmission_id = 0U;
+
+    portENTER_CRITICAL(
+        &s_lock
+    );
+
+    const bool callback_configured =
+        s_config.tx_confirmation_callback != NULL;
+
+    portEXIT_CRITICAL(
+        &s_lock
+    );
+
+    if (!callback_configured) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return can_twai_driver_transmit_internal(
+        frame,
+        transmission_context,
+        true,
+        timeout_ms,
+        transmission_id
+    );
 }
 
 esp_err_t can_twai_driver_receive(
@@ -1091,6 +1701,189 @@ esp_err_t can_twai_driver_receive(
 
         return ESP_ERR_TIMEOUT;
     }
+
+    return ESP_OK;
+}
+
+esp_err_t can_twai_driver_set_acceptance_filter(
+    const can_twai_acceptance_filter_t *filter
+)
+{
+    if (!can_twai_driver_validate_filter(
+            filter
+        )) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    portENTER_CRITICAL(
+        &s_lock
+    );
+
+    const bool initialized =
+        s_info.initialized;
+
+    const bool was_started =
+        s_info.started;
+
+    portEXIT_CRITICAL(
+        &s_lock
+    );
+
+    if (!initialized ||
+        (s_node == NULL)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const can_twai_acceptance_filter_t previous_filter =
+        s_config.acceptance_filter;
+
+    if (can_twai_driver_filters_equal(
+            &previous_filter,
+            filter
+        )) {
+
+        return ESP_OK;
+    }
+
+    /*
+     * Hardware acceptance filters may only be changed while the TWAI
+     * node is disabled.
+     */
+    if (was_started) {
+        const esp_err_t stop_result =
+            can_twai_driver_stop();
+
+        if (stop_result != ESP_OK) {
+            return stop_result;
+        }
+    }
+
+    esp_err_t result =
+        can_twai_driver_apply_acceptance_filter(
+            filter
+        );
+
+    if (result != ESP_OK) {
+        const esp_err_t apply_result =
+            result;
+
+        ESP_LOGE(
+            TAG,
+            "Failed to apply TWAI acceptance filter: %s",
+            esp_err_to_name(apply_result)
+        );
+
+        result =
+            can_twai_driver_apply_acceptance_filter(
+                &previous_filter
+            );
+
+        if (result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to restore previous TWAI filter: %s",
+                esp_err_to_name(result)
+            );
+
+            /*
+             * The effective hardware filter is now uncertain. Keep
+             * the controller stopped.
+             */
+            return result;
+        }
+
+        if (was_started) {
+            result =
+                can_twai_driver_start();
+
+            if (result != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to restart TWAI after filter error: %s",
+                    esp_err_to_name(result)
+                );
+
+                return result;
+            }
+        }
+
+        return apply_result;
+    }
+
+    if (was_started) {
+        result =
+            can_twai_driver_start();
+
+        if (result != ESP_OK) {
+            const esp_err_t start_result =
+                result;
+
+            ESP_LOGE(
+                TAG,
+                "Failed to restart TWAI with new filter: %s",
+                esp_err_to_name(start_result)
+            );
+
+            /*
+             * The node remains disabled after the failed start, so the
+             * previous filter can be restored immediately.
+             */
+            result =
+                can_twai_driver_apply_acceptance_filter(
+                    &previous_filter
+                );
+
+            if (result != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to roll back TWAI filter: %s",
+                    esp_err_to_name(result)
+                );
+
+                return result;
+            }
+
+            result =
+                can_twai_driver_start();
+
+            if (result != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to restart TWAI after filter rollback: %s",
+                    esp_err_to_name(result)
+                );
+
+                return result;
+            }
+
+            ESP_LOGW(
+                TAG,
+                "Previous TWAI filter restored"
+            );
+
+            return start_result;
+        }
+    }
+
+    /*
+     * Publish the new configuration only after both the hardware
+     * filter update and optional controller restart have succeeded.
+     */
+    s_config.acceptance_filter =
+        *filter;
+
+    ESP_LOGI(
+        TAG,
+        "TWAI acceptance filter changed: "
+        "format=%s, ID=0x%08lX, mask=0x%08lX",
+        filter->extended
+            ? "extended"
+            : "standard",
+        (unsigned long)filter->identifier,
+        (unsigned long)filter->mask
+    );
 
     return ESP_OK;
 }
@@ -1167,12 +1960,22 @@ esp_err_t can_twai_driver_get_info(
 
     *info = s_info;
 
+    QueueHandle_t rx_queue =
+        s_rx_queue;
+
     twai_node_handle_t node =
         s_node;
 
     portEXIT_CRITICAL(
         &s_lock
     );
+
+    if (rx_queue != NULL) {
+        info->rx_queue_current =
+            (uint32_t)uxQueueMessagesWaiting(
+                rx_queue
+            );
+    }
 
     if (!info->initialized ||
         (node == NULL)) {
