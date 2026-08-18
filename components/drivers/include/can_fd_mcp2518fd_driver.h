@@ -14,14 +14,15 @@ extern "C" {
  * @file can_fd_mcp2518fd_driver.h
  * @brief Secondary CAN controller driver based on MCP2518FD.
  *
- * The initial implementation operates in Classical CAN mode only:
- *
- * - CAN FD is disabled;
- * - Bit Rate Switching is disabled;
- * - payload length is limited to 8 bytes;
- * - nominal bitrate defaults to 500 kbit/s.
+ * The driver supports Classical CAN and CAN FD frames, optional Bit
+ * Rate Switching, payloads up to 64 bytes, hardware timestamps,
+ * acceptance filters and transmission-event tracking.
  *
  * The driver owns the dedicated SPI bus and MCP2518FD interrupt GPIO.
+ *
+ * Public runtime operations are thread-safe after successful
+ * initialization. Driver deinitialization must only be performed by
+ * the component that owns the driver lifecycle.
  */
 
 #define CAN_FD_MCP2518FD_CLASSIC_DATA_MAX_LENGTH   (8U)

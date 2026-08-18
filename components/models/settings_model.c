@@ -29,12 +29,16 @@ _Static_assert(
 static app_settings_t s_settings;
 static SemaphoreHandle_t s_mutex = NULL;
 
-static bool settings_model_can_bitrate_valid(
+static bool settings_model_nominal_can_bitrate_valid(
     uint32_t bitrate
 )
 {
     switch (bitrate) {
+        case 10000U:
+        case 20000U:
+        case 33333U:
         case 50000U:
+        case 83333U:
         case 100000U:
         case 125000U:
         case 250000U:
@@ -42,6 +46,27 @@ static bool settings_model_can_bitrate_valid(
         case 800000U:
         case 1000000U:
             return true;
+
+        default:
+            return false;
+    }
+}
+
+static bool settings_model_can_fd_brs_bitrate_valid(
+    uint32_t bitrate
+)
+{
+    switch (bitrate) {
+        case 1000000U:
+        case 2000000U:
+        case 4000000U:
+        case 5000000U:
+            return true;
+
+#if SETTINGS_CAN_FD_DATA_BITRATE_MAX >= 8000000U
+        case 8000000U:
+            return true;
+#endif
 
         default:
             return false;
@@ -218,14 +243,56 @@ static esp_err_t settings_model_validate(
     }
 
     /*
-     * Keep a valid bitrate even while CAN is disabled so the interface can
-     * be enabled later without requiring an additional configuration step.
+     * Keep a valid bitrate even while CAN is disabled so the interface
+     * can be enabled later without additional configuration.
      */
-    if (!settings_model_can_bitrate_valid(
+    if (!settings_model_nominal_can_bitrate_valid(
             settings->can_primary.bitrate
         )) {
 
         return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!settings_model_nominal_can_bitrate_valid(
+            settings->can_secondary.nominal_bitrate
+        )) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /*
+     * Bit Rate Switching is available only for CAN FD frames.
+     */
+    if (settings->can_secondary.brs_enabled &&
+        !settings->can_secondary.fd_enabled) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (settings->can_secondary.brs_enabled) {
+        /*
+         * The BRS data phase must use one of the supported high-speed
+         * bitrates and must be faster than the arbitration phase.
+         */
+        if (!settings_model_can_fd_brs_bitrate_valid(
+                settings->can_secondary.data_bitrate
+            ) ||
+            (settings->can_secondary.data_bitrate <=
+            settings->can_secondary.nominal_bitrate)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+    } else {
+        /*
+         * Classical CAN and CAN FD without BRS use the nominal bitrate
+         * for the complete frame.
+         */
+        if (settings->can_secondary.data_bitrate !=
+            settings->can_secondary.nominal_bitrate) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
     }
 
     return ESP_OK;
@@ -368,6 +435,24 @@ esp_err_t settings_model_set_defaults(
 
     settings->can_primary.listen_only =
         SETTINGS_CAN_PRIMARY_LISTEN_ONLY_DEFAULT;
+
+    settings->can_secondary.enabled =
+        SETTINGS_CAN_SECONDARY_ENABLED_DEFAULT;
+
+    settings->can_secondary.nominal_bitrate =
+        SETTINGS_CAN_SECONDARY_NOMINAL_BITRATE_DEFAULT;
+
+    settings->can_secondary.data_bitrate =
+        SETTINGS_CAN_SECONDARY_DATA_BITRATE_DEFAULT;
+
+    settings->can_secondary.fd_enabled =
+        SETTINGS_CAN_SECONDARY_FD_ENABLED_DEFAULT;
+
+    settings->can_secondary.brs_enabled =
+        SETTINGS_CAN_SECONDARY_BRS_ENABLED_DEFAULT;
+
+    settings->can_secondary.listen_only =
+        SETTINGS_CAN_SECONDARY_LISTEN_ONLY_DEFAULT;
 
     return ESP_OK;
 }

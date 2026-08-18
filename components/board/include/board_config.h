@@ -52,13 +52,16 @@
  * MCP2518FD controller and TCAN1042HGV transceiver.
  */
 #define CAN_FD_SPI_HOST               SPI3_HOST
-#define CAN_FD_SPI_CLOCK_HZ           (10 * 1000 * 1000)
+#define CAN_FD_SPI_CLOCK_HZ           (8 * 1000 * 1000)
 
 #define CAN_FD_PIN_MOSI               GPIO_NUM_11
 #define CAN_FD_PIN_MISO               GPIO_NUM_14
 #define CAN_FD_PIN_SCLK               GPIO_NUM_12
 #define CAN_FD_PIN_CS                 GPIO_NUM_10
 #define CAN_FD_PIN_INT                GPIO_NUM_7
+
+#define CAN_FD_EXTERNAL_OSCILLATOR_HZ (20U * 1000U * 1000U)
+#define CAN_FD_SYSTEM_CLOCK_HZ        (20U * 1000U * 1000U)
 
 /*
  * Passive low-level-trigger buzzer.

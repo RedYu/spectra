@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "esp_err.h"
 #include "esp_heap_caps.h"
@@ -672,6 +673,71 @@ static void startup_task(
         (void)gui_service_set_boot_progress(
             70U,
             "Primary CAN disabled"
+        );
+    }
+
+    if (settings.can_secondary.enabled) {
+        const bool secondary_can_running =
+            can_fd_service_is_running();
+
+        (void)gui_service_set_boot_progress(
+            72U,
+            secondary_can_running
+                ? "Secondary CAN ready"
+                : "Secondary CAN unavailable"
+        );
+
+        if (!secondary_can_running) {
+            startup_warning = true;
+
+            ESP_LOGW(
+                TAG,
+                "Secondary CAN is enabled but not running"
+            );
+
+        } else {
+            can_fd_mcp2518fd_info_t can_fd_info;
+
+            const esp_err_t info_result =
+                can_fd_service_get_info(
+                    &can_fd_info
+                );
+
+            if (info_result != ESP_OK) {
+                startup_warning = true;
+
+                ESP_LOGW(
+                    TAG,
+                    "Failed to read secondary CAN information: %s",
+                    esp_err_to_name(info_result)
+                );
+
+            } else {
+                ESP_LOGI(
+                    TAG,
+                    "Secondary CAN ready: "
+                    "nominal=%lu, data=%lu, "
+                    "FD=%s, BRS=%s, mode=%u",
+                    (unsigned long)
+                        can_fd_info.nominal_bitrate,
+                    (unsigned long)
+                        can_fd_info.data_bitrate,
+                    can_fd_info.fd_enabled
+                        ? "enabled"
+                        : "disabled",
+                    can_fd_info.brs_enabled
+                        ? "enabled"
+                        : "disabled",
+                    (unsigned int)
+                        can_fd_info.mode
+                );
+            }
+        }
+
+    } else {
+        (void)gui_service_set_boot_progress(
+            72U,
+            "Secondary CAN disabled"
         );
     }
 

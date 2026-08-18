@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 
 #include "app_config.h"
+#include "board_config.h"
 #include "gui_config.h"
 #include "storage_sd_service.h"
 #include "display_backlight.h"
@@ -23,6 +24,7 @@
 #include "wifi_credentials_service.h"
 #include "usb_network_service.h"
 #include "can_service.h"
+#include "can_fd_service.h"
 #include "buzzer_service.h"
 
 #define SETTINGS_JSON_INDENT_SPACES  (4U)
@@ -1254,6 +1256,88 @@ static esp_err_t parse_config(
 
         parsed_settings->can_primary.listen_only =
             cJSON_IsTrue(listen_only);
+
+        const cJSON *secondary =
+            cJSON_GetObjectItemCaseSensitive(
+                can,
+                "secondary"
+            );
+
+        /*
+         * Secondary CAN is optional for compatibility with configuration
+         * files created before MCP2518FD support was introduced.
+         */
+        if (secondary != NULL) {
+            if (!cJSON_IsObject(secondary)) {
+                result = ESP_ERR_INVALID_RESPONSE;
+                goto cleanup;
+            }
+
+            const cJSON *secondary_enabled =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "enabled"
+                );
+
+            const cJSON *nominal_bitrate =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "nominal_bitrate"
+                );
+
+            const cJSON *data_bitrate =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "data_bitrate"
+                );
+
+            const cJSON *fd_enabled =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "fd_enabled"
+                );
+
+            const cJSON *brs_enabled =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "brs_enabled"
+                );
+
+            const cJSON *secondary_listen_only =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "listen_only"
+                );
+
+            if (!cJSON_IsBool(secondary_enabled) ||
+                !cJSON_IsNumber(nominal_bitrate) ||
+                !cJSON_IsNumber(data_bitrate) ||
+                !cJSON_IsBool(fd_enabled) ||
+                !cJSON_IsBool(brs_enabled) ||
+                !cJSON_IsBool(secondary_listen_only)) {
+
+                result = ESP_ERR_INVALID_RESPONSE;
+                goto cleanup;
+            }
+
+            parsed_settings->can_secondary.enabled =
+                cJSON_IsTrue(secondary_enabled);
+
+            parsed_settings->can_secondary.nominal_bitrate =
+                (uint32_t)nominal_bitrate->valuedouble;
+
+            parsed_settings->can_secondary.data_bitrate =
+                (uint32_t)data_bitrate->valuedouble;
+
+            parsed_settings->can_secondary.fd_enabled =
+                cJSON_IsTrue(fd_enabled);
+
+            parsed_settings->can_secondary.brs_enabled =
+                cJSON_IsTrue(brs_enabled);
+
+            parsed_settings->can_secondary.listen_only =
+                cJSON_IsTrue(secondary_listen_only);
+        }
     }
 
     /*
@@ -1617,6 +1701,50 @@ static cJSON *settings_service_create_json(
             primary,
             "listen_only",
             settings->can_primary.listen_only
+        ) == NULL)) {
+
+        goto error;
+    }
+
+    cJSON *secondary =
+        cJSON_AddObjectToObject(
+            can,
+            "secondary"
+        );
+
+    if (secondary == NULL) {
+        goto error;
+    }
+
+    if ((cJSON_AddBoolToObject(
+            secondary,
+            "enabled",
+            settings->can_secondary.enabled
+        ) == NULL) ||
+        (cJSON_AddNumberToObject(
+            secondary,
+            "nominal_bitrate",
+            settings->can_secondary.nominal_bitrate
+        ) == NULL) ||
+        (cJSON_AddNumberToObject(
+            secondary,
+            "data_bitrate",
+            settings->can_secondary.data_bitrate
+        ) == NULL) ||
+        (cJSON_AddBoolToObject(
+            secondary,
+            "fd_enabled",
+            settings->can_secondary.fd_enabled
+        ) == NULL) ||
+        (cJSON_AddBoolToObject(
+            secondary,
+            "brs_enabled",
+            settings->can_secondary.brs_enabled
+        ) == NULL) ||
+        (cJSON_AddBoolToObject(
+            secondary,
+            "listen_only",
+            settings->can_secondary.listen_only
         ) == NULL)) {
 
         goto error;
@@ -2335,6 +2463,62 @@ static void settings_service_build_can_config(
         3;
 }
 
+static void settings_service_build_can_fd_config(
+    const can_secondary_settings_t *settings,
+    can_fd_service_config_t *config
+)
+{
+    if ((settings == NULL) ||
+        (config == NULL)) {
+
+        return;
+    }
+
+    memset(
+        config,
+        0,
+        sizeof(*config)
+    );
+
+    config->driver.oscillator_hz =
+        CAN_FD_SYSTEM_CLOCK_HZ;
+
+    config->driver.nominal_bitrate =
+        settings->nominal_bitrate;
+
+    config->driver.data_bitrate =
+        settings->data_bitrate;
+
+    config->driver.mode =
+        settings->listen_only
+            ? CAN_FD_MCP2518FD_MODE_LISTEN_ONLY
+            : CAN_FD_MCP2518FD_MODE_NORMAL;
+
+    config->driver.fd_enabled =
+        settings->fd_enabled;
+
+    config->driver.brs_enabled =
+        settings->brs_enabled;
+
+    config->driver.tx_fifo_depth = 8U;
+    config->driver.rx_fifo_depth = 16U;
+
+    config->driver.spi_crc_enabled = false;
+
+    config->driver.retransmission =
+        CAN_FD_MCP2518FD_RETRANSMISSION_UNLIMITED;
+
+    /*
+     * Frame processing callbacks will be connected to the application
+     * CAN routing layer later.
+     */
+    config->receive_callback = NULL;
+    config->receive_context = NULL;
+
+    config->tx_confirmation_callback = NULL;
+    config->tx_confirmation_context = NULL;
+}
+
 static esp_err_t settings_service_apply_can_primary(
     const can_primary_settings_t *settings
 )
@@ -2399,6 +2583,103 @@ static esp_err_t settings_service_apply_can_primary(
 
     return can_service_reconfigure(
         &config.driver
+    );
+}
+
+static esp_err_t settings_service_apply_can_secondary(
+    const can_secondary_settings_t *settings
+)
+{
+    if (settings == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!settings->enabled) {
+        if (!can_fd_service_is_running()) {
+            return ESP_OK;
+        }
+
+        return can_fd_service_stop();
+    }
+
+    can_fd_service_config_t config;
+
+    settings_service_build_can_fd_config(
+        settings,
+        &config
+    );
+
+    if (!can_fd_service_is_running()) {
+        return can_fd_service_start(
+            &config
+        );
+    }
+
+    can_fd_mcp2518fd_info_t current_info;
+
+    esp_err_t result =
+        can_fd_service_get_info(
+            &current_info
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if ((current_info.nominal_bitrate ==
+         config.driver.nominal_bitrate) &&
+        (current_info.data_bitrate ==
+         config.driver.data_bitrate) &&
+        (current_info.mode ==
+         config.driver.mode) &&
+        (current_info.fd_enabled ==
+         config.driver.fd_enabled) &&
+        (current_info.brs_enabled ==
+         config.driver.brs_enabled) &&
+        (current_info.retransmission ==
+         config.driver.retransmission)) {
+
+        return ESP_OK;
+    }
+
+    const can_fd_mcp2518fd_runtime_config_t
+        runtime_config = {
+            .nominal_bitrate =
+                config.driver.nominal_bitrate,
+
+            .data_bitrate =
+                config.driver.data_bitrate,
+
+            .mode =
+                config.driver.mode,
+
+            .retransmission =
+                config.driver.retransmission,
+
+            .fd_enabled =
+                config.driver.fd_enabled,
+
+            .brs_enabled =
+                config.driver.brs_enabled,
+        };
+
+    ESP_LOGI(
+        TAG,
+        "Applying secondary CAN configuration: "
+        "nominal=%lu, data=%lu, FD=%s, BRS=%s, mode=%u",
+        (unsigned long)runtime_config.nominal_bitrate,
+        (unsigned long)runtime_config.data_bitrate,
+        runtime_config.fd_enabled
+            ? "enabled"
+            : "disabled",
+        runtime_config.brs_enabled
+            ? "enabled"
+            : "disabled",
+        (unsigned int)runtime_config.mode
+    );
+
+    return can_fd_service_reconfigure(
+        &runtime_config
     );
 }
 
@@ -2528,6 +2809,21 @@ static esp_err_t settings_service_apply_internal(void)
         ESP_LOGE(
             TAG,
             "Failed to apply primary CAN settings: %s",
+            esp_err_to_name(result)
+        );
+
+        goto cleanup;
+    }
+
+    result =
+        settings_service_apply_can_secondary(
+            &settings->can_secondary
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply secondary CAN settings: %s",
             esp_err_to_name(result)
         );
 
@@ -2696,6 +2992,29 @@ static esp_err_t settings_service_apply_internal(void)
             : "false",
         (unsigned long)settings->can_primary.bitrate,
         settings->can_primary.listen_only
+            ? "listen-only"
+            : "normal"
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Secondary CAN: enabled=%s, "
+        "nominal=%lu, data=%lu, "
+        "FD=%s, BRS=%s, mode=%s",
+        settings->can_secondary.enabled
+            ? "true"
+            : "false",
+        (unsigned long)
+            settings->can_secondary.nominal_bitrate,
+        (unsigned long)
+            settings->can_secondary.data_bitrate,
+        settings->can_secondary.fd_enabled
+            ? "enabled"
+            : "disabled",
+        settings->can_secondary.brs_enabled
+            ? "enabled"
+            : "disabled",
+        settings->can_secondary.listen_only
             ? "listen-only"
             : "normal"
     );
@@ -3890,6 +4209,128 @@ esp_err_t settings_service_set_can_primary(
             ESP_LOGE(
                 TAG,
                 "Failed to restore previous CAN settings: %s",
+                esp_err_to_name(rollback_result)
+            );
+        }
+
+        settings_service_unlock();
+        return result;
+    }
+
+    settings_service_unlock();
+
+    return ESP_OK;
+}
+
+esp_err_t settings_service_set_can_secondary(
+    bool enabled,
+    uint32_t nominal_bitrate,
+    uint32_t data_bitrate,
+    bool fd_enabled,
+    bool brs_enabled,
+    bool listen_only
+)
+{
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (!s_initialized) {
+        settings_service_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    app_settings_t previous;
+
+    esp_err_t result =
+        settings_model_get(
+            &previous
+        );
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+        return result;
+    }
+
+    if ((previous.can_secondary.enabled ==
+         enabled) &&
+        (previous.can_secondary.nominal_bitrate ==
+         nominal_bitrate) &&
+        (previous.can_secondary.data_bitrate ==
+         data_bitrate) &&
+        (previous.can_secondary.fd_enabled ==
+         fd_enabled) &&
+        (previous.can_secondary.brs_enabled ==
+         brs_enabled) &&
+        (previous.can_secondary.listen_only ==
+         listen_only)) {
+
+        settings_service_unlock();
+        return ESP_OK;
+    }
+
+    app_settings_t updated =
+        previous;
+
+    updated.can_secondary.enabled =
+        enabled;
+
+    updated.can_secondary.nominal_bitrate =
+        nominal_bitrate;
+
+    updated.can_secondary.data_bitrate =
+        data_bitrate;
+
+    updated.can_secondary.fd_enabled =
+        fd_enabled;
+
+    updated.can_secondary.brs_enabled =
+        brs_enabled;
+
+    updated.can_secondary.listen_only =
+        listen_only;
+
+    /*
+     * Validate the complete settings model before modifying the
+     * hardware configuration.
+     */
+    result =
+        settings_model_set(
+            &updated
+        );
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+        return result;
+    }
+
+    result =
+        settings_service_apply_can_secondary(
+            &updated.can_secondary
+        );
+
+    if (result != ESP_OK) {
+        /*
+         * Restore the settings model first, then attempt to restore
+         * the previous MCP2518FD runtime state.
+         */
+        (void)settings_model_set(
+            &previous
+        );
+
+        const esp_err_t rollback_result =
+            settings_service_apply_can_secondary(
+                &previous.can_secondary
+            );
+
+        if (rollback_result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to restore previous secondary CAN "
+                "settings: %s",
                 esp_err_to_name(rollback_result)
             );
         }

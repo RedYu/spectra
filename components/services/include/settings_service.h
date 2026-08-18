@@ -419,6 +419,30 @@ esp_err_t settings_service_set_can_primary(
     bool listen_only
 );
 
+/**
+ * @brief Configure and immediately apply the secondary CAN interface.
+ *
+ * The secondary interface uses the MCP2518FD controller and supports
+ * both Classical CAN and CAN FD. Enabling starts the service,
+ * disabling stops it, and changing an active configuration performs a
+ * runtime reconfiguration.
+ *
+ * Without BRS, data_bitrate must equal nominal_bitrate. BRS requires
+ * CAN FD to be enabled and data_bitrate to be higher than
+ * nominal_bitrate.
+ *
+ * The settings are not automatically saved. Call
+ * settings_service_save() after this function succeeds.
+ */
+esp_err_t settings_service_set_can_secondary(
+    bool enabled,
+    uint32_t nominal_bitrate,
+    uint32_t data_bitrate,
+    bool fd_enabled,
+    bool brs_enabled,
+    bool listen_only
+);
+
 #ifdef __cplusplus
 }
 #endif

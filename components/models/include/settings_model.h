@@ -70,6 +70,27 @@ extern "C" {
 #define SETTINGS_CAN_PRIMARY_BITRATE_DEFAULT       (500000U)
 #define SETTINGS_CAN_PRIMARY_LISTEN_ONLY_DEFAULT   (true)
 
+#define SETTINGS_CAN_SECONDARY_ENABLED_DEFAULT \
+    (false)
+
+#define SETTINGS_CAN_SECONDARY_NOMINAL_BITRATE_DEFAULT \
+    (500000U)
+
+#define SETTINGS_CAN_SECONDARY_DATA_BITRATE_DEFAULT \
+    (500000U)
+
+#define SETTINGS_CAN_FD_DATA_BITRATE_MAX \
+    (5000000U)
+
+#define SETTINGS_CAN_SECONDARY_FD_ENABLED_DEFAULT \
+    (false)
+
+#define SETTINGS_CAN_SECONDARY_BRS_ENABLED_DEFAULT \
+    (false)
+
+#define SETTINGS_CAN_SECONDARY_LISTEN_ONLY_DEFAULT \
+    (true)
+
 /**
  * @brief Primary Classical CAN interface settings.
  *
@@ -87,6 +108,33 @@ typedef struct
     bool listen_only;
 
 } can_primary_settings_t;
+
+/**
+ * @brief Secondary MCP2518FD CAN interface settings.
+ *
+ * The interface supports both Classical CAN and CAN FD frames.
+ *
+ * nominal_bitrate configures the arbitration phase. data_bitrate
+ * configures the CAN FD data phase when BRS is enabled.
+ *
+ * When CAN FD or BRS is disabled, data_bitrate must be equal to
+ * nominal_bitrate.
+ *
+ * Listen-only mode prevents transmission and acknowledgement and is
+ * recommended when connecting to an unknown CAN bus.
+ */
+typedef struct
+{
+    bool enabled;
+
+    uint32_t nominal_bitrate;
+    uint32_t data_bitrate;
+
+    bool fd_enabled;
+    bool brs_enabled;
+    bool listen_only;
+
+} can_secondary_settings_t;
 
 typedef struct
 {
@@ -226,6 +274,7 @@ typedef struct
     usb_rndis_settings_t usb_rndis;
 
     can_primary_settings_t can_primary;
+    can_secondary_settings_t can_secondary;
 
 } app_settings_t;
 

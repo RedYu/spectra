@@ -45,6 +45,14 @@
             "enabled": false,
             "bitrate": 500000,
             "listen_only": true
+        },
+        "secondary": {
+            "enabled": false,
+            "nominal_bitrate": 500000,
+            "data_bitrate": 500000,
+            "fd_enabled": false,
+            "brs_enabled": false,
+            "listen_only": true
         }
     }
 }
