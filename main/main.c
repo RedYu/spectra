@@ -30,6 +30,7 @@
 #include "internet_service.h"
 #include "crash_dump_service.h"
 #include "can_service.h"
+#include "can_fd_service.h"
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
@@ -649,14 +650,17 @@ static void startup_task(
     }
 
     if (settings.can_primary.enabled) {
+        const bool primary_can_running =
+            can_service_is_running();
+
         (void)gui_service_set_boot_progress(
             70U,
-            can_service_is_running()
+            primary_can_running
                 ? "Primary CAN ready"
                 : "Primary CAN unavailable"
         );
 
-        if (!can_service_is_running()) {
+        if (!primary_can_running) {
             startup_warning = true;
 
             ESP_LOGW(
@@ -664,7 +668,6 @@ static void startup_task(
                 "Primary CAN is enabled but not running"
             );
         }
-
     } else {
         (void)gui_service_set_boot_progress(
             70U,

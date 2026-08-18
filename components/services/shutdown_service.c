@@ -21,6 +21,7 @@
 #include "battery_service.h"
 #include "buzzer_service.h"
 #include "can_service.h"
+#include "can_fd_service.h"
 #include "settings_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
@@ -143,6 +144,19 @@ static void shutdown_service_task(
                 TAG,
                 "Failed to stop primary CAN service: %s",
                 esp_err_to_name(can_result)
+            );
+        }
+    }
+
+    if (can_fd_service_is_running()) {
+        const esp_err_t can_fd_result =
+            can_fd_service_stop();
+
+        if (can_fd_result != ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Failed to stop CAN FD service: %s",
+                esp_err_to_name(can_fd_result)
             );
         }
     }
