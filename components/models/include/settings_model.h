@@ -18,6 +18,11 @@ extern "C" {
 #define SETTINGS_DISPLAY_BRIGHTNESS_MAX            (100U)
 #define SETTINGS_DISPLAY_BRIGHTNESS_DEFAULT        (80U)
 
+#define SETTINGS_SOUND_ENABLED_DEFAULT             (true)
+#define SETTINGS_SOUND_VOLUME_MIN                  (0U)
+#define SETTINGS_SOUND_VOLUME_MAX                  (100U)
+#define SETTINGS_SOUND_VOLUME_DEFAULT              (70U)
+
 #define SETTINGS_LOGGING_SD_ENABLED_DEFAULT        (false)
 #define SETTINGS_UI_ANIMATIONS_ENABLED_DEFAULT     (false)
 
@@ -95,6 +100,20 @@ typedef struct
     uint8_t brightness;
 
 } display_settings_t;
+
+/**
+ * @brief Audible-feedback settings.
+ *
+ * Volume is expressed as a percentage from 0 to 100. A zero value
+ * effectively mutes the buzzer while preserving the enabled setting.
+ * Changes can be applied at runtime.
+ */
+typedef struct
+{
+    bool enabled;
+    uint8_t volume_percent;
+
+} sound_settings_t;
 
 typedef struct
 {
@@ -198,6 +217,7 @@ typedef struct
 
     device_settings_t device;
     display_settings_t display;
+    sound_settings_t sound;
     logging_settings_t logging;
     ui_settings_t ui;
 

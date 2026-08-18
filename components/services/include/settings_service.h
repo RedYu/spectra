@@ -266,8 +266,9 @@ esp_err_t settings_service_save(void);
 /**
  * @brief Apply the current settings to application services.
  *
- * Applies display brightness, SD-card logging, per-tag logging levels,
- * GUI animations, Wi-Fi states and the primary CAN configuration.
+ * Applies display brightness, sound settings, SD-card logging,
+ * per-tag logging levels, GUI animations, Wi-Fi states and the
+ * primary CAN configuration.
  *
  * STA credentials are loaded separately from NVS and must match the
  * SSID and credential identifier stored in the settings model.
@@ -370,6 +371,27 @@ esp_err_t settings_service_set_theme_mode(
  */
 esp_err_t settings_service_mark_theme_applied(
     ui_theme_mode_t theme_mode
+);
+
+/**
+ * @brief Configure and immediately apply audible feedback.
+ *
+ * Updates the sound settings in the model and applies them to the
+ * buzzer service. The setting is not automatically saved; call
+ * settings_service_save() after this function succeeds.
+ *
+ * @param[in] enabled True to enable audible feedback.
+ * @param[in] volume_percent Volume from 0 to
+ * SETTINGS_SOUND_VOLUME_MAX percent.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if volume_percent is
+ * invalid, ESP_ERR_INVALID_STATE if a required service is not running,
+ * ESP_ERR_TIMEOUT if a lock cannot be acquired, otherwise an ESP-IDF
+ * error code.
+ */
+esp_err_t settings_service_set_sound(
+    bool enabled,
+    uint8_t volume_percent
 );
 
 /**

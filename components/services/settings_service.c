@@ -23,6 +23,7 @@
 #include "wifi_credentials_service.h"
 #include "usb_network_service.h"
 #include "can_service.h"
+#include "buzzer_service.h"
 
 #define SETTINGS_JSON_INDENT_SPACES  (4U)
 
@@ -53,6 +54,10 @@ static ui_theme_mode_t s_applied_theme_mode =
 
 static esp_err_t settings_service_lock(void);
 static void settings_service_unlock(void);
+
+static esp_err_t settings_service_apply_sound(
+    const sound_settings_t *sound
+);
 
 static esp_err_t settings_service_set_log_tag_levels_internal(
     const char *warning_tags,
@@ -343,6 +348,32 @@ static esp_err_t settings_service_parse_log_tag_list(
     );
 
     return ESP_OK;
+}
+
+static esp_err_t settings_service_apply_sound(
+    const sound_settings_t *sound
+)
+{
+    if (sound == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!buzzer_service_is_running()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t result =
+        buzzer_service_set_volume(
+            sound->volume_percent
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return buzzer_service_set_enabled(
+        sound->enabled
+    );
 }
 
 static const char *settings_service_theme_mode_to_string(
@@ -709,6 +740,73 @@ static esp_err_t parse_config(
 
     parsed_settings->display.brightness =
         (uint8_t)brightness->valueint;
+
+    /*
+     * Sound configuration is optional for compatibility with files
+     * created before audible-feedback settings were introduced.
+     */
+    const cJSON *sound =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "sound"
+        );
+
+    if (sound != NULL) {
+        if (!cJSON_IsObject(sound)) {
+            ESP_LOGE(
+                TAG,
+                "Invalid sound configuration"
+            );
+
+            result = ESP_ERR_INVALID_RESPONSE;
+            goto cleanup;
+        }
+
+        const cJSON *sound_enabled =
+            cJSON_GetObjectItemCaseSensitive(
+                sound,
+                "enabled"
+            );
+
+        const cJSON *volume_percent =
+            cJSON_GetObjectItemCaseSensitive(
+                sound,
+                "volume_percent"
+            );
+
+        if (!cJSON_IsBool(sound_enabled)) {
+            ESP_LOGE(
+                TAG,
+                "Missing or invalid sound.enabled"
+            );
+
+            result = ESP_ERR_INVALID_RESPONSE;
+            goto cleanup;
+        }
+
+        if (!cJSON_IsNumber(volume_percent) ||
+            (volume_percent->valuedouble !=
+            (double)volume_percent->valueint) ||
+            (volume_percent->valueint <
+            (int)SETTINGS_SOUND_VOLUME_MIN) ||
+            (volume_percent->valueint >
+            (int)SETTINGS_SOUND_VOLUME_MAX)) {
+
+            ESP_LOGE(
+                TAG,
+                "Missing or invalid sound.volume_percent"
+            );
+
+            result = ESP_ERR_INVALID_ARG;
+            goto cleanup;
+        }
+
+        parsed_settings->sound.enabled =
+            cJSON_IsTrue(sound_enabled);
+
+        parsed_settings->sound.volume_percent =
+            (uint8_t)volume_percent->valueint;
+    }
 
     /*
      * Validate logging configuration.
@@ -1270,6 +1368,34 @@ static cJSON *settings_service_create_json(
             display,
             "brightness",
             settings->display.brightness
+        ) == NULL) {
+
+        goto error;
+    }
+
+    cJSON *sound =
+        cJSON_AddObjectToObject(
+            root,
+            "sound"
+        );
+
+    if (sound == NULL) {
+        goto error;
+    }
+
+    if (cJSON_AddBoolToObject(
+            sound,
+            "enabled",
+            settings->sound.enabled
+        ) == NULL) {
+
+        goto error;
+    }
+
+    if (cJSON_AddNumberToObject(
+            sound,
+            "volume_percent",
+            settings->sound.volume_percent
         ) == NULL) {
 
         goto error;
@@ -2422,6 +2548,29 @@ static esp_err_t settings_service_apply_internal(void)
         goto cleanup;
     }
 
+    if (buzzer_service_is_running()) {
+        result =
+            settings_service_apply_sound(
+                &settings->sound
+            );
+
+        if (result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to apply sound settings: %s",
+                esp_err_to_name(result)
+            );
+
+            goto cleanup;
+        }
+    } else {
+        ESP_LOGW(
+            TAG,
+            "Sound settings were not applied because "
+            "the buzzer service is unavailable"
+        );
+    }
+
     gui_config_set_animations_enabled(
         settings->ui.animations_enabled
     );
@@ -2501,6 +2650,15 @@ static esp_err_t settings_service_apply_internal(void)
         settings_service_theme_mode_to_string(
             settings->ui.theme_mode
         )
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Sound: feedback=%s, volume=%u%%",
+        settings->sound.enabled
+            ? "enabled"
+            : "disabled",
+        (unsigned int)settings->sound.volume_percent
     );
 
     ESP_LOGI(
@@ -3745,3 +3903,84 @@ esp_err_t settings_service_set_can_primary(
     return ESP_OK;
 }
 
+esp_err_t settings_service_set_sound(
+    bool enabled,
+    uint8_t volume_percent
+)
+{
+    if (volume_percent >
+        SETTINGS_SOUND_VOLUME_MAX) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t lock_result =
+        settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    if (!s_initialized) {
+        settings_service_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    app_settings_t previous;
+
+    esp_err_t result =
+        settings_model_get(
+            &previous
+        );
+
+    if (result != ESP_OK) {
+        settings_service_unlock();
+        return result;
+    }
+
+    app_settings_t updated =
+        previous;
+
+    updated.sound.enabled =
+        enabled;
+
+    updated.sound.volume_percent =
+        volume_percent;
+
+    result =
+        settings_model_set(
+            &updated
+        );
+
+    if (result == ESP_OK) {
+        result =
+            settings_service_apply_sound(
+                &updated.sound
+            );
+    }
+
+    if (result != ESP_OK) {
+        (void)settings_model_set(
+            &previous
+        );
+
+        if (buzzer_service_is_running()) {
+            const esp_err_t rollback_result =
+                settings_service_apply_sound(
+                    &previous.sound
+                );
+
+            if (rollback_result != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "Failed to restore previous sound settings: %s",
+                    esp_err_to_name(rollback_result)
+                );
+            }
+        }
+    }
+
+    settings_service_unlock();
+
+    return result;
+}

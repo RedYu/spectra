@@ -7,6 +7,10 @@
     "display": {
         "brightness": 80
     },
+    "sound": {
+        "enabled": true,
+        "volume_percent": 70
+    },
     "logging": {
         "sd_enabled": true,
 

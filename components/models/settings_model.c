@@ -9,6 +9,23 @@
 
 #define SETTINGS_LOCK_TIMEOUT_MS (100U)
 
+_Static_assert(
+    SETTINGS_SOUND_VOLUME_DEFAULT >=
+    SETTINGS_SOUND_VOLUME_MIN,
+    "Default sound volume is below minimum"
+);
+
+_Static_assert(
+    SETTINGS_SOUND_VOLUME_DEFAULT <=
+    SETTINGS_SOUND_VOLUME_MAX,
+    "Default sound volume exceeds maximum"
+);
+
+_Static_assert(
+    SETTINGS_SOUND_VOLUME_MAX <= UINT8_MAX,
+    "Sound volume does not fit into uint8_t"
+);
+
 static app_settings_t s_settings;
 static SemaphoreHandle_t s_mutex = NULL;
 
@@ -96,6 +113,12 @@ static esp_err_t settings_model_validate(
 
         settings->display.brightness =
             SETTINGS_DISPLAY_BRIGHTNESS_MAX;
+    }
+
+    if (settings->sound.volume_percent >
+        SETTINGS_SOUND_VOLUME_MAX) {
+
+        return ESP_ERR_INVALID_ARG;
     }
 
     if ((settings->ui.theme_mode != UI_THEME_MODE_LIGHT) &&
@@ -270,6 +293,12 @@ esp_err_t settings_model_set_defaults(
 
     settings->display.brightness =
         SETTINGS_DISPLAY_BRIGHTNESS_DEFAULT;
+
+    settings->sound.enabled =
+        SETTINGS_SOUND_ENABLED_DEFAULT;
+
+    settings->sound.volume_percent =
+        SETTINGS_SOUND_VOLUME_DEFAULT;
 
     settings->logging.sd_enabled =
         SETTINGS_LOGGING_SD_ENABLED_DEFAULT;

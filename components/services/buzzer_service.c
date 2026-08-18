@@ -28,6 +28,18 @@
 #define ARRAY_SIZE(array) \
     (sizeof(array) / sizeof((array)[0]))
 
+_Static_assert(
+    BUZZER_SERVICE_VOLUME_MAX_PERCENT ==
+    BUZZER_VOLUME_MAX_PERCENT,
+    "Buzzer service and driver volume ranges must match"
+);
+
+_Static_assert(
+    BUZZER_SERVICE_VOLUME_DEFAULT_PERCENT <=
+    BUZZER_SERVICE_VOLUME_MAX_PERCENT,
+    "Default buzzer volume exceeds maximum"
+);
+
 typedef struct
 {
     uint16_t frequency_hz;
@@ -87,6 +99,11 @@ static atomic_bool s_running =
 
 static atomic_bool s_enabled =
     ATOMIC_VAR_INIT(true);
+
+static atomic_uint_fast8_t s_volume_percent =
+    ATOMIC_VAR_INIT(
+        BUZZER_SERVICE_VOLUME_DEFAULT_PERCENT
+    );
 
 /*
  * Short UI feedback.
@@ -299,7 +316,27 @@ static bool buzzer_service_play_pattern(
         const buzzer_note_t *note =
             &pattern->notes[index];
 
-        const esp_err_t result =
+        const uint8_t volume_percent =
+            (uint8_t)atomic_load(
+                &s_volume_percent
+            );
+
+        esp_err_t result =
+            buzzer_driver_set_volume(
+                volume_percent
+            );
+
+        if (result != ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Failed to apply buzzer volume: %s",
+                esp_err_to_name(result)
+            );
+
+            continue;
+        }
+
+        result =
             buzzer_driver_start_tone(
                 note->frequency_hz
             );
@@ -719,4 +756,56 @@ bool buzzer_service_is_running(void)
     return atomic_load(
         &s_running
     );
+}
+
+esp_err_t buzzer_service_set_volume(
+    uint8_t volume_percent
+)
+{
+    if (volume_percent >
+        BUZZER_SERVICE_VOLUME_MAX_PERCENT) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!atomic_load(&s_running)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    atomic_store(
+        &s_volume_percent,
+        volume_percent
+    );
+
+    /*
+     * Stop current playback immediately when muted. A non-zero volume
+     * is applied when the next note starts.
+     */
+    if (volume_percent == 0U) {
+        return buzzer_service_cancel();
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t buzzer_service_get_volume(
+    uint8_t *volume_percent
+)
+{
+    if (volume_percent == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *volume_percent = 0U;
+
+    if (!atomic_load(&s_running)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    *volume_percent =
+        (uint8_t)atomic_load(
+            &s_volume_percent
+        );
+
+    return ESP_OK;
 }

@@ -1,12 +1,16 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define BUZZER_SERVICE_VOLUME_MAX_PERCENT      (100U)
+#define BUZZER_SERVICE_VOLUME_DEFAULT_PERCENT  (70U)
 
 /**
  * @brief Predefined application buzzer signals.
@@ -129,6 +133,33 @@ esp_err_t buzzer_service_get_enabled(
  * @brief Check whether the buzzer service is running.
  */
 bool buzzer_service_is_running(void);
+
+/**
+ * @brief Set the buzzer volume.
+ *
+ * A zero value mutes and cancels current playback. Other values are
+ * applied when the next note starts.
+ *
+ * @param[in] volume_percent Volume from 0 to 100 percent.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if the value exceeds
+ * 100, or ESP_ERR_INVALID_STATE if the service is not running.
+ */
+esp_err_t buzzer_service_set_volume(
+    uint8_t volume_percent
+);
+
+/**
+ * @brief Get the configured buzzer volume.
+ *
+ * @param[out] volume_percent Destination for the volume percentage.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if volume_percent is
+ * NULL, or ESP_ERR_INVALID_STATE if the service is not running.
+ */
+esp_err_t buzzer_service_get_volume(
+    uint8_t *volume_percent
+);
 
 #ifdef __cplusplus
 }

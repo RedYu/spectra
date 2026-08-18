@@ -25,6 +25,7 @@
 #include "storage_sd_service.h"
 #include "system_service.h"
 #include "can_service.h"
+#include "buzzer_service.h"
 
 #include "widgets/toolbar.h"
 #include "widgets/wifi_credentials_dialog.h"
@@ -76,6 +77,10 @@ static lv_obj_t *s_tabview = NULL;
 
 static lv_obj_t *s_brightness_slider = NULL;
 static lv_obj_t *s_brightness_value_label = NULL;
+
+static lv_obj_t *s_sound_enabled_switch = NULL;
+static lv_obj_t *s_buzzer_volume_slider = NULL;
+static lv_obj_t *s_buzzer_volume_value_label = NULL;
 
 static lv_obj_t *s_sd_logging_switch = NULL;
 static lv_obj_t *s_storage_info_label = NULL;
@@ -177,6 +182,151 @@ static void settings_screen_set_switch_state(
     lv_obj_t *switch_object,
     bool checked
 );
+
+static void buzzer_volume_released_event_cb(
+    lv_event_t *event
+)
+{
+    (void)event;
+
+    if (s_updating_controls) {
+        return;
+    }
+
+    const esp_err_t result =
+        buzzer_service_play(
+            BUZZER_SIGNAL_CLICK
+        );
+
+    if ((result != ESP_OK) &&
+        (result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGW(
+            TAG,
+            "Failed to play volume preview: %s",
+            esp_err_to_name(result)
+        );
+    }
+}
+
+static void sound_enabled_switch_event_cb(
+    lv_event_t *event
+)
+{
+    if (s_updating_controls) {
+        return;
+    }
+
+    lv_obj_t *switch_object =
+        lv_event_get_target_obj(
+            event
+        );
+
+    if (switch_object == NULL) {
+        return;
+    }
+
+    const bool enabled =
+        lv_obj_has_state(
+            switch_object,
+            LV_STATE_CHECKED
+        );
+
+    app_settings_t settings;
+
+    esp_err_t result =
+        settings_model_get(
+            &settings
+        );
+
+    if (result == ESP_OK) {
+        result =
+            settings_service_set_sound(
+                enabled,
+                settings.sound.volume_percent
+            );
+    }
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply sound setting: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)settings_screen_refresh();
+        return;
+    }
+
+    if (s_buzzer_volume_slider != NULL) {
+        if (enabled) {
+            lv_obj_remove_state(
+                s_buzzer_volume_slider,
+                LV_STATE_DISABLED
+            );
+        } else {
+            lv_obj_add_state(
+                s_buzzer_volume_slider,
+                LV_STATE_DISABLED
+            );
+        }
+    }
+}
+
+static void buzzer_volume_slider_event_cb(
+    lv_event_t *event
+)
+{
+    if (s_updating_controls) {
+        return;
+    }
+
+    lv_obj_t *slider =
+        lv_event_get_target_obj(event);
+
+    if (slider == NULL) {
+        return;
+    }
+
+    const int32_t value =
+        lv_slider_get_value(
+            slider
+        );
+
+    app_settings_t settings;
+
+    esp_err_t result =
+        settings_model_get(
+            &settings
+        );
+
+    if (result == ESP_OK) {
+        result =
+            settings_service_set_sound(
+                settings.sound.enabled,
+                (uint8_t)value
+            );
+    }
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply sound volume: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)settings_screen_refresh();
+        return;
+    }
+
+    if (s_buzzer_volume_value_label != NULL) {
+        lv_label_set_text_fmt(
+            s_buzzer_volume_value_label,
+            "%u%%",
+            (unsigned int)value
+        );
+    }
+}
 
 static void settings_screen_status_refresh_timer_cb(
     lv_timer_t *timer
@@ -486,6 +636,9 @@ static void settings_screen_delete_event_cb(
     s_tabview = NULL;
     s_brightness_slider = NULL;
     s_brightness_value_label = NULL;
+    s_sound_enabled_switch = NULL;
+    s_buzzer_volume_slider = NULL;
+    s_buzzer_volume_value_label = NULL;
     s_sd_logging_switch = NULL;
     s_storage_info_label = NULL;
     s_animations_switch = NULL;
@@ -1370,6 +1523,39 @@ static esp_err_t settings_screen_refresh(void)
     }
 
     settings_screen_set_switch_state(
+        s_sound_enabled_switch,
+        settings.sound.enabled
+    );
+
+    if (s_buzzer_volume_slider != NULL) {
+        if (settings.sound.enabled) {
+            lv_obj_remove_state(
+                s_buzzer_volume_slider,
+                LV_STATE_DISABLED
+            );
+        } else {
+            lv_obj_add_state(
+                s_buzzer_volume_slider,
+                LV_STATE_DISABLED
+            );
+        }
+
+        lv_slider_set_value(
+            s_buzzer_volume_slider,
+            (int32_t)settings.sound.volume_percent,
+            LV_ANIM_OFF
+        );
+    }
+
+    if (s_buzzer_volume_value_label != NULL) {
+        lv_label_set_text_fmt(
+            s_buzzer_volume_value_label,
+            "%u%%",
+            (unsigned int)settings.sound.volume_percent
+        );
+    }
+
+    settings_screen_set_switch_state(
         s_sd_logging_switch,
         settings.logging.sd_enabled
     );
@@ -1786,32 +1972,6 @@ static void settings_screen_restart_event_cb(
         lv_event_get_target(event);
 
     if (button == NULL) {
-        return;
-    }
-
-    const esp_err_t save_result =
-        settings_service_save();
-
-    if (save_result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to save settings before restart: %s",
-            esp_err_to_name(save_result)
-        );
-
-        lv_obj_t *label =
-            lv_obj_get_child(
-                button,
-                0
-            );
-
-        if (label != NULL) {
-            lv_label_set_text(
-                label,
-                "Save failed"
-            );
-        }
-
         return;
     }
     
@@ -2817,6 +2977,193 @@ static lv_obj_t *settings_screen_create_switch_card(
     return switch_obj;
 }
 
+static esp_err_t settings_screen_create_buzzer_volume_card(
+    lv_obj_t *tab
+)
+{
+    if (tab == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const gui_theme_t *theme =
+        gui_theme_get();
+
+    if (theme == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    lv_obj_t *card =
+        lv_obj_create(
+            tab
+        );
+
+    if (card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        card,
+        LV_PCT(100),
+        BRIGHTNESS_CARD_HEIGHT
+    );
+
+    settings_screen_style_card(
+        card
+    );
+
+    lv_obj_t *label =
+        lv_label_create(
+            card
+        );
+
+    if (label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_add_style(
+        label,
+        gui_styles_text_body(),
+        LV_PART_MAIN
+    );
+
+    lv_label_set_text(
+        label,
+        "Sound volume"
+    );
+
+    lv_obj_align(
+        label,
+        LV_ALIGN_TOP_LEFT,
+        0,
+        0
+    );
+
+    s_buzzer_volume_value_label =
+        lv_label_create(
+            card
+        );
+
+    if (s_buzzer_volume_value_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_add_style(
+        s_buzzer_volume_value_label,
+        gui_styles_text_body(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_color(
+        s_buzzer_volume_value_label,
+        theme->colors.control_accent,
+        LV_PART_MAIN
+    );
+
+    lv_label_set_text(
+        s_buzzer_volume_value_label,
+        "0%"
+    );
+
+    lv_obj_align(
+        s_buzzer_volume_value_label,
+        LV_ALIGN_TOP_RIGHT,
+        0,
+        0
+    );
+
+    s_buzzer_volume_slider =
+        lv_slider_create(
+            card
+        );
+
+    if (s_buzzer_volume_slider == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        s_buzzer_volume_slider,
+        LV_PCT(100),
+        12
+    );
+
+    lv_obj_align(
+        s_buzzer_volume_slider,
+        LV_ALIGN_BOTTOM_MID,
+        0,
+        0
+    );
+
+    lv_slider_set_range(
+        s_buzzer_volume_slider,
+        SETTINGS_SOUND_VOLUME_MIN,
+        SETTINGS_SOUND_VOLUME_MAX
+    );
+
+    lv_slider_set_value(
+        s_buzzer_volume_slider,
+        SETTINGS_SOUND_VOLUME_DEFAULT,
+        LV_ANIM_OFF
+    );
+
+    lv_obj_set_style_bg_color(
+        s_buzzer_volume_slider,
+        theme->settings.control_track,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_buzzer_volume_slider,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        s_buzzer_volume_slider,
+        theme->colors.control_accent,
+        LV_PART_INDICATOR
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_buzzer_volume_slider,
+        LV_OPA_COVER,
+        LV_PART_INDICATOR
+    );
+
+    lv_obj_set_style_bg_color(
+        s_buzzer_volume_slider,
+        theme->colors.control_accent,
+        LV_PART_KNOB
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_buzzer_volume_slider,
+        LV_OPA_COVER,
+        LV_PART_KNOB
+    );
+
+    lv_obj_set_style_pad_all(
+        s_buzzer_volume_slider,
+        5,
+        LV_PART_KNOB
+    );
+
+    lv_obj_add_event_cb(
+        s_buzzer_volume_slider,
+        buzzer_volume_slider_event_cb,
+        LV_EVENT_VALUE_CHANGED,
+        NULL
+    );
+
+    lv_obj_add_event_cb(
+        s_buzzer_volume_slider,
+        buzzer_volume_released_event_cb,
+        LV_EVENT_RELEASED,
+        NULL
+    );
+
+    return ESP_OK;
+}
+
 static esp_err_t settings_screen_create_theme_card(
     lv_obj_t *parent
 )
@@ -3165,6 +3512,26 @@ static esp_err_t settings_screen_create_general_tab(
         LV_EVENT_VALUE_CHANGED,
         NULL
     );
+
+    s_sound_enabled_switch =
+        settings_screen_create_switch_card(
+            tab,
+            "Enable sounds",
+            sound_enabled_switch_event_cb
+        );
+
+    if (s_sound_enabled_switch == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    const esp_err_t volume_result =
+        settings_screen_create_buzzer_volume_card(
+            tab
+        );
+
+    if (volume_result != ESP_OK) {
+        return volume_result;
+    }
 
     s_animations_switch =
         settings_screen_create_switch_card(
@@ -4473,6 +4840,9 @@ lv_obj_t *settings_screen_create(void)
     s_tabview = NULL;
     s_brightness_slider = NULL;
     s_brightness_value_label = NULL;
+    s_sound_enabled_switch = NULL;
+    s_buzzer_volume_slider = NULL;
+    s_buzzer_volume_value_label = NULL;
     s_sd_logging_switch = NULL;
     s_storage_info_label = NULL;
     s_animations_switch = NULL;
@@ -4646,6 +5016,9 @@ void settings_screen_destroy(
     s_tabview = NULL;
     s_brightness_slider = NULL;
     s_brightness_value_label = NULL;
+    s_sound_enabled_switch = NULL;
+    s_buzzer_volume_slider = NULL;
+    s_buzzer_volume_value_label = NULL;
     s_sd_logging_switch = NULL;
     s_storage_info_label = NULL;
     s_animations_switch = NULL;

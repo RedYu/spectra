@@ -11,7 +11,12 @@
 #define BUZZER_LEDC_DUTY_RESOLUTION    LEDC_TIMER_10_BIT
 
 #define BUZZER_DEFAULT_FREQUENCY_HZ    (2000U)
+
+#define BUZZER_LEDC_DUTY_MAX           (1023U)
 #define BUZZER_DUTY_50_PERCENT         (512U)
+
+static uint8_t s_volume_percent =
+    BUZZER_VOLUME_DEFAULT_PERCENT;
 
 _Static_assert(
     BUZZER_ACTIVE_LEVEL !=
@@ -123,9 +128,11 @@ esp_err_t buzzer_driver_init(void)
     }
 
     /*
-     * The external buzzer module is active low. PWM polarity does not
-     * affect the sound of a passive buzzer, so output inversion is not
-     * required. The channel is stopped at a high level when inactive.
+     * The external buzzer module is active low. Keep the LEDC output
+     * non-inverted so that a stopped channel can explicitly hold the
+     * signal high. Volume control maps the duty cycle from almost always
+     * high at low volume to a symmetrical 50-percent waveform at maximum
+     * volume.
      */
     const ledc_channel_config_t channel_config = {
         .gpio_num =
@@ -253,28 +260,42 @@ esp_err_t buzzer_driver_start_tone(
         return ESP_ERR_INVALID_ARG;
     }
 
-    const uint32_t configured_frequency =
+    if (s_volume_percent == 0U) {
+        return buzzer_driver_stop();
+    }
+
+    esp_err_t result =
         ledc_set_freq(
             BUZZER_LEDC_SPEED_MODE,
             BUZZER_LEDC_TIMER,
             frequency_hz
         );
 
-    if (configured_frequency == 0U) {
+    if (result != ESP_OK) {
         ESP_LOGE(
             TAG,
-            "Failed to set buzzer frequency to %lu Hz",
-            (unsigned long)frequency_hz
+            "Failed to set buzzer frequency to %lu Hz: %s",
+            (unsigned long)frequency_hz,
+            esp_err_to_name(result)
         );
 
-        return ESP_FAIL;
+        return result;
     }
 
-    esp_err_t result =
+    const uint32_t active_range =
+        BUZZER_LEDC_DUTY_MAX -
+        BUZZER_DUTY_50_PERCENT;
+
+    const uint32_t duty =
+        BUZZER_LEDC_DUTY_MAX -
+        ((active_range * s_volume_percent) /
+        BUZZER_VOLUME_MAX_PERCENT);
+
+    result =
         ledc_set_duty(
             BUZZER_LEDC_SPEED_MODE,
             BUZZER_LEDC_CHANNEL,
-            BUZZER_DUTY_50_PERCENT
+            duty
         );
 
     if (result != ESP_OK) {
@@ -314,6 +335,44 @@ esp_err_t buzzer_driver_stop(void)
     }
 
     return result;
+}
+
+esp_err_t buzzer_driver_set_volume(
+    uint8_t volume_percent
+)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (volume_percent >
+        BUZZER_VOLUME_MAX_PERCENT) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_volume_percent =
+        volume_percent;
+
+    return ESP_OK;
+}
+
+esp_err_t buzzer_driver_get_volume(
+    uint8_t *volume_percent
+)
+{
+    if (volume_percent == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    *volume_percent =
+        s_volume_percent;
+
+    return ESP_OK;
 }
 
 bool buzzer_driver_is_initialized(void)
