@@ -18,7 +18,7 @@
 #define BATTERY_SERVICE_LOCK_TIMEOUT_MS     (100U)
 #define BATTERY_SERVICE_STOP_TIMEOUT_MS     (2000U)
 
-#define BATTERY_SERVICE_TASK_STACK_SIZE     (3072U)
+#define BATTERY_SERVICE_TASK_STACK_SIZE     (2304U)
 #define BATTERY_SERVICE_TASK_PRIORITY       (3U)
 
 #define BATTERY_SERVICE_PRESENT_MIN_MV      (2500U)
@@ -283,6 +283,19 @@ static void battery_service_task(
 
     while (true) {
         battery_service_update();
+
+        const UBaseType_t watermark =
+            uxTaskGetStackHighWaterMark(
+                NULL
+            );
+
+        if (watermark < 512U) {
+            ESP_LOGW(
+                TAG,
+                "Battery task stack is low: %u bytes",
+                (unsigned int)watermark
+            );
+        }
 
         const EventBits_t bits =
             xEventGroupWaitBits(

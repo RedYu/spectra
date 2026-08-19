@@ -18,7 +18,7 @@
             "warning": "tusb_desc,dns_redirect_server,wifi,wifi_init,esp-x509-crt-bundle,can_twai_driver,can_service",
             "info": "",
             "debug": "",
-            "disabled": "memory"
+            "disabled": ""
         }
     },
     "ui": {
