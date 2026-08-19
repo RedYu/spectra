@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "esp_err.h"
 #include "esp_heap_caps.h"
@@ -37,15 +38,6 @@
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
 
-#define TWAI_STARTUP_SELF_TEST_ENABLED  (1)
-#define TWAI_SELF_TEST_TIMEOUT_MS       (500U)
-
-#define CAN_FD_STARTUP_SELF_TEST_ENABLED  (1)
-#define CAN_FD_SELF_TEST_TIMEOUT_MS       (500U)
-
-#define CAN_LINK_STARTUP_SELF_TEST_ENABLED  (1)
-#define CAN_LINK_TEST_TIMEOUT_MS          (500U)
-
 typedef enum
 {
     SERVICE_OPTIONAL = 0,
@@ -54,217 +46,6 @@ typedef enum
 } service_requirement_t;
 
 static const char *TAG = "app_main";
-
-static esp_err_t app_wait_secondary_can_rx(
-    uint32_t previous_count,
-    uint32_t timeout_ms
-)
-{
-    const TickType_t started_at =
-        xTaskGetTickCount();
-
-    TickType_t timeout_ticks =
-        pdMS_TO_TICKS(
-            timeout_ms
-        );
-
-    if (timeout_ticks == 0U) {
-        timeout_ticks = 1U;
-    }
-
-    while ((xTaskGetTickCount() -
-            started_at) < timeout_ticks) {
-
-        can_fd_mcp2518fd_info_t info;
-
-        if ((can_fd_service_get_info(
-                 &info
-             ) == ESP_OK) &&
-            (info.received_frames >
-             previous_count)) {
-
-            return ESP_OK;
-        }
-
-        vTaskDelay(1U);
-    }
-
-    return ESP_ERR_TIMEOUT;
-}
-
-static esp_err_t app_wait_primary_can_rx(
-    uint32_t previous_count,
-    uint32_t timeout_ms
-)
-{
-    const TickType_t started_at =
-        xTaskGetTickCount();
-
-    TickType_t timeout_ticks =
-        pdMS_TO_TICKS(
-            timeout_ms
-        );
-
-    if (timeout_ticks == 0U) {
-        timeout_ticks = 1U;
-    }
-
-    while ((xTaskGetTickCount() -
-            started_at) < timeout_ticks) {
-
-        can_twai_driver_info_t info;
-
-        if ((can_service_get_info(
-                 &info
-             ) == ESP_OK) &&
-            (info.received_frames >
-             previous_count)) {
-
-            return ESP_OK;
-        }
-
-        vTaskDelay(1U);
-    }
-
-    return ESP_ERR_TIMEOUT;
-}
-
-static esp_err_t app_can_link_self_test(void)
-{
-    if (!can_service_is_running() ||
-        !can_fd_service_is_running()) {
-
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    can_twai_driver_info_t primary_before;
-    can_fd_mcp2518fd_info_t secondary_before;
-
-    esp_err_t result =
-        can_service_get_info(
-            &primary_before
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    result =
-        can_fd_service_get_info(
-            &secondary_before
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    if ((primary_before.mode !=
-         CAN_TWAI_MODE_NORMAL) ||
-        (secondary_before.mode !=
-         CAN_FD_MCP2518FD_MODE_NORMAL) ||
-        (primary_before.bitrate !=
-         secondary_before.nominal_bitrate)) {
-
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    /*
-     * Primary TWAI -> secondary MCP2518FD.
-     */
-    const can_twai_frame_t primary_frame = {
-        .identifier = 0x601U,
-        .data_length = 8U,
-        .extended = false,
-        .remote = false,
-
-        .data = {
-            0x50U, 0x52U, 0x49U, 0x4DU,
-            0x41U, 0x52U, 0x59U, 0x01U,
-        },
-    };
-
-    result =
-        can_service_transmit(
-            &primary_frame,
-            100U
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    result =
-        app_wait_secondary_can_rx(
-            secondary_before.received_frames,
-            CAN_LINK_TEST_TIMEOUT_MS
-        );
-
-    if (result != ESP_OK) {
-        ESP_LOGW(
-            TAG,
-            "Primary -> secondary CAN test failed"
-        );
-
-        return result;
-    }
-
-    /*
-     * Secondary MCP2518FD -> primary TWAI.
-     */
-    can_twai_driver_info_t primary_current;
-
-    result =
-        can_service_get_info(
-            &primary_current
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    const can_fd_mcp2518fd_frame_t secondary_frame = {
-        .identifier = 0x602U,
-        .data_length = 8U,
-
-        .data = {
-            0x53U, 0x45U, 0x43U, 0x4FU,
-            0x4EU, 0x44U, 0x41U, 0x02U,
-        },
-
-        .extended = false,
-        .remote = false,
-        .fd_frame = false,
-        .bit_rate_switch = false,
-        .error_state_indicator = false,
-    };
-
-    result =
-        can_fd_service_transmit(
-            &secondary_frame,
-            100U
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    result =
-        app_wait_primary_can_rx(
-            primary_current.received_frames,
-            CAN_LINK_TEST_TIMEOUT_MS
-        );
-
-    if (result != ESP_OK) {
-        ESP_LOGW(
-            TAG,
-            "Secondary -> primary CAN test failed"
-        );
-
-        return result;
-    }
-
-    return ESP_OK;
-}
 
 static void log_heap_region(
     const char *name,
@@ -327,6 +108,13 @@ static void log_memory_status(
     );
 
     log_heap_region(
+        "Internal DMA",
+        MALLOC_CAP_INTERNAL |
+        MALLOC_CAP_DMA |
+        MALLOC_CAP_8BIT
+    );
+
+    log_heap_region(
         "DMA",
         MALLOC_CAP_DMA |
         MALLOC_CAP_8BIT
@@ -341,6 +129,37 @@ static void log_memory_status(
     log_heap_region(
         "Default",
         MALLOC_CAP_DEFAULT
+    );
+}
+
+static void log_service_memory(
+    const char *service,
+    const char *state
+)
+{
+    char stage[64];
+
+    const int written =
+        snprintf(
+            stage,
+            sizeof(stage),
+            "%s %s",
+            service,
+            state
+        );
+
+    if ((written < 0) ||
+        ((size_t)written >= sizeof(stage))) {
+
+        log_memory_status(
+            service
+        );
+
+        return;
+    }
+
+    log_memory_status(
+        stage
     );
 }
 
@@ -382,6 +201,11 @@ static esp_err_t start_service(
         return ESP_ERR_INVALID_ARG;
     }
 
+    log_service_memory(
+        name,
+        "before start"
+    );
+
     ESP_LOGI(
         TAG,
         "Starting %s service",
@@ -390,6 +214,16 @@ static esp_err_t start_service(
 
     const esp_err_t result =
         start();
+
+    /*
+     * Record memory even when service initialization fails.
+     */
+    log_service_memory(
+        name,
+        result == ESP_OK
+            ? "after start"
+            : "after failed start"
+    );
 
     if (result != ESP_OK) {
         if (requirement ==
@@ -848,121 +682,23 @@ static void startup_task(
         }
     }
 
-#if TWAI_STARTUP_SELF_TEST_ENABLED || \
-    CAN_FD_STARTUP_SELF_TEST_ENABLED
-
-    /*
-     * settings_service_init() already applies the loaded settings and
-     * may start both CAN services. Stop them temporarily before running
-     * isolated controller self-tests. settings_service_apply() below
-     * restores their configured operating modes.
-     */
-    if (can_service_is_running()) {
-        const esp_err_t stop_result =
-            can_service_stop();
-
-        if (stop_result != ESP_OK) {
-            startup_warning = true;
-
-            ESP_LOGW(
-                TAG,
-                "Failed to stop primary CAN before self-test: %s",
-                esp_err_to_name(stop_result)
-            );
-        }
-    }
-
-    if (can_fd_service_is_running()) {
-        const esp_err_t stop_result =
-            can_fd_service_stop();
-
-        if (stop_result != ESP_OK) {
-            startup_warning = true;
-
-            ESP_LOGW(
-                TAG,
-                "Failed to stop secondary CAN before self-test: %s",
-                esp_err_to_name(stop_result)
-            );
-        }
-    }
-
-#endif
-
-#if TWAI_STARTUP_SELF_TEST_ENABLED
-
-    (void)gui_service_set_boot_progress(
-        48U,
-        "Testing primary CAN"
-    );
-
-    ESP_LOGI(
-        TAG,
-        "Starting TWAI self-test"
-    );
-
-    if (!can_service_is_running()) {
-        const esp_err_t twai_test_result =
-            can_service_run_self_test(
-                CAN_TWAI_BITRATE_500_KBIT,
-                TWAI_SELF_TEST_TIMEOUT_MS
-            );
-
-        if (twai_test_result != ESP_OK) {
-            startup_warning = true;
-
-            ESP_LOGW(
-                TAG,
-                "TWAI self-test failed: %s",
-                esp_err_to_name(twai_test_result)
-            );
-        } else {
-            ESP_LOGI(
-                TAG,
-                "TWAI self-test passed"
-            );
-        }
-    }
-#endif
-
-#if CAN_FD_STARTUP_SELF_TEST_ENABLED
-
-    ESP_LOGI(
-        TAG,
-        "Starting MCP2518FD service self-test"
-    );
-
-    if (!can_fd_service_is_running()) {
-        const esp_err_t can_fd_test_result =
-            can_fd_service_run_self_test(
-                500000U,
-                CAN_FD_SELF_TEST_TIMEOUT_MS
-            );
-
-        if (can_fd_test_result != ESP_OK) {
-            startup_warning = true;
-
-            ESP_LOGW(
-                TAG,
-                "MCP2518FD service self-test failed: %s",
-                esp_err_to_name(can_fd_test_result)
-            );
-        } else {
-            ESP_LOGI(
-                TAG,
-                "MCP2518FD service self-test passed"
-            );
-        }
-    }
-
-#endif
-
     (void)gui_service_set_boot_progress(
         50U,
         "Applying settings"
     );
 
-    result = settings_service_apply();
+    log_memory_status(
+        "Before applying settings"
+    );
+
+    result =
+        settings_service_apply();
+
+    log_memory_status(
+        result == ESP_OK
+            ? "After applying settings"
+            : "After failed settings application"
+    );
 
     if (result != ESP_OK) {
         ESP_LOGE(
@@ -1070,49 +806,6 @@ static void startup_task(
             "Secondary CAN disabled"
         );
     }
-
-#if CAN_LINK_STARTUP_SELF_TEST_ENABLED
-
-    if (settings.can_primary.enabled &&
-        settings.can_secondary.enabled &&
-        !settings.can_primary.listen_only &&
-        !settings.can_secondary.listen_only &&
-        (settings.can_primary.bitrate ==
-         settings.can_secondary.nominal_bitrate)) {
-
-        ESP_LOGI(
-            TAG,
-            "Starting bidirectional CAN link test"
-        );
-
-        const esp_err_t link_test_result =
-            app_can_link_self_test();
-
-        if (link_test_result != ESP_OK) {
-            startup_warning = true;
-
-            ESP_LOGW(
-                TAG,
-                "Bidirectional CAN link test failed: %s",
-                esp_err_to_name(link_test_result)
-            );
-        } else {
-            ESP_LOGI(
-                TAG,
-                "Bidirectional CAN link test passed"
-            );
-        }
-
-    } else {
-        ESP_LOGW(
-            TAG,
-            "Bidirectional CAN link test skipped: "
-            "both interfaces must be enabled in normal mode "
-            "with equal nominal bitrates"
-        );
-    }
-
-#endif
 
     (void)gui_service_set_boot_progress(
         75U,

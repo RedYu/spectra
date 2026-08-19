@@ -6,12 +6,14 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include "esp_heap_caps.h"
 
 #include "system_model.h"
 #include "wifi_service.h"
@@ -114,6 +116,21 @@ static bool internet_service_check(void)
         return false;
     }
 
+    ESP_LOGI(
+        TAG,
+        "Memory before HTTPS: internal_dma=%u, largest=%u",
+        (unsigned int)heap_caps_get_free_size(
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_DMA |
+            MALLOC_CAP_8BIT
+        ),
+        (unsigned int)heap_caps_get_largest_free_block(
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_DMA |
+            MALLOC_CAP_8BIT
+        )
+    );
+
     const esp_err_t result =
         esp_http_client_perform(
             client
@@ -148,6 +165,27 @@ static bool internet_service_check(void)
 
     esp_http_client_cleanup(
         client
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Memory after HTTPS: internal_dma=%u, "
+        "minimum=%u, largest=%u",
+        (unsigned int)heap_caps_get_free_size(
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_DMA |
+            MALLOC_CAP_8BIT
+        ),
+        (unsigned int)heap_caps_get_minimum_free_size(
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_DMA |
+            MALLOC_CAP_8BIT
+        ),
+        (unsigned int)heap_caps_get_largest_free_block(
+            MALLOC_CAP_INTERNAL |
+            MALLOC_CAP_DMA |
+            MALLOC_CAP_8BIT
+        )
     );
 
     return available;
@@ -315,7 +353,7 @@ static void internet_service_task(
 
     s_task = NULL;
 
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 esp_err_t internet_service_start(void)
@@ -370,13 +408,15 @@ esp_err_t internet_service_start(void)
     }
 
     const BaseType_t task_result =
-        xTaskCreate(
+        xTaskCreateWithCaps(
             internet_service_task,
             "internet_service",
             INTERNET_SERVICE_TASK_STACK_SIZE,
             NULL,
             INTERNET_SERVICE_TASK_PRIORITY,
-            &s_task
+            &s_task,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
         );
 
     if (task_result != pdPASS) {
