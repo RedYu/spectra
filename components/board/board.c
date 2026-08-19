@@ -3,6 +3,7 @@
 #include "esp_log.h"
 
 #include "driver/i2c_master.h"
+#include "driver/gpio.h"
 
 #include "app_config.h"
 #include "board_config.h"
@@ -14,9 +15,18 @@ static SemaphoreHandle_t s_bus_semaphore = NULL;
 
 static i2c_master_bus_handle_t s_i2c_bus = NULL;
 
+static bool s_gpio_isr_service_initialized = false;
+
 esp_err_t board_init(void)
 {
     esp_err_t result =
+        board_gpio_isr_service_init();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
         display_backlight_init();
 
     if (result != ESP_OK) {
@@ -260,4 +270,58 @@ bool board_i2c_is_initialized(void)
 i2c_master_bus_handle_t board_i2c_get_handle(void)
 {
     return s_i2c_bus;
+}
+
+esp_err_t board_gpio_isr_service_init(void)
+{
+    if (s_gpio_isr_service_initialized) {
+        return ESP_OK;
+    }
+
+    /*
+     * This service is shared by all GPIO interrupt users. Keep the
+     * allocation flags at zero until every registered ISR handler has
+     * been audited for complete IRAM safety.
+     */
+    const esp_err_t result =
+        gpio_install_isr_service(
+            0
+        );
+
+    if ((result != ESP_OK) &&
+        (result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGE(
+            TAG,
+            "Failed to install shared GPIO ISR service: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    /*
+     * ESP_ERR_INVALID_STATE means that another component installed the
+     * global service earlier. It is still available for shared use.
+     */
+    s_gpio_isr_service_initialized = true;
+
+    if (result == ESP_ERR_INVALID_STATE) {
+        ESP_LOGI(
+            TAG,
+            "Shared GPIO ISR service was already initialized"
+        );
+    } else {
+        ESP_LOGI(
+            TAG,
+            "Shared GPIO ISR service initialized"
+        );
+    }
+
+    return ESP_OK;
+}
+
+bool board_gpio_isr_service_is_initialized(void)
+{
+    return s_gpio_isr_service_initialized;
 }

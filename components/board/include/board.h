@@ -91,6 +91,22 @@ bool board_i2c_is_initialized(void);
  */
 i2c_master_bus_handle_t board_i2c_get_handle(void);
 
+/**
+ * @brief Initialize the shared GPIO ISR service.
+ *
+ * The GPIO ISR service is global to ESP-IDF and is owned by the board
+ * module for the complete application lifetime. Repeated calls are
+ * accepted.
+ *
+ * @return ESP_OK on success, otherwise an ESP-IDF error code.
+ */
+esp_err_t board_gpio_isr_service_init(void);
+
+/**
+ * @brief Check whether the shared GPIO ISR service is available.
+ */
+bool board_gpio_isr_service_is_initialized(void);
+
 #ifdef __cplusplus
 }
 #endif

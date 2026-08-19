@@ -42,17 +42,17 @@
     },
     "can": {
         "primary": {
-            "enabled": false,
+            "enabled": true,
             "bitrate": 500000,
-            "listen_only": true
+            "listen_only": false
         },
         "secondary": {
-            "enabled": false,
+            "enabled": true,
             "nominal_bitrate": 500000,
             "data_bitrate": 500000,
             "fd_enabled": false,
             "brs_enabled": false,
-            "listen_only": true
+            "listen_only": false
         }
     }
 }

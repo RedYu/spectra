@@ -13,8 +13,8 @@
 #include "freertos/queue.h"
 
 #include "esp_log.h"
-#include "esp_intr_alloc.h"
 
+#include "board.h"
 #include "board_config.h"
 
 #define MCP2518FD_SPI_INSTRUCTION_RESET       (0x0U)
@@ -4544,12 +4544,14 @@ esp_err_t can_fd_mcp2518fd_driver_init(
     }
 
     result =
-        gpio_install_isr_service(
-            ESP_INTR_FLAG_IRAM
-        );
+        board_gpio_isr_service_init();
 
-    if ((result != ESP_OK) &&
-        (result != ESP_ERR_INVALID_STATE)) {
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Shared GPIO ISR service is unavailable: %s",
+            esp_err_to_name(result)
+        );
 
         mcp2518fd_release_resources();
         return result;
@@ -4563,6 +4565,12 @@ esp_err_t can_fd_mcp2518fd_driver_init(
         );
 
     if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to register MCP2518FD GPIO interrupt handler: %s",
+            esp_err_to_name(result)
+        );
+
         mcp2518fd_release_resources();
         return result;
     }

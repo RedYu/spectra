@@ -18,6 +18,8 @@
 #define CAN_SERVICE_STOP_TIMEOUT_MS          (2000U)
 #define CAN_SERVICE_ERROR_RETRY_DELAY_MS     (20U)
 
+#define CAN_SERVICE_SELF_TEST_IDENTIFIER     (0x123U)
+
 static const char *TAG =
     "can_service";
 
@@ -54,6 +56,22 @@ static uint32_t
     s_confirmation_queue_capacity = 0U;
 
 static can_service_config_t s_config;
+
+static const uint8_t s_self_test_data[
+    CAN_TWAI_CLASSIC_DATA_MAX_LENGTH
+] = {
+    0x11U,
+    0x22U,
+    0x33U,
+    0x44U,
+    0x55U,
+    0x66U,
+    0x77U,
+    0x88U,
+};
+
+static SemaphoreHandle_t
+    s_self_test_received = NULL;
 
 static esp_err_t can_service_lock(void)
 {
@@ -292,6 +310,44 @@ static void can_service_receive_task(
     vTaskDelete(NULL);
 }
 
+static void can_service_self_test_receive_callback(
+    const can_twai_frame_t *frame,
+    void *context
+)
+{
+    (void)context;
+
+    if ((frame == NULL) ||
+        (frame->identifier !=
+         CAN_SERVICE_SELF_TEST_IDENTIFIER) ||
+        frame->extended ||
+        frame->remote ||
+        (frame->data_length !=
+         CAN_TWAI_CLASSIC_DATA_MAX_LENGTH) ||
+        (memcmp(
+            frame->data,
+            s_self_test_data,
+            sizeof(s_self_test_data)
+        ) != 0)) {
+
+        return;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "TWAI self-test frame received: "
+        "ID=0x%03lX, timestamp=%llu",
+        (unsigned long)frame->identifier,
+        (unsigned long long)frame->timestamp_us
+    );
+
+    if (s_self_test_received != NULL) {
+        (void)xSemaphoreGive(
+            s_self_test_received
+        );
+    }
+}
+
 esp_err_t can_service_start(
     const can_service_config_t *config
 )
@@ -470,6 +526,214 @@ esp_err_t can_service_start(
     can_service_unlock();
 
     return ESP_OK;
+}
+
+esp_err_t can_service_run_self_test(
+    uint32_t bitrate,
+    uint32_t timeout_ms
+)
+{
+    if ((bitrate == 0U) ||
+        (timeout_ms == 0U)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (can_service_is_running() ||
+        (s_self_test_received != NULL)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_self_test_received =
+        xSemaphoreCreateBinary();
+
+    if (s_self_test_received == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    const can_service_config_t config = {
+        .driver = {
+            .bitrate = bitrate,
+            .sample_point_permill = 800U,
+
+            .mode =
+                CAN_TWAI_MODE_SELF_TEST,
+
+            .tx_queue_depth = 4U,
+            .rx_queue_length = 4U,
+
+            /*
+             * Self-test does not require acknowledgement.
+             */
+            .transmit_retry_count = 0,
+
+            .acceptance_filter = {
+                .identifier =
+                    CAN_SERVICE_SELF_TEST_IDENTIFIER,
+
+                .mask =
+                    CAN_TWAI_STANDARD_ID_MAX,
+
+                .extended = false,
+            },
+
+            /*
+             * Replaced internally by can_service_start().
+             */
+            .tx_confirmation_callback = NULL,
+            .tx_confirmation_context = NULL,
+        },
+
+        .receive_callback =
+            can_service_self_test_receive_callback,
+
+        .receive_context = NULL,
+
+        .tx_confirmation_callback = NULL,
+        .tx_confirmation_context = NULL,
+    };
+
+    esp_err_t result =
+        can_service_start(
+            &config
+        );
+
+    if (result != ESP_OK) {
+        vSemaphoreDelete(
+            s_self_test_received
+        );
+
+        s_self_test_received = NULL;
+
+        return result;
+    }
+
+    const can_twai_frame_t frame = {
+        .identifier =
+            CAN_SERVICE_SELF_TEST_IDENTIFIER,
+
+        .data_length =
+            CAN_TWAI_CLASSIC_DATA_MAX_LENGTH,
+
+        .extended = false,
+        .remote = false,
+
+        .data = {
+            0x11U,
+            0x22U,
+            0x33U,
+            0x44U,
+            0x55U,
+            0x66U,
+            0x77U,
+            0x88U,
+        },
+
+        .timestamp_us = 0U,
+    };
+
+    result =
+        can_service_transmit(
+            &frame,
+            timeout_ms
+        );
+
+    if (result == ESP_OK) {
+        TickType_t timeout_ticks =
+            pdMS_TO_TICKS(
+                timeout_ms
+            );
+
+        if (timeout_ticks == 0U) {
+            timeout_ticks = 1U;
+        }
+
+        if (xSemaphoreTake(
+                s_self_test_received,
+                timeout_ticks
+            ) != pdTRUE) {
+
+            result = ESP_ERR_TIMEOUT;
+        }
+    }
+
+    can_twai_driver_info_t info;
+
+    const esp_err_t info_result =
+        can_service_get_info(
+            &info
+        );
+
+    if (info_result == ESP_OK) {
+        ESP_LOGD(
+            TAG,
+            "TWAI self-test diagnostics: "
+            "state=%u, TX=%lu, TX success=%lu, "
+            "TX failed=%lu, RX=%lu, RX dropped=%lu, "
+            "TEC=%u, REC=%u, ACK errors=%lu, "
+            "bus errors=%lu",
+            (unsigned int)info.state,
+            (unsigned long)info.transmitted_frames,
+            (unsigned long)info.successful_transmissions,
+            (unsigned long)info.failed_transmissions,
+            (unsigned long)info.received_frames,
+            (unsigned long)info.dropped_rx_frames,
+            (unsigned int)info.transmit_error_count,
+            (unsigned int)info.receive_error_count,
+            (unsigned long)info.acknowledgement_error_count,
+            (unsigned long)info.bus_error_count
+        );
+    }
+
+    const esp_err_t stop_result =
+        can_service_stop();
+
+    /*
+    * Do not delete the semaphore while the service task may still access
+    * the self-test callback.
+    */
+    if (can_service_is_running()) {
+        ESP_LOGE(
+            TAG,
+            "CAN service remains running after self-test: %s",
+            esp_err_to_name(stop_result)
+        );
+
+        return stop_result;
+    }
+
+    vSemaphoreDelete(
+        s_self_test_received
+    );
+
+    s_self_test_received = NULL;
+
+    if (stop_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to clean up CAN service after self-test: %s",
+            esp_err_to_name(stop_result)
+        );
+
+        return stop_result;
+    }
+
+    if (result == ESP_OK) {
+        ESP_LOGI(
+            TAG,
+            "TWAI self-test passed at %lu bit/s",
+            (unsigned long)bitrate
+        );
+    } else {
+        ESP_LOGW(
+            TAG,
+            "TWAI self-test failed: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    return result;
 }
 
 esp_err_t can_service_stop(void)

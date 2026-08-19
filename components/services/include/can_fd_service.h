@@ -142,6 +142,26 @@ esp_err_t can_fd_service_start(
 );
 
 /**
+ * @brief Run a blocking MCP2518FD internal-loopback self-test.
+ *
+ * The secondary CAN service must not already be running. The test
+ * verifies frame transmission, loopback reception and the matching TEF
+ * confirmation sequence.
+ *
+ * Internal loopback keeps TXCAN recessive and does not transmit the
+ * test frame onto the physical CAN bus.
+ *
+ * @param[in] nominal_bitrate Classical CAN bitrate used by the test.
+ * @param[in] timeout_ms Maximum time to wait for RX and TEF events.
+ *
+ * @return ESP_OK when all checks pass, otherwise an ESP-IDF error code.
+ */
+esp_err_t can_fd_service_run_self_test(
+    uint32_t nominal_bitrate,
+    uint32_t timeout_ms
+);
+
+/**
  * @brief Stop the secondary CAN FD service.
  *
  * Stops the processing task, aborts pending transmissions, stops and

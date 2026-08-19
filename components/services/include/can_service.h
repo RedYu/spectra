@@ -112,6 +112,31 @@ esp_err_t can_service_start(
 );
 
 /**
+ * @brief Run a blocking TWAI loopback self-test.
+ *
+ * The CAN service must not already be running. No other task may start
+ * or stop the CAN service while the test is executing.
+ *
+ * @warning The test frame is also emitted through the physical TWAI TX
+ * pin. Do not run this test on a live vehicle bus unless the external
+ * CAN transceiver is disabled or disconnected from the bus.
+ *
+ * @param[in] bitrate Test CAN bitrate.
+ * @param[in] timeout_ms Maximum time to wait for looped-back reception.
+ *
+ * @return ESP_OK when the test frame is transmitted and received,
+ * ESP_ERR_INVALID_ARG if bitrate or timeout_ms is zero,
+ * ESP_ERR_INVALID_STATE if the service is running or another self-test
+ * remains active, ESP_ERR_NO_MEM if the synchronization semaphore
+ * cannot be created, ESP_ERR_TIMEOUT when the test frame is not
+ * received, otherwise an ESP-IDF error code.
+ */
+esp_err_t can_service_run_self_test(
+    uint32_t bitrate,
+    uint32_t timeout_ms
+);
+
+/**
  * @brief Reconfigure the running primary CAN interface.
  *
  * Reception and transmission are temporarily stopped while the TWAI

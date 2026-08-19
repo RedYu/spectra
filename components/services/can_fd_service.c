@@ -7,8 +7,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 
 #include "esp_log.h"
+
+#include "board_config.h"
 
 #define CAN_FD_SERVICE_TASK_STACK_SIZE       (4096U)
 #define CAN_FD_SERVICE_TASK_PRIORITY         (5U)
@@ -16,6 +19,15 @@
 #define CAN_FD_SERVICE_RECEIVE_TIMEOUT_MS    (10U)
 #define CAN_FD_SERVICE_STOP_TIMEOUT_MS       (2000U)
 #define CAN_FD_SERVICE_ERROR_DELAY_MS        (20U)
+
+#define CAN_FD_SERVICE_SELF_TEST_IDENTIFIER  (0x456U)
+
+#define CAN_FD_SERVICE_SELF_TEST_RX_BIT      (1U << 0)
+#define CAN_FD_SERVICE_SELF_TEST_TX_BIT      (1U << 1)
+
+#define CAN_FD_SERVICE_SELF_TEST_BITS        \
+    (CAN_FD_SERVICE_SELF_TEST_RX_BIT |       \
+     CAN_FD_SERVICE_SELF_TEST_TX_BIT)
 
 static const char *TAG =
     "can_fd_service";
@@ -55,6 +67,26 @@ static atomic_uint_fast32_t s_receive_errors =
 
 static atomic_uint_fast32_t s_tx_event_errors =
     ATOMIC_VAR_INIT(0U);
+
+static const uint8_t s_self_test_data[
+    CAN_FD_MCP2518FD_CLASSIC_DATA_MAX_LENGTH
+] = {
+    0xA1U,
+    0xB2U,
+    0xC3U,
+    0xD4U,
+    0xE5U,
+    0xF6U,
+    0x17U,
+    0x28U,
+};
+
+static EventGroupHandle_t
+    s_self_test_events = NULL;
+
+static atomic_uint_fast32_t
+    s_self_test_observed_sequence =
+        ATOMIC_VAR_INIT(0U);
 
 static esp_err_t can_fd_service_lock(void)
 {
@@ -271,6 +303,65 @@ static void can_fd_service_drain_tx_events(void)
 
         can_fd_service_deliver_tx_event(
             &event
+        );
+    }
+}
+
+static void can_fd_service_self_test_receive_callback(
+    const can_fd_mcp2518fd_frame_t *frame,
+    void *context
+)
+{
+    (void)context;
+
+    if ((frame == NULL) ||
+        (frame->identifier !=
+         CAN_FD_SERVICE_SELF_TEST_IDENTIFIER) ||
+        frame->extended ||
+        frame->remote ||
+        frame->fd_frame ||
+        frame->bit_rate_switch ||
+        frame->error_state_indicator ||
+        (frame->data_length !=
+         CAN_FD_MCP2518FD_CLASSIC_DATA_MAX_LENGTH) ||
+        (memcmp(
+            frame->data,
+            s_self_test_data,
+            sizeof(s_self_test_data)
+        ) != 0)) {
+
+        return;
+    }
+
+    if (s_self_test_events != NULL) {
+        (void)xEventGroupSetBits(
+            s_self_test_events,
+            CAN_FD_SERVICE_SELF_TEST_RX_BIT
+        );
+    }
+}
+
+static void can_fd_service_self_test_tx_callback(
+    const can_fd_mcp2518fd_tx_event_t *event,
+    void *context
+)
+{
+    (void)context;
+
+    if (event == NULL) {
+        return;
+    }
+
+    atomic_store_explicit(
+        &s_self_test_observed_sequence,
+        event->sequence,
+        memory_order_relaxed
+    );
+
+    if (s_self_test_events != NULL) {
+        (void)xEventGroupSetBits(
+            s_self_test_events,
+            CAN_FD_SERVICE_SELF_TEST_TX_BIT
         );
     }
 }
@@ -1118,4 +1209,227 @@ bool can_fd_service_is_running(void)
     return atomic_load(
         &s_running
     );
+}
+
+esp_err_t can_fd_service_run_self_test(
+    uint32_t nominal_bitrate,
+    uint32_t timeout_ms
+)
+{
+    if ((nominal_bitrate == 0U) ||
+        (timeout_ms == 0U)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (can_fd_service_is_running() ||
+        (s_self_test_events != NULL)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_self_test_events =
+        xEventGroupCreate();
+
+    if (s_self_test_events == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    atomic_store_explicit(
+        &s_self_test_observed_sequence,
+        0U,
+        memory_order_relaxed
+    );
+
+    const can_fd_service_config_t config = {
+        .driver = {
+            .oscillator_hz =
+                CAN_FD_SYSTEM_CLOCK_HZ,
+
+            .nominal_bitrate =
+                nominal_bitrate,
+
+            /*
+             * Classical CAN has no separate data phase.
+             */
+            .data_bitrate =
+                nominal_bitrate,
+
+            .mode =
+                CAN_FD_MCP2518FD_MODE_INTERNAL_LOOPBACK,
+
+            .fd_enabled = false,
+            .brs_enabled = false,
+
+            .tx_fifo_depth = 4U,
+            .rx_fifo_depth = 4U,
+
+            .spi_crc_enabled = false,
+
+            .retransmission =
+                CAN_FD_MCP2518FD_RETRANSMISSION_DISABLED,
+        },
+
+        .receive_callback =
+            can_fd_service_self_test_receive_callback,
+
+        .receive_context = NULL,
+
+        .tx_confirmation_callback =
+            can_fd_service_self_test_tx_callback,
+
+        .tx_confirmation_context = NULL,
+    };
+
+    esp_err_t result =
+        can_fd_service_start(
+            &config
+        );
+
+    if (result != ESP_OK) {
+        vEventGroupDelete(
+            s_self_test_events
+        );
+
+        s_self_test_events = NULL;
+
+        return result;
+    }
+
+    const can_fd_mcp2518fd_frame_t frame = {
+        .identifier =
+            CAN_FD_SERVICE_SELF_TEST_IDENTIFIER,
+
+        .data_length =
+            CAN_FD_MCP2518FD_CLASSIC_DATA_MAX_LENGTH,
+
+        .data = {
+            0xA1U,
+            0xB2U,
+            0xC3U,
+            0xD4U,
+            0xE5U,
+            0xF6U,
+            0x17U,
+            0x28U,
+        },
+
+        .extended = false,
+        .remote = false,
+        .fd_frame = false,
+        .bit_rate_switch = false,
+        .error_state_indicator = false,
+
+        .timestamp = 0U,
+        .timestamp_valid = false,
+    };
+
+    uint32_t transmitted_sequence = 0U;
+
+    result =
+        can_fd_service_transmit_tracked(
+            &frame,
+            timeout_ms,
+            &transmitted_sequence
+        );
+
+    if (result == ESP_OK) {
+        TickType_t timeout_ticks =
+            pdMS_TO_TICKS(
+                timeout_ms
+            );
+
+        if (timeout_ticks == 0U) {
+            timeout_ticks = 1U;
+        }
+
+        const EventBits_t bits =
+            xEventGroupWaitBits(
+                s_self_test_events,
+                CAN_FD_SERVICE_SELF_TEST_BITS,
+                pdFALSE,
+                pdTRUE,
+                timeout_ticks
+            );
+
+        if ((bits &
+             CAN_FD_SERVICE_SELF_TEST_BITS) !=
+            CAN_FD_SERVICE_SELF_TEST_BITS) {
+
+            ESP_LOGW(
+                TAG,
+                "MCP2518FD self-test timeout: RX=%s, TEF=%s",
+                (bits & CAN_FD_SERVICE_SELF_TEST_RX_BIT)
+                    ? "received"
+                    : "missing",
+                (bits & CAN_FD_SERVICE_SELF_TEST_TX_BIT)
+                    ? "received"
+                    : "missing"
+            );
+
+            result = ESP_ERR_TIMEOUT;
+        } else {
+            const uint32_t observed_sequence =
+                (uint32_t)atomic_load_explicit(
+                    &s_self_test_observed_sequence,
+                    memory_order_relaxed
+                );
+
+            if (observed_sequence !=
+                transmitted_sequence) {
+
+                ESP_LOGE(
+                    TAG,
+                    "Self-test TX sequence mismatch: "
+                    "sent=%lu, confirmed=%lu",
+                    (unsigned long)transmitted_sequence,
+                    (unsigned long)observed_sequence
+                );
+
+                result =
+                    ESP_ERR_INVALID_RESPONSE;
+            }
+        }
+    }
+
+    const esp_err_t stop_result =
+        can_fd_service_stop();
+
+    if (can_fd_service_is_running()) {
+        ESP_LOGE(
+            TAG,
+            "CAN FD service remains running after self-test: %s",
+            esp_err_to_name(stop_result)
+        );
+
+        return stop_result;
+    }
+
+    vEventGroupDelete(
+        s_self_test_events
+    );
+
+    s_self_test_events = NULL;
+
+    if (stop_result != ESP_OK) {
+        return stop_result;
+    }
+
+    if (result == ESP_OK) {
+        ESP_LOGI(
+            TAG,
+            "MCP2518FD service self-test passed: "
+            "bitrate=%lu, sequence=%lu",
+            (unsigned long)nominal_bitrate,
+            (unsigned long)transmitted_sequence
+        );
+    } else {
+        ESP_LOGW(
+            TAG,
+            "MCP2518FD service self-test failed: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    return result;
 }

@@ -1486,11 +1486,20 @@ static esp_err_t can_twai_driver_transmit_internal(
         return ESP_ERR_INVALID_STATE;
     }
 
+    TickType_t timeout_ticks =
+        pdMS_TO_TICKS(
+            timeout_ms
+        );
+
+    if ((timeout_ms > 0U) &&
+        (timeout_ticks == 0U)) {
+
+        timeout_ticks = 1U;
+    }
+
     if (xSemaphoreTake(
             s_tx_slots_available,
-            pdMS_TO_TICKS(
-                timeout_ms
-            )
+            timeout_ticks
         ) != pdTRUE) {
 
         return ESP_ERR_TIMEOUT;

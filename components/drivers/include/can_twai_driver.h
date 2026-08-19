@@ -39,7 +39,11 @@ typedef enum
     CAN_TWAI_MODE_LISTEN_ONLY,
 
     /**
-     * Internal self-test with transmitted frames received locally.
+     * Self-test operation with local reception of transmitted frames.
+     *
+     * The transmitted signal may still appear on the physical TWAI TX
+     * pin. Do not use this mode while connected to a live vehicle bus
+     * unless the external transceiver is disabled or in standby.
      */
     CAN_TWAI_MODE_SELF_TEST,
 
