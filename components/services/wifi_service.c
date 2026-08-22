@@ -689,6 +689,64 @@ static void wifi_service_cancel_reconnect(void)
     }
 }
 
+static const char *wifi_service_disconnect_reason_name(
+    uint8_t reason
+)
+{
+    switch (reason) {
+        case WIFI_REASON_UNSPECIFIED:
+            return "UNSPECIFIED";
+
+        case WIFI_REASON_AUTH_EXPIRE:
+            return "AUTH_EXPIRE";
+
+        case WIFI_REASON_AUTH_LEAVE:
+            return "AUTH_LEAVE";
+
+        case WIFI_REASON_ASSOC_EXPIRE:
+            return "ASSOC_EXPIRE";
+
+        case WIFI_REASON_ASSOC_TOOMANY:
+            return "ASSOC_TOOMANY";
+
+        case WIFI_REASON_NOT_AUTHED:
+            return "NOT_AUTHED";
+
+        case WIFI_REASON_NOT_ASSOCED:
+            return "NOT_ASSOCED";
+
+        case WIFI_REASON_ASSOC_LEAVE:
+            return "ASSOC_LEAVE";
+
+        case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+            return "4WAY_HANDSHAKE_TIMEOUT";
+
+        case WIFI_REASON_GROUP_KEY_UPDATE_TIMEOUT:
+            return "GROUP_KEY_UPDATE_TIMEOUT";
+
+        case WIFI_REASON_BEACON_TIMEOUT:
+            return "BEACON_TIMEOUT";
+
+        case WIFI_REASON_NO_AP_FOUND:
+            return "NO_AP_FOUND";
+
+        case WIFI_REASON_AUTH_FAIL:
+            return "AUTH_FAIL";
+
+        case WIFI_REASON_ASSOC_FAIL:
+            return "ASSOC_FAIL";
+
+        case WIFI_REASON_HANDSHAKE_TIMEOUT:
+            return "HANDSHAKE_TIMEOUT";
+
+        case WIFI_REASON_CONNECTION_FAIL:
+            return "CONNECTION_FAIL";
+
+        default:
+            return "UNKNOWN";
+    }
+}
+
 static void wifi_service_event_handler(
     void *argument,
     esp_event_base_t event_base,
@@ -758,9 +816,12 @@ static void wifi_service_event_handler(
         if (event != NULL) {
             ESP_LOGW(
                 TAG,
-                "Station disconnected: "
-                "reason=%u, RSSI=%d, BSSID=" MACSTR,
+                "Station disconnected: reason=%u (%s), "
+                "RSSI=%d, BSSID=" MACSTR,
                 (unsigned int)event->reason,
+                wifi_service_disconnect_reason_name(
+                    event->reason
+                ),
                 (int)event->rssi,
                 MAC2STR(event->bssid)
             );
