@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 
+#include "can_frame.h"
 #include "can_fd_mcp2518fd_driver.h"
 
 #ifdef __cplusplus
@@ -32,10 +33,24 @@ extern "C" {
  * The frame pointer remains valid only during the callback.
  *
  * The callback should complete quickly and must not call
- * can_fd_service_stop().
+ * can_fd_service_stop() or can_fd_service_reconfigure().
  */
 typedef void (*can_fd_service_receive_cb_t)(
     const can_fd_mcp2518fd_frame_t *frame,
+    void *context
+);
+
+/**
+ * @brief Callback invoked for every received shared CAN frame.
+ *
+ * The callback runs in the CAN FD service task context. The frame
+ * pointer remains valid only during the callback.
+ *
+ * The callback must complete quickly and must not call
+ * can_fd_service_stop() or can_fd_service_reconfigure().
+ */
+typedef void (*can_fd_service_common_receive_cb_t)(
+    const can_frame_t *frame,
     void *context
 );
 
@@ -44,10 +59,14 @@ typedef void (*can_fd_service_receive_cb_t)(
  *
  * Successful transmission events are obtained from the MCP2518FD
  * Transmit Event FIFO. The sequence value can be matched with the value
- * returned by can_fd_service_transmit_tracked().
+ * returned by can_fd_service_transmit_tracked() or
+ * can_fd_service_transmit_common_tracked().
  *
  * The callback runs in the CAN FD service task context. The event
  * pointer remains valid only during the callback.
+ * 
+ * The callback should complete quickly and must not call
+ * can_fd_service_stop() or can_fd_service_reconfigure().
  */
 typedef void (*can_fd_service_tx_confirmation_cb_t)(
     const can_fd_mcp2518fd_tx_event_t *event,
@@ -75,6 +94,22 @@ typedef struct
     void *receive_context;
 
     /**
+     * Optional shared-frame receive callback.
+     *
+     * This callback is intended for can_router and new application
+     * components. When both receive callbacks are configured, the
+     * legacy receive_callback is invoked first, followed by this
+     * callback.
+     */
+    can_fd_service_common_receive_cb_t
+        common_receive_callback;
+
+    /**
+     * Optional shared-frame receive callback context.
+     */
+    void *common_receive_context;
+
+    /**
      * Optional successful-transmission callback.
      */
     can_fd_service_tx_confirmation_cb_t
@@ -93,7 +128,10 @@ typedef struct
 typedef struct
 {
     /**
-     * Frames delivered to the receive callback.
+     * Physical RX frames delivered to at least one receive callback.
+     *
+     * A frame is counted once when one or both legacy and shared-frame
+     * callbacks are configured.
      */
     uint32_t delivered_rx_frames;
 
@@ -103,7 +141,8 @@ typedef struct
     uint32_t delivered_tx_confirmations;
 
     /**
-     * RX frames consumed while no receive callback was configured.
+     * RX frames consumed while neither the legacy nor shared-frame
+     * receive callback was configured.
      */
     uint32_t unhandled_rx_frames;
 
@@ -180,7 +219,8 @@ esp_err_t can_fd_service_stop(void);
  *
  * Reception and transmission are temporarily interrupted while the
  * new runtime configuration is applied. Application callbacks remain
- * unchanged.
+ * unchanged. This function must not be called from any CAN FD service 
+ * callback.
  *
  * @param[in] config New runtime configuration.
  *
@@ -204,13 +244,59 @@ esp_err_t can_fd_service_transmit(
 );
 
 /**
+ * @brief Queue one shared Classical CAN or CAN FD frame.
+ *
+ * The frame must belong to CAN_BUS_SECONDARY. It is converted to the
+ * MCP2518FD driver format before being placed into the hardware TX
+ * FIFO.
+ *
+ * Successful return does not guarantee that the frame was transmitted
+ * or acknowledged on the CAN bus.
+ *
+ * @param[in] frame Shared CAN frame.
+ * @param[in] timeout_ms Maximum time to wait for a TX FIFO slot.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for an invalid frame
+ * or incompatible bus, ESP_ERR_INVALID_SIZE for an unsupported payload
+ * length, ESP_ERR_INVALID_STATE if the service is not running,
+ * ESP_ERR_TIMEOUT on timeout, otherwise an ESP-IDF error code.
+ */
+esp_err_t can_fd_service_transmit_common(
+    const can_frame_t *frame,
+    uint32_t timeout_ms
+);
+
+/**
  * @brief Queue a tracked Classical CAN or CAN FD frame.
  *
  * The returned sequence can be matched with a later TX confirmation
- * callback.
+ * callback. Zero is a valid MCP2518FD hardware sequence value.
  */
 esp_err_t can_fd_service_transmit_tracked(
     const can_fd_mcp2518fd_frame_t *frame,
+    uint32_t timeout_ms,
+    uint32_t *sequence
+);
+
+/**
+ * @brief Queue one tracked shared Classical CAN or CAN FD frame.
+ *
+ * The returned native sequence can be matched with a later MCP2518FD
+ * TX confirmation event.
+ *
+ * @param[in] frame Shared CAN frame.
+ * @param[in] timeout_ms Maximum time to wait for a TX FIFO slot.
+ * @param[out] sequence Assigned MCP2518FD sequence. Zero is a valid
+ * hardware sequence value.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for invalid
+ * arguments or an incompatible bus, ESP_ERR_INVALID_SIZE for an
+ * unsupported payload length, ESP_ERR_INVALID_STATE if the service is
+ * not running, ESP_ERR_TIMEOUT on timeout, otherwise an ESP-IDF error
+ * code.
+ */
+esp_err_t can_fd_service_transmit_common_tracked(
+    const can_frame_t *frame,
     uint32_t timeout_ms,
     uint32_t *sequence
 );

@@ -12,6 +12,7 @@
 #include "esp_log.h"
 
 #include "board_config.h"
+#include "can_mcp2518fd_frame_adapter.h"
 
 #define CAN_FD_SERVICE_TASK_STACK_SIZE       (4096U)
 #define CAN_FD_SERVICE_TASK_PRIORITY         (5U)
@@ -157,13 +158,21 @@ static void can_fd_service_deliver_frame(
     const can_fd_mcp2518fd_frame_t *frame
 )
 {
-    can_fd_service_receive_cb_t callback =
+    can_fd_service_receive_cb_t legacy_callback =
         s_config.receive_callback;
 
-    void *context =
+    void *legacy_context =
         s_config.receive_context;
 
-    if (callback == NULL) {
+    can_fd_service_common_receive_cb_t common_callback =
+        s_config.common_receive_callback;
+
+    void *common_context =
+        s_config.common_receive_context;
+
+    if ((legacy_callback == NULL) &&
+        (common_callback == NULL)) {
+
         (void)atomic_fetch_add_explicit(
             &s_unhandled_rx_frames,
             1U,
@@ -173,16 +182,64 @@ static void can_fd_service_deliver_frame(
         return;
     }
 
-    callback(
-        frame,
-        context
-    );
+    can_frame_t common_frame;
+    bool common_frame_valid = false;
 
-    (void)atomic_fetch_add_explicit(
-        &s_delivered_rx_frames,
-        1U,
-        memory_order_relaxed
-    );
+    /*
+     * Convert before invoking the legacy callback so application code
+     * cannot modify the source before shared-frame conversion.
+     */
+    if (common_callback != NULL) {
+        const esp_err_t result =
+            can_mcp2518fd_frame_to_common(
+                frame,
+                &common_frame
+            );
+
+        if (result == ESP_OK) {
+            common_frame_valid = true;
+        } else {
+            (void)atomic_fetch_add_explicit(
+                &s_receive_errors,
+                1U,
+                memory_order_relaxed
+            );
+
+            ESP_LOGW(
+                TAG,
+                "Failed to convert received MCP2518FD frame: %s",
+                esp_err_to_name(result)
+            );
+        }
+    }
+
+    bool delivered = false;
+
+    if (legacy_callback != NULL) {
+        legacy_callback(
+            frame,
+            legacy_context
+        );
+
+        delivered = true;
+    }
+
+    if (common_frame_valid) {
+        common_callback(
+            &common_frame,
+            common_context
+        );
+
+        delivered = true;
+    }
+
+    if (delivered) {
+        (void)atomic_fetch_add_explicit(
+            &s_delivered_rx_frames,
+            1U,
+            memory_order_relaxed
+        );
+    }
 }
 
 static void can_fd_service_deliver_tx_event(
@@ -867,6 +924,33 @@ esp_err_t can_fd_service_transmit(
     return result;
 }
 
+esp_err_t can_fd_service_transmit_common(
+    const can_frame_t *frame,
+    uint32_t timeout_ms
+)
+{
+    if (frame == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    can_fd_mcp2518fd_frame_t driver_frame;
+
+    const esp_err_t result =
+        can_mcp2518fd_frame_from_common(
+            frame,
+            &driver_frame
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return can_fd_service_transmit(
+        &driver_frame,
+        timeout_ms
+    );
+}
+
 esp_err_t can_fd_service_transmit_tracked(
     const can_fd_mcp2518fd_frame_t *frame,
     uint32_t timeout_ms,
@@ -879,7 +963,7 @@ esp_err_t can_fd_service_transmit_tracked(
         return ESP_ERR_INVALID_ARG;
     }
 
-    *sequence = 0U;
+    *sequence = CAN_NATIVE_SEQUENCE_NONE;
 
     esp_err_t result =
         can_fd_service_lock();
@@ -909,6 +993,40 @@ esp_err_t can_fd_service_transmit_tracked(
     can_fd_service_unlock();
 
     return result;
+}
+
+esp_err_t can_fd_service_transmit_common_tracked(
+    const can_frame_t *frame,
+    uint32_t timeout_ms,
+    uint32_t *sequence
+)
+{
+    if ((frame == NULL) ||
+        (sequence == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *sequence =
+        CAN_NATIVE_SEQUENCE_NONE;
+
+    can_fd_mcp2518fd_frame_t driver_frame;
+
+    const esp_err_t result =
+        can_mcp2518fd_frame_from_common(
+            frame,
+            &driver_frame
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return can_fd_service_transmit_tracked(
+        &driver_frame,
+        timeout_ms,
+        sequence
+    );
 }
 
 esp_err_t can_fd_service_abort_transmissions(void)

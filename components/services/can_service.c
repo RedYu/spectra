@@ -11,6 +11,8 @@
 
 #include "esp_log.h"
 
+#include "can_twai_frame_adapter.h"
+
 #define CAN_SERVICE_TASK_STACK_SIZE          (4096U)
 #define CAN_SERVICE_TASK_PRIORITY            (5U)
 
@@ -34,6 +36,11 @@ static can_service_receive_cb_t
     s_receive_callback = NULL;
 
 static void *s_receive_context = NULL;
+
+static can_service_common_receive_cb_t
+    s_common_receive_callback = NULL;
+
+static void *s_common_receive_context = NULL;
 
 static atomic_bool s_running =
     ATOMIC_VAR_INIT(false);
@@ -277,16 +284,59 @@ static void can_service_receive_task(
             continue;
         }
 
+        can_frame_t common_frame;
+        bool common_frame_valid = false;
+
+        can_service_common_receive_cb_t
+            common_callback =
+                s_common_receive_callback;
+
+        void *common_context =
+            s_common_receive_context;
+
+        /*
+         * Convert the frame before invoking the legacy callback so an
+         * incorrectly implemented callback cannot modify source data
+         * before it reaches the shared-frame consumer.
+         */
+        if (common_callback != NULL) {
+            const esp_err_t adapter_result =
+                can_twai_frame_to_common(
+                    &frame,
+                    &common_frame
+                );
+
+            if (adapter_result == ESP_OK) {
+                common_frame_valid = true;
+            } else {
+                ESP_LOGW(
+                    TAG,
+                    "Failed to convert received TWAI frame: %s",
+                    esp_err_to_name(adapter_result)
+                );
+            }
+        }
+
         can_service_receive_cb_t callback =
             s_receive_callback;
 
         void *context =
             s_receive_context;
 
+        /*
+         * Preserve the documented callback order during migration.
+         */
         if (callback != NULL) {
             callback(
                 &frame,
                 context
+            );
+        }
+
+        if (common_frame_valid) {
+            common_callback(
+                &common_frame,
+                common_context
             );
         }
     }
@@ -471,6 +521,12 @@ esp_err_t can_service_start(
     s_receive_context =
         config->receive_context;
 
+    s_common_receive_callback =
+        config->common_receive_callback;
+
+    s_common_receive_context =
+        config->common_receive_context;
+
     atomic_store(
         &s_stop_requested,
         false
@@ -480,6 +536,8 @@ esp_err_t can_service_start(
         &s_stop_in_progress,
         false
     );
+
+    s_config = *config;
 
     const BaseType_t task_result =
         xTaskCreate(
@@ -496,6 +554,15 @@ esp_err_t can_service_start(
 
         s_receive_callback = NULL;
         s_receive_context = NULL;
+
+        s_common_receive_callback = NULL;
+        s_common_receive_context = NULL;
+
+        memset(
+            &s_config,
+            0,
+            sizeof(s_config)
+        );
 
         (void)can_twai_driver_stop();
         (void)can_twai_driver_deinit();
@@ -515,8 +582,6 @@ esp_err_t can_service_start(
         &s_running,
         true
     );
-
-    s_config = *config;
 
     ESP_LOGI(
         TAG,
@@ -589,6 +654,9 @@ esp_err_t can_service_run_self_test(
             can_service_self_test_receive_callback,
 
         .receive_context = NULL,
+
+        .common_receive_callback = NULL,
+        .common_receive_context = NULL,
 
         .tx_confirmation_callback = NULL,
         .tx_confirmation_context = NULL,
@@ -865,6 +933,15 @@ esp_err_t can_service_stop(void)
 
     s_receive_callback = NULL;
     s_receive_context = NULL;
+
+    s_common_receive_callback = NULL;
+    s_common_receive_context = NULL;
+
+    memset(
+        &s_config,
+        0,
+        sizeof(s_config)
+    );
 
     atomic_store(
         &s_running,
@@ -1144,6 +1221,9 @@ esp_err_t can_service_reconfigure(
         s_receive_callback = NULL;
         s_receive_context = NULL;
 
+        s_common_receive_callback = NULL;
+        s_common_receive_context = NULL;
+
         atomic_store(
             &s_running,
             false
@@ -1209,7 +1289,9 @@ esp_err_t can_service_reconfigure(
             NULL;
 
         s_confirmation_queue_capacity =
-            driver_config->tx_queue_depth;
+            driver_config->tx_queue_depth > 0U
+                ? (uint32_t)driver_config->tx_queue_depth
+                : 1U;
 
         if (previous_confirmation_queue != NULL) {
             vQueueDelete(
@@ -1318,6 +1400,9 @@ esp_err_t can_service_reconfigure(
         s_receive_callback = NULL;
         s_receive_context = NULL;
 
+        s_common_receive_callback = NULL;
+        s_common_receive_context = NULL;
+
         can_service_unlock();
 
         return ESP_ERR_NO_MEM;
@@ -1384,6 +1469,33 @@ esp_err_t can_service_transmit(
     return result;
 }
 
+esp_err_t can_service_transmit_common(
+    const can_frame_t *frame,
+    uint32_t timeout_ms
+)
+{
+    if (frame == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    can_twai_frame_t twai_frame;
+
+    const esp_err_t result =
+        can_twai_frame_from_common(
+            frame,
+            &twai_frame
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return can_service_transmit(
+        &twai_frame,
+        timeout_ms
+    );
+}
+
 esp_err_t can_service_transmit_tracked(
     const can_twai_frame_t *frame,
     void *transmission_context,
@@ -1431,6 +1543,42 @@ esp_err_t can_service_transmit_tracked(
     can_service_unlock();
 
     return result;
+}
+
+esp_err_t can_service_transmit_common_tracked(
+    const can_frame_t *frame,
+    void *transmission_context,
+    uint32_t timeout_ms,
+    uint32_t *transmission_id
+)
+{
+    if ((frame == NULL) ||
+        (transmission_id == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *transmission_id =
+        CAN_NATIVE_SEQUENCE_NONE;
+
+    can_twai_frame_t twai_frame;
+
+    const esp_err_t result =
+        can_twai_frame_from_common(
+            frame,
+            &twai_frame
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return can_service_transmit_tracked(
+        &twai_frame,
+        transmission_context,
+        timeout_ms,
+        transmission_id
+    );
 }
 
 esp_err_t can_service_recover(void)

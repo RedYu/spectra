@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 
+#include "can_frame.h"
 #include "can_twai_driver.h"
 
 #ifdef __cplusplus
@@ -34,6 +35,23 @@ extern "C" {
  */
 typedef void (*can_service_receive_cb_t)(
     const can_twai_frame_t *frame,
+    void *context
+);
+
+/**
+ * @brief Callback invoked for every received shared CAN frame.
+ *
+ * The callback runs in the CAN service task context, not in an ISR.
+ * The frame pointer remains valid only during the callback.
+ *
+ * The callback should complete quickly and must not call
+ * can_service_stop() or can_service_reconfigure().
+ *
+ * @param[in] frame Received frame converted to the shared format.
+ * @param[in] context Optional application context.
+ */
+typedef void (*can_service_common_receive_cb_t)(
+    const can_frame_t *frame,
     void *context
 );
 
@@ -70,6 +88,22 @@ typedef struct
      * Optional receive-callback context.
      */
     void *receive_context;
+
+    /**
+     * Optional shared-frame receive callback.
+     *
+     * This callback is intended for can_router and new application
+     * components. When both receive callbacks are configured, the
+     * legacy receive_callback is invoked first, followed by this
+     * callback.
+     */
+    can_service_common_receive_cb_t
+        common_receive_callback;
+
+    /**
+     * Optional shared-frame receive callback context.
+     */
+    void *common_receive_context;
 
     /**
      * Optional tracked-transmission completion callback.
@@ -140,12 +174,14 @@ esp_err_t can_service_run_self_test(
  * @brief Reconfigure the running primary CAN interface.
  *
  * Reception and transmission are temporarily stopped while the TWAI
- * controller is recreated. The receive callback remains unchanged.
+ * controller is recreated. Receive and transmission-confirmation 
+ * callbacks remain unchanged.
  *
  * If applying the new configuration fails, the service attempts to
  * restore the previous configuration.
  *
- * This function must not be called from the receive callback.
+ * This function must not be called from any CAN service callback,
+ * including receive and transmission-confirmation callbacks.
  *
  * @param[in] driver_config New TWAI driver configuration.
  *
@@ -191,12 +227,70 @@ esp_err_t can_service_transmit(
 );
 
 /**
- * @brief Queue a tracked CAN frame for transmission.
+ * @brief Queue one shared Classical CAN frame for transmission.
  *
- * Completion is delivered through the service TX confirmation callback.
+ * The frame must belong to CAN_BUS_PRIMARY and must not use CAN FD,
+ * BRS or ESI. It is converted to the TWAI driver format before being
+ * queued.
+ *
+ * @param[in] frame Shared CAN frame.
+ * @param[in] timeout_ms Maximum time to wait for an internal
+ * transmission slot.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for an invalid frame
+ * or bus, ESP_ERR_NOT_SUPPORTED for CAN FD, ESP_ERR_INVALID_STATE if
+ * the service is not running, ESP_ERR_TIMEOUT on timeout, otherwise
+ * an ESP-IDF error code.
+ */
+esp_err_t can_service_transmit_common(
+    const can_frame_t *frame,
+    uint32_t timeout_ms
+);
+
+/**
+ * @brief Queue a tracked Classical CAN frame for transmission.
+ *
+ * Completion is delivered through the configured TX confirmation
+ * callback. The transmission context is returned unchanged in the
+ * confirmation.
+ *
+ * @param[in] frame TWAI frame to transmit.
+ * @param[in] transmission_context Optional per-transmission context.
+ * @param[in] timeout_ms Maximum time to wait for a TX slot.
+ * @param[out] transmission_id Assigned non-zero transmission ID.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for invalid
+ * arguments, ESP_ERR_INVALID_STATE if the service is not running,
+ * ESP_ERR_TIMEOUT on timeout, otherwise an ESP-IDF error code.
  */
 esp_err_t can_service_transmit_tracked(
     const can_twai_frame_t *frame,
+    void *transmission_context,
+    uint32_t timeout_ms,
+    uint32_t *transmission_id
+);
+
+/**
+ * @brief Queue a tracked shared Classical CAN frame.
+ *
+ * The source frame is converted to the TWAI driver format. Completion
+ * is delivered through the existing service TX confirmation callback.
+ *
+ * transmission_context is returned unchanged in the confirmation and
+ * can be used by can_router to locate its pending transmission.
+ *
+ * @param[in] frame Shared CAN frame.
+ * @param[in] transmission_context Per-transmission context.
+ * @param[in] timeout_ms Maximum time to wait for a TX slot.
+ * @param[out] transmission_id Native non-zero TWAI transmission ID.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for invalid
+ * arguments, ESP_ERR_NOT_SUPPORTED for CAN FD,
+ * ESP_ERR_INVALID_STATE if the service is not running,
+ * ESP_ERR_TIMEOUT on timeout, otherwise an ESP-IDF error code.
+ */
+esp_err_t can_service_transmit_common_tracked(
+    const can_frame_t *frame,
     void *transmission_context,
     uint32_t timeout_ms,
     uint32_t *transmission_id
