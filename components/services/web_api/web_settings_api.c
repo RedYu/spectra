@@ -263,6 +263,14 @@ static esp_err_t web_settings_api_get_handler(
             )
             : NULL;
 
+    cJSON *can_secondary =
+        can != NULL
+            ? cJSON_AddObjectToObject(
+                can,
+                "secondary"
+            )
+            : NULL;
+
     bool valid =
         (device != NULL) &&
         (display != NULL) &&
@@ -274,7 +282,8 @@ static esp_err_t web_settings_api_get_handler(
         (wifi_sta != NULL) &&
         (usb_rndis != NULL) &&
         (can != NULL) &&
-        (can_primary != NULL);
+        (can_primary != NULL) &&
+        (can_secondary != NULL);
 
     valid = valid &&
         (cJSON_AddNumberToObject(
@@ -441,6 +450,48 @@ static esp_err_t web_settings_api_get_handler(
             can_primary,
             "listen_only",
             settings->can_primary.listen_only
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            can_secondary,
+            "enabled",
+            settings->can_secondary.enabled
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddNumberToObject(
+            can_secondary,
+            "nominal_bitrate",
+            settings->can_secondary.nominal_bitrate
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddNumberToObject(
+            can_secondary,
+            "data_bitrate",
+            settings->can_secondary.data_bitrate
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            can_secondary,
+            "fd_enabled",
+            settings->can_secondary.fd_enabled
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            can_secondary,
+            "brs_enabled",
+            settings->can_secondary.brs_enabled
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            can_secondary,
+            "listen_only",
+            settings->can_secondary.listen_only
         ) != NULL);
 
     /*
@@ -1157,6 +1208,184 @@ static esp_err_t web_settings_api_put_handler(
                 settings_service_set_can_primary(
                     requested_enabled,
                     requested_bitrate,
+                    requested_listen_only
+                );
+
+            if (result != ESP_OK) {
+                goto apply_failed;
+            }
+
+            applied = true;
+        }
+
+        const cJSON *secondary =
+            cJSON_GetObjectItemCaseSensitive(
+                can,
+                "secondary"
+            );
+
+        if ((secondary != NULL) &&
+            !cJSON_IsObject(secondary)) {
+
+            goto invalid_settings;
+        }
+
+        if (secondary != NULL) {
+            const cJSON *enabled =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "enabled"
+                );
+
+            const cJSON *nominal_bitrate =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "nominal_bitrate"
+                );
+
+            const cJSON *data_bitrate =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "data_bitrate"
+                );
+
+            const cJSON *fd_enabled =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "fd_enabled"
+                );
+
+            const cJSON *brs_enabled =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "brs_enabled"
+                );
+
+            const cJSON *listen_only =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "listen_only"
+                );
+
+            /*
+             * An empty Secondary CAN object is not a valid update.
+             */
+            if ((enabled == NULL) &&
+                (nominal_bitrate == NULL) &&
+                (data_bitrate == NULL) &&
+                (fd_enabled == NULL) &&
+                (brs_enabled == NULL) &&
+                (listen_only == NULL)) {
+
+                goto invalid_settings;
+            }
+
+            if (((enabled != NULL) &&
+                !cJSON_IsBool(enabled)) ||
+                ((fd_enabled != NULL) &&
+                !cJSON_IsBool(fd_enabled)) ||
+                ((brs_enabled != NULL) &&
+                !cJSON_IsBool(brs_enabled)) ||
+                ((listen_only != NULL) &&
+                !cJSON_IsBool(listen_only))) {
+
+                goto invalid_settings;
+            }
+
+            if ((nominal_bitrate != NULL) &&
+                (!cJSON_IsNumber(nominal_bitrate) ||
+                (nominal_bitrate->valuedouble < 0.0) ||
+                (nominal_bitrate->valuedouble >
+                (double)UINT32_MAX) ||
+                (nominal_bitrate->valuedouble !=
+                (double)(uint32_t)
+                    nominal_bitrate->valuedouble))) {
+
+                goto invalid_settings;
+            }
+
+            if ((data_bitrate != NULL) &&
+                (!cJSON_IsNumber(data_bitrate) ||
+                (data_bitrate->valuedouble < 0.0) ||
+                (data_bitrate->valuedouble >
+                (double)UINT32_MAX) ||
+                (data_bitrate->valuedouble !=
+                (double)(uint32_t)
+                    data_bitrate->valuedouble))) {
+
+                goto invalid_settings;
+            }
+
+            app_settings_t *current_settings =
+                web_settings_api_allocate_settings();
+
+            if (current_settings == NULL) {
+                result = ESP_ERR_NO_MEM;
+                goto apply_failed;
+            }
+
+            result =
+                settings_model_get(
+                    current_settings
+                );
+
+            if (result != ESP_OK) {
+                heap_caps_free(
+                    current_settings
+                );
+
+                goto apply_failed;
+            }
+
+            const bool requested_enabled =
+                enabled != NULL
+                    ? cJSON_IsTrue(enabled)
+                    : current_settings->
+                        can_secondary.enabled;
+
+            const uint32_t requested_nominal_bitrate =
+                nominal_bitrate != NULL
+                    ? (uint32_t)
+                        nominal_bitrate->valuedouble
+                    : current_settings->
+                        can_secondary.nominal_bitrate;
+
+            const uint32_t requested_data_bitrate =
+                data_bitrate != NULL
+                    ? (uint32_t)
+                        data_bitrate->valuedouble
+                    : current_settings->
+                        can_secondary.data_bitrate;
+
+            const bool requested_fd_enabled =
+                fd_enabled != NULL
+                    ? cJSON_IsTrue(fd_enabled)
+                    : current_settings->
+                        can_secondary.fd_enabled;
+
+            const bool requested_brs_enabled =
+                brs_enabled != NULL
+                    ? cJSON_IsTrue(brs_enabled)
+                    : current_settings->
+                        can_secondary.brs_enabled;
+
+            const bool requested_listen_only =
+                listen_only != NULL
+                    ? cJSON_IsTrue(listen_only)
+                    : current_settings->
+                        can_secondary.listen_only;
+
+            heap_caps_free(
+                current_settings
+            );
+
+            result =
+                settings_service_set_can_secondary(
+                    requested_enabled,
+                    requested_nominal_bitrate,
+                    requested_data_bitrate,
+                    requested_fd_enabled,
+                    requested_brs_enabled,
                     requested_listen_only
                 );
 

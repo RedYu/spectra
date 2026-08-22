@@ -943,9 +943,7 @@
                                 </option>
                             </select>
 
-                            <span class="select-arrow">
-                                ▾
-                            </span>
+                            <span class="select-arrow">&#9662;</span>
                         </div>
                     </div>
                 </div>
@@ -1447,7 +1445,11 @@
                             id="can-primary-bitrate"
                             class="theme-select"
                         >
+                            <option value="10000">10 kbit/s</option>
+                            <option value="20000">20 kbit/s</option>
+                            <option value="33333">33.333 kbit/s</option>
                             <option value="50000">50 kbit/s</option>
+                            <option value="83333">83.333 kbit/s</option>
                             <option value="100000">100 kbit/s</option>
                             <option value="125000">125 kbit/s</option>
                             <option value="250000">250 kbit/s</option>
@@ -1456,9 +1458,7 @@
                             <option value="1000000">1 Mbit/s</option>
                         </select>
 
-                        <span class="select-arrow">
-                            ▾
-                        </span>
+                        <span class="select-arrow">&#9662;</span>
                     </div>
                 </div>
 
@@ -1480,6 +1480,134 @@
                                 type="checkbox"
                             >
 
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <section class="card">
+            <header class="card-header">
+                <h2>Secondary CAN</h2>
+                <p>Configure the MCP2518FD CAN FD interface</p>
+            </header>
+
+            <div class="card-content">
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">CAN enabled</div>
+                        <div class="setting-description">
+                            Start the secondary MCP2518FD interface
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input id="can-secondary-enabled" type="checkbox">
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Nominal bitrate</div>
+                        <div class="setting-description">
+                            Arbitration-phase bus speed
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <select
+                            id="can-secondary-nominal-bitrate"
+                            class="theme-select"
+                        >
+                            <option value="10000">10 kbit/s</option>
+                            <option value="20000">20 kbit/s</option>
+                            <option value="33333">33.333 kbit/s</option>
+                            <option value="50000">50 kbit/s</option>
+                            <option value="83333">83.333 kbit/s</option>
+                            <option value="100000">100 kbit/s</option>
+                            <option value="125000">125 kbit/s</option>
+                            <option value="250000">250 kbit/s</option>
+                            <option value="500000">500 kbit/s</option>
+                            <option value="800000">800 kbit/s</option>
+                            <option value="1000000">1 Mbit/s</option>
+                        </select>
+
+                        <span class="select-arrow">&#9662;</span>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">CAN FD</div>
+                        <div class="setting-description">
+                            Allow CAN FD frames with payloads up to 64 bytes
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input id="can-secondary-fd-enabled" type="checkbox">
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Bit-rate switching</div>
+                        <div class="setting-description">
+                            Use a faster bitrate during the CAN FD data phase
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input id="can-secondary-brs-enabled" type="checkbox">
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Data bitrate</div>
+                        <div class="setting-description">
+                            CAN FD data-phase speed when BRS is enabled
+                        </div>
+                    </div>
+
+                    <div class="setting-control">
+                        <select
+                            id="can-secondary-data-bitrate"
+                            class="theme-select"
+                        >
+                            <option value="1000000">1 Mbit/s</option>
+                            <option value="2000000">2 Mbit/s</option>
+                            <option value="4000000">4 Mbit/s</option>
+                            <option value="5000000">5 Mbit/s</option>
+                        </select>
+
+                        <span class="select-arrow">&#9662;</span>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Listen only</div>
+                        <div class="setting-description">
+                            Receive frames without transmitting acknowledgements
+                        </div>
+                    </div>
+
+                    <div class="switch-control">
+                        <label class="switch">
+                            <input
+                                id="can-secondary-listen-only"
+                                type="checkbox"
+                            >
                             <span class="switch-slider"></span>
                         </label>
                     </div>
@@ -1647,6 +1775,34 @@
                     "can-primary-listen-only"
                 ),
 
+            canSecondaryEnabled:
+                document.getElementById("can-secondary-enabled"),
+
+            canSecondaryNominalBitrate:
+                document.getElementById(
+                    "can-secondary-nominal-bitrate"
+                ),
+
+            canSecondaryDataBitrate:
+                document.getElementById(
+                    "can-secondary-data-bitrate"
+                ),
+
+            canSecondaryFdEnabled:
+                document.getElementById(
+                    "can-secondary-fd-enabled"
+                ),
+
+            canSecondaryBrsEnabled:
+                document.getElementById(
+                    "can-secondary-brs-enabled"
+                ),
+
+            canSecondaryListenOnly:
+                document.getElementById(
+                    "can-secondary-listen-only"
+                ),
+
             restart:
                 document.getElementById("restart"),
 
@@ -1739,16 +1895,83 @@
                     elements.wifiApPassword.disabled;
         }
 
+        const CAN_FD_DATA_BITRATES = [
+            1000000,
+            2000000,
+            4000000,
+            5000000
+        ];
+
+        function selectValidSecondaryDataBitrate() {
+            const nominalBitrate =
+                Number(elements.canSecondaryNominalBitrate.value);
+
+            const currentBitrate =
+                Number(elements.canSecondaryDataBitrate.value);
+
+            if (CAN_FD_DATA_BITRATES.includes(currentBitrate) &&
+                currentBitrate > nominalBitrate) {
+
+                return;
+            }
+
+            const nextBitrate =
+                CAN_FD_DATA_BITRATES.find(
+                    bitrate => bitrate > nominalBitrate
+                );
+
+            if (nextBitrate !== undefined) {
+                elements.canSecondaryDataBitrate.value =
+                    String(nextBitrate);
+            }
+        }
+
         function updateCanControls() {
-            const disabled =
+            elements.canPrimaryEnabled.disabled =
+                operationBusy;
+
+            const primaryDisabled =
                 operationBusy ||
                 !elements.canPrimaryEnabled.checked;
 
             elements.canPrimaryBitrate.disabled =
-                disabled;
+                primaryDisabled;
 
             elements.canPrimaryListenOnly.disabled =
-                disabled;
+                primaryDisabled;
+
+            elements.canSecondaryEnabled.disabled =
+                operationBusy;
+
+            const secondaryDisabled =
+                operationBusy ||
+                !elements.canSecondaryEnabled.checked;
+
+            elements.canSecondaryNominalBitrate.disabled =
+                secondaryDisabled;
+
+            elements.canSecondaryFdEnabled.disabled =
+                secondaryDisabled;
+
+            elements.canSecondaryListenOnly.disabled =
+                secondaryDisabled;
+
+            if (!elements.canSecondaryFdEnabled.checked) {
+                elements.canSecondaryBrsEnabled.checked = false;
+            }
+
+            elements.canSecondaryBrsEnabled.disabled =
+                secondaryDisabled ||
+                !elements.canSecondaryFdEnabled.checked;
+
+            if (elements.canSecondaryBrsEnabled.checked) {
+                selectValidSecondaryDataBitrate();
+            }
+
+            elements.canSecondaryDataBitrate.disabled =
+                secondaryDisabled ||
+                !elements.canSecondaryFdEnabled.checked ||
+                !elements.canSecondaryBrsEnabled.checked;
         }
 
         function updateStaControls() {
@@ -2156,6 +2379,9 @@
             const canPrimary =
                 can.primary || {};
 
+            const canSecondary =
+                can.secondary || {};
+
             const wifiAp =
                 network.wifi_ap || {};
 
@@ -2262,6 +2488,35 @@
             elements.canPrimaryListenOnly.checked =
                 canPrimary.listen_only !== false;
 
+            elements.canSecondaryEnabled.checked =
+                canSecondary.enabled === true;
+
+            elements.canSecondaryNominalBitrate.value =
+                String(
+                    canSecondary.nominal_bitrate ?? 500000
+                );
+
+            elements.canSecondaryFdEnabled.checked =
+                canSecondary.fd_enabled === true;
+
+            elements.canSecondaryBrsEnabled.checked =
+                canSecondary.fd_enabled === true &&
+                canSecondary.brs_enabled === true;
+
+            elements.canSecondaryListenOnly.checked =
+                canSecondary.listen_only !== false;
+
+            const secondaryDataBitrate =
+                Number(canSecondary.data_bitrate ?? 2000000);
+
+            if (CAN_FD_DATA_BITRATES.includes(secondaryDataBitrate)) {
+                elements.canSecondaryDataBitrate.value =
+                    String(secondaryDataBitrate);
+            }
+
+            selectValidSecondaryDataBitrate();
+            updateCanControls();
+
             elements.restartNotice.classList.toggle(
                 "visible",
                 settings.restart_required === true
@@ -2273,8 +2528,6 @@
 
             elements.clearStaCredentials.disabled =
                 !credentialsConfigured;
-
-            updateCanControls();
         }
 
         function validateSettings() {
@@ -2374,6 +2627,23 @@
                     wifiStaPassword;
             }
 
+            const secondaryNominalBitrate =
+                Number(
+                    elements.canSecondaryNominalBitrate.value
+                );
+
+            const secondaryFdEnabled =
+                elements.canSecondaryFdEnabled.checked;
+
+            const secondaryBrsEnabled =
+                secondaryFdEnabled &&
+                elements.canSecondaryBrsEnabled.checked;
+
+            const secondaryDataBitrate =
+                secondaryBrsEnabled
+                    ? Number(elements.canSecondaryDataBitrate.value)
+                    : secondaryNominalBitrate;
+
             return {
                 display: {
                     brightness:
@@ -2440,12 +2710,30 @@
                             elements.canPrimaryEnabled.checked,
 
                         bitrate:
-                            Number(
-                                elements.canPrimaryBitrate.value
-                            ),
+                            Number(elements.canPrimaryBitrate.value),
 
                         listen_only:
                             elements.canPrimaryListenOnly.checked
+                    },
+
+                    secondary: {
+                        enabled:
+                            elements.canSecondaryEnabled.checked,
+
+                        nominal_bitrate:
+                            secondaryNominalBitrate,
+
+                        data_bitrate:
+                            secondaryDataBitrate,
+
+                        fd_enabled:
+                            secondaryFdEnabled,
+
+                        brs_enabled:
+                            secondaryBrsEnabled,
+
+                        listen_only:
+                            elements.canSecondaryListenOnly.checked
                     }
                 }
             };
@@ -2735,6 +3023,26 @@
         );
 
         elements.canPrimaryEnabled.addEventListener(
+            "change",
+            updateCanControls
+        );
+
+        elements.canSecondaryEnabled.addEventListener(
+            "change",
+            updateCanControls
+        );
+
+        elements.canSecondaryNominalBitrate.addEventListener(
+            "change",
+            updateCanControls
+        );
+
+        elements.canSecondaryFdEnabled.addEventListener(
+            "change",
+            updateCanControls
+        );
+
+        elements.canSecondaryBrsEnabled.addEventListener(
             "change",
             updateCanControls
         );
