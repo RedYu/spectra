@@ -22,6 +22,7 @@
 #include "buzzer_service.h"
 #include "can_service.h"
 #include "can_fd_service.h"
+#include "can_router.h"
 #include "settings_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
@@ -84,11 +85,11 @@ static void shutdown_service_task(
                 "Failed to queue shutdown signal: %s",
                 esp_err_to_name(buzzer_play_result)
             );
-        } else{
+        } else {
             /*
-            * Allow the asynchronous shutdown signal to finish before the
-            * buzzer service is stopped.
-            */
+             * Allow the asynchronous shutdown signal to finish before the
+             * buzzer service is stopped.
+             */
             vTaskDelay(
                 pdMS_TO_TICKS(SHUTDOWN_SERVICE_BUZZER_WAIT_MS)
             );
@@ -133,12 +134,16 @@ static void shutdown_service_task(
      * Stop CAN reception and abort pending transmissions after the web
      * interface has stopped accepting CAN-related requests.
      */
+    bool can_sources_stopped = true;
+
     if (can_service_is_running()) {
         const esp_err_t can_result =
             can_service_stop();
 
         if ((can_result != ESP_OK) &&
             (can_result != ESP_ERR_INVALID_STATE)) {
+
+            can_sources_stopped = false;
 
             ESP_LOGW(
                 TAG,
@@ -152,11 +157,32 @@ static void shutdown_service_task(
         const esp_err_t can_fd_result =
             can_fd_service_stop();
 
-        if (can_fd_result != ESP_OK) {
+        if ((can_fd_result != ESP_OK) &&
+            (can_fd_result != ESP_ERR_INVALID_STATE)) {
+
+            can_sources_stopped = false;
+
             ESP_LOGW(
                 TAG,
-                "Failed to stop CAN FD service: %s",
+                "Failed to stop secondary CAN service: %s",
                 esp_err_to_name(can_fd_result)
+            );
+        }
+    }
+
+    if (can_sources_stopped &&
+        can_router_is_running()) {
+
+        const esp_err_t router_result =
+            can_router_stop();
+
+        if ((router_result != ESP_OK) &&
+            (router_result != ESP_ERR_INVALID_STATE)) {
+
+            ESP_LOGW(
+                TAG,
+                "Failed to stop CAN router: %s",
+                esp_err_to_name(router_result)
             );
         }
     }
