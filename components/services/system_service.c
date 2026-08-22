@@ -15,7 +15,10 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
+
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 #include "driver/temperature_sensor.h"
@@ -25,27 +28,25 @@
 #include "system_model.h"
 #include "shutdown_service.h"
 
-#define SYSTEM_TASK_STACK_SIZE      (3072U)
-#define SYSTEM_TASK_PRIORITY        (2U)
-#define SYSTEM_UPDATE_INTERVAL_MS   (1000U)
-#define SYSTEM_TASK_STATUS_EXTRA_COUNT  (4U)
-
 #define SYSTEM_RESTART_DELAY_MAX_MS     (60000U)
 
 #define SYSTEM_TEMPERATURE_MIN_C             (10)
 #define SYSTEM_TEMPERATURE_MAX_C             (80)
 #define SYSTEM_TEMPERATURE_UPDATE_INTERVAL   (5U)
 
-/*
- * TODO:
- * system_service_stop() requests asynchronous cooperative shutdown.
- * Add synchronized service state and completion acknowledgement before
- * supporting an immediate stop/start sequence.
- */
+#define SYSTEM_TASK_STACK_SIZE          (3072U)
+#define SYSTEM_TASK_PRIORITY            (2U)
+#define SYSTEM_UPDATE_INTERVAL_MS       (1000U)
+#define SYSTEM_TASK_STATUS_EXTRA_COUNT  (4U)
+
+#define SYSTEM_STOP_TIMEOUT_MS          (2000U)
+
+#define SYSTEM_EVENT_STOPPED            BIT0
 
 static const char *TAG = "system_service";
 
 static TaskHandle_t s_task_handle = NULL;
+static EventGroupHandle_t s_events = NULL;
 
 static temperature_sensor_handle_t
     s_temperature_sensor = NULL;
@@ -81,6 +82,22 @@ static void system_service_reset_cpu_usage(void)
     s_previous_cpu_sample_valid = false;
 
 #endif
+}
+
+static esp_err_t system_service_create_resources(void)
+{
+    if (s_events != NULL) {
+        return ESP_OK;
+    }
+
+    s_events =
+        xEventGroupCreate();
+
+    if (s_events == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
 }
 
 static esp_err_t system_service_temperature_init(void)
@@ -567,6 +584,19 @@ static void system_service_task(
             );
         }
 
+        const UBaseType_t watermark =
+            uxTaskGetStackHighWaterMark(
+                NULL
+            );
+
+        if (watermark < 512U) {
+            ESP_LOGW(
+                TAG,
+                "System task stack is low: %u bytes",
+                (unsigned int)watermark
+            );
+        }
+
         /*
          * Wait for either the next update interval or a stop
          * notification.
@@ -595,12 +625,20 @@ static void system_service_task(
     );
 
     /*
-     * Clear the handle before deleting the current task so the
-     * service can be started again.
+     * Publish completion only after all service resources have been
+     * released. The stopping task remains responsible for clearing
+     * s_task_handle.
      */
-    s_task_handle = NULL;
+    if (s_events != NULL) {
+        (void)xEventGroupSetBits(
+            s_events,
+            SYSTEM_EVENT_STOPPED
+        );
+    }
 
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(
+        NULL
+    );
 }
 
 esp_err_t system_service_start(void)
@@ -609,9 +647,21 @@ esp_err_t system_service_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    esp_err_t result =
+        system_service_create_resources();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    (void)xEventGroupClearBits(
+        s_events,
+        SYSTEM_EVENT_STOPPED
+    );
+
     system_model_t model = {0};
 
-    esp_err_t result =
+    result =
         system_model_get_snapshot(
             &model
         );
@@ -771,13 +821,15 @@ esp_err_t system_service_start(void)
     system_service_reset_cpu_usage();
 
     const BaseType_t task_result =
-        xTaskCreate(
+        xTaskCreateWithCaps(
             system_service_task,
             "system_task",
             SYSTEM_TASK_STACK_SIZE,
             NULL,
             SYSTEM_TASK_PRIORITY,
-            &s_task_handle
+            &s_task_handle,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
         );
 
     if (task_result != pdPASS) {
@@ -793,26 +845,58 @@ esp_err_t system_service_start(void)
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "System service started");
+    ESP_LOGI(
+        TAG,
+        "System service started"
+    );
 
     return ESP_OK;
 }
 
-void system_service_stop(void)
+esp_err_t system_service_stop(void)
 {
     TaskHandle_t task_handle =
         s_task_handle;
 
-    if (task_handle == NULL) {
-        return;
+    if ((task_handle == NULL) ||
+        (s_events == NULL)) {
+
+        return ESP_ERR_INVALID_STATE;
     }
 
-    /*
-     * Wake the task and request cooperative termination.
-     */
     (void)xTaskNotifyGive(
         task_handle
     );
+
+    const EventBits_t bits =
+        xEventGroupWaitBits(
+            s_events,
+            SYSTEM_EVENT_STOPPED,
+            pdTRUE,
+            pdTRUE,
+            pdMS_TO_TICKS(
+                SYSTEM_STOP_TIMEOUT_MS
+            )
+        );
+
+    if ((bits &
+         SYSTEM_EVENT_STOPPED) == 0U) {
+
+        ESP_LOGE(
+            TAG,
+            "Timed out waiting for system task"
+        );
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+    /*
+     * Keep the handle valid until shutdown is acknowledged so a
+     * concurrent start request cannot create a second system task.
+     */
+    s_task_handle = NULL;
+
+    return ESP_OK;
 }
 
 esp_err_t system_service_schedule_restart(

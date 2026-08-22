@@ -6,9 +6,11 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 
 #include "buzzer_driver.h"
@@ -441,6 +443,19 @@ static void buzzer_service_task(
 
             break;
         }
+
+        const UBaseType_t watermark =
+            uxTaskGetStackHighWaterMark(
+                NULL
+            );
+
+        if (watermark < 512U) {
+            ESP_LOGW(
+                TAG,
+                "Buzzer task stack is low: %u bytes",
+                (unsigned int)watermark
+            );
+        }
     }
 
     const esp_err_t result =
@@ -468,7 +483,12 @@ static void buzzer_service_task(
         );
     }
 
-    vTaskDelete(NULL);
+    /*
+     * The task stack was allocated through xTaskCreateWithCaps().
+     */
+    vTaskDeleteWithCaps(
+        NULL
+    );
 }
 
 esp_err_t buzzer_service_start(void)
@@ -539,13 +559,15 @@ esp_err_t buzzer_service_start(void)
     );
 
     const BaseType_t task_result =
-        xTaskCreate(
+        xTaskCreateWithCaps(
             buzzer_service_task,
             "buzzer_service",
             BUZZER_SERVICE_TASK_STACK_SIZE,
             NULL,
             BUZZER_SERVICE_TASK_PRIORITY,
-            &s_task
+            &s_task,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
         );
 
     if (task_result != pdPASS) {

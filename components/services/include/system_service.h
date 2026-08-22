@@ -21,30 +21,33 @@ extern "C" {
 esp_err_t system_service_start(void);
 
 /**
- * @brief Request cooperative termination of the system service.
+ * @brief Stop the system monitoring service.
  *
- * The function returns immediately. The service task finishes its
- * current update, releases temporary resources and then terminates.
- * Calling this function when the service is not running has no effect.
+ * Requests cooperative termination and waits until the monitoring task
+ * releases the temperature sensor and stops accessing shared service
+ * resources.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
+ * not running, or ESP_ERR_TIMEOUT if the task does not stop in time.
  */
-void system_service_stop(void);
+esp_err_t system_service_stop(void);
 
 /**
- * @brief Schedule a device restart.
+ * @brief Schedule a graceful device restart.
  *
- * The restart is performed asynchronously after the requested delay,
- * allowing the caller to finish operations such as sending an HTTP
- * response.
+ * The restart sequence runs asynchronously after the requested delay,
+ * allowing callers such as HTTP handlers to finish sending their
+ * responses.
  *
- * Only one restart may be scheduled at a time. A zero delay requests
- * an immediate asynchronous restart. Callers that need to complete an
- * operation before restarting must provide a sufficient delay.
+ * Before restarting, the shutdown service saves settings, stops
+ * network and CAN services, stops background monitoring, closes file
+ * logging and safely unmounts the SD card.
  *
- * The caller is responsible for saving settings, flushing persistent
- * data and completing any pending response before the restart occurs.
+ * Only one restart may be scheduled at a time. A zero delay starts the
+ * graceful shutdown sequence immediately.
  *
- * @param[in] delay_ms Delay before restart in milliseconds. The
- * maximum supported delay is 60000 milliseconds.
+ * @param[in] delay_ms Delay before starting graceful shutdown, in
+ * milliseconds. The maximum supported delay is 60000 milliseconds.
  *
  * @return ESP_OK when the restart task is created,
  * ESP_ERR_INVALID_ARG if delay_ms exceeds the supported maximum,

@@ -196,7 +196,18 @@ static void shutdown_service_task(
     /*
      * Stop periodic runtime and temperature updates.
      */
-    system_service_stop();
+    const esp_err_t system_result =
+        system_service_stop();
+
+    if ((system_result != ESP_OK) &&
+        (system_result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGW(
+            TAG,
+            "Failed to stop system service: %s",
+            esp_err_to_name(system_result)
+        );
+    }
 
     /*
      * Stop battery measurements and release ADC resources after all

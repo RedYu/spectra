@@ -8,7 +8,9 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -325,7 +327,9 @@ static void battery_service_task(
         BATTERY_SERVICE_STOPPED_BIT
     );
 
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(
+        NULL
+    );
 }
 
 static esp_err_t battery_service_create_resources(void)
@@ -394,13 +398,15 @@ esp_err_t battery_service_start(void)
     }
 
     const BaseType_t task_result =
-        xTaskCreate(
+        xTaskCreateWithCaps(
             battery_service_task,
             "battery_service",
             BATTERY_SERVICE_TASK_STACK_SIZE,
             NULL,
             BATTERY_SERVICE_TASK_PRIORITY,
-            &s_task
+            &s_task,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
         );
 
     if (task_result != pdPASS) {
