@@ -21,6 +21,8 @@ idf_component_register(
         "buzzer_service.c"
         "can_service.c"
         "can_fd_service.c"
+        "can_twai_frame_adapter.c"
+        "can_mcp2518fd_frame_adapter.c"
 
         "web_api/web_api_common.c"
         "web_api/web_system_api.c"
@@ -36,6 +38,7 @@ idf_component_register(
 
     REQUIRES
         models
+        can
 
     PRIV_REQUIRES
         app
