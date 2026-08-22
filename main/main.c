@@ -553,6 +553,43 @@ static void startup_task(
         return;
     }
 
+    const can_router_config_t can_router_config = {
+        .queue_depth =
+            64U,
+
+        .subscriber_capacity =
+            8U,
+
+        .pending_tx_capacity =
+            32U,
+    };
+
+    result =
+        can_router_start(
+            &can_router_config
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to start CAN router: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)gui_service_set_boot_progress(
+            50U,
+            "CAN router unavailable"
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "CAN router started"
+    );
+
     result = settings_service_init();
 
     if (result != ESP_OK) {
@@ -561,6 +598,59 @@ static void startup_task(
             "Configuration initialization failed: %s",
             esp_err_to_name(result)
         );
+
+        bool can_sources_stopped = true;
+
+        if (can_service_is_running()) {
+            const esp_err_t can_result =
+                can_service_stop();
+
+            if ((can_result != ESP_OK) &&
+                (can_result != ESP_ERR_INVALID_STATE)) {
+
+                can_sources_stopped = false;
+
+                ESP_LOGW(
+                    TAG,
+                    "Failed to stop primary CAN after startup error: %s",
+                    esp_err_to_name(can_result)
+                );
+            }
+        }
+
+        if (can_fd_service_is_running()) {
+            const esp_err_t can_fd_result =
+                can_fd_service_stop();
+
+            if ((can_fd_result != ESP_OK) &&
+                (can_fd_result != ESP_ERR_INVALID_STATE)) {
+
+                can_sources_stopped = false;
+
+                ESP_LOGW(
+                    TAG,
+                    "Failed to stop secondary CAN after startup error: %s",
+                    esp_err_to_name(can_fd_result)
+                );
+            }
+        }
+
+        if (can_sources_stopped &&
+            can_router_is_running()) {
+
+            const esp_err_t router_result =
+                can_router_stop();
+
+            if ((router_result != ESP_OK) &&
+                (router_result != ESP_ERR_INVALID_STATE)) {
+
+                ESP_LOGW(
+                    TAG,
+                    "Failed to stop CAN router after startup error: %s",
+                    esp_err_to_name(router_result)
+                );
+            }
+        }
 
         vTaskDelete(NULL);
         return;
@@ -690,43 +780,6 @@ static void startup_task(
 
     log_memory_status(
         "Before applying settings"
-    );
-
-    const can_router_config_t can_router_config = {
-        .queue_depth =
-            64U,
-
-        .subscriber_capacity =
-            8U,
-
-        .pending_tx_capacity =
-            32U,
-    };
-
-    result =
-        can_router_start(
-            &can_router_config
-        );
-
-    if (result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to start CAN router: %s",
-            esp_err_to_name(result)
-        );
-
-        (void)gui_service_set_boot_progress(
-            50U,
-            "CAN router unavailable"
-        );
-
-        vTaskDelete(NULL);
-        return;
-    }
-
-    ESP_LOGI(
-        TAG,
-        "CAN router started"
     );
 
     result =
