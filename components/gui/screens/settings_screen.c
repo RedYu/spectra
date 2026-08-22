@@ -15,6 +15,7 @@
 #include "gui_feedback.h"
 #include "gui_styles.h"
 #include "gui_theme.h"
+#include "buzzer_service.h"
 #include "screen_manager.h"
 #include "system_model.h"
 #include "settings_model.h"
@@ -25,7 +26,7 @@
 #include "storage_sd_service.h"
 #include "system_service.h"
 #include "can_service.h"
-#include "buzzer_service.h"
+#include "can_fd_service.h"
 
 #include "widgets/toolbar.h"
 #include "widgets/wifi_credentials_dialog.h"
@@ -58,6 +59,38 @@
 #define SETTINGS_STATUS_REFRESH_PERIOD_MS  (1000U)
 
 #define SETTINGS_SCREEN_RESTART_DELAY_MS  (500U)
+
+#define SETTINGS_CAN_NOMINAL_BITRATE_OPTIONS \
+    "10 kbit/s\n"                            \
+    "20 kbit/s\n"                            \
+    "33.333 kbit/s\n"                        \
+    "50 kbit/s\n"                            \
+    "83.333 kbit/s\n"                        \
+    "100 kbit/s\n"                           \
+    "125 kbit/s\n"                           \
+    "250 kbit/s\n"                           \
+    "500 kbit/s\n"                           \
+    "800 kbit/s\n"                           \
+    "1 Mbit/s"
+
+#if SETTINGS_CAN_FD_DATA_BITRATE_MAX >= 8000000U
+
+#define SETTINGS_CAN_FD_DATA_BITRATE_OPTIONS \
+    "1 Mbit/s\n"                             \
+    "2 Mbit/s\n"                             \
+    "4 Mbit/s\n"                             \
+    "5 Mbit/s\n"                             \
+    "8 Mbit/s"
+
+#else
+
+#define SETTINGS_CAN_FD_DATA_BITRATE_OPTIONS \
+    "1 Mbit/s\n"                             \
+    "2 Mbit/s\n"                             \
+    "4 Mbit/s\n"                             \
+    "5 Mbit/s"
+
+#endif
 
 static const char *TAG = "settings_screen";
 
@@ -119,7 +152,11 @@ static lv_obj_t *s_can_listen_only_switch = NULL;
 static lv_obj_t *s_can_info_label = NULL;
 
 static const uint32_t s_can_bitrates[] = {
+    10000U,
+    20000U,
+    33333U,
     50000U,
+    83333U,
     100000U,
     125000U,
     250000U,
@@ -127,6 +164,29 @@ static const uint32_t s_can_bitrates[] = {
     800000U,
     1000000U,
 };
+
+static lv_obj_t *s_can_secondary_enabled_switch = NULL;
+static lv_obj_t *s_can_secondary_nominal_dropdown = NULL;
+static lv_obj_t *s_can_secondary_data_dropdown = NULL;
+static lv_obj_t *s_can_secondary_fd_switch = NULL;
+static lv_obj_t *s_can_secondary_brs_switch = NULL;
+static lv_obj_t *s_can_secondary_listen_only_switch = NULL;
+static lv_obj_t *s_can_secondary_info_label = NULL;
+
+static const uint32_t s_can_fd_data_bitrates[] = {
+    1000000U,
+    2000000U,
+    4000000U,
+    5000000U,
+
+#if SETTINGS_CAN_FD_DATA_BITRATE_MAX >= 8000000U
+    8000000U,
+#endif
+};
+
+#define SETTINGS_CAN_FD_DATA_BITRATE_COUNT \
+    (sizeof(s_can_fd_data_bitrates) / \
+     sizeof(s_can_fd_data_bitrates[0]))
 
 #define SETTINGS_CAN_BITRATE_COUNT \
     (sizeof(s_can_bitrates) / sizeof(s_can_bitrates[0]))
@@ -178,10 +238,77 @@ static void settings_screen_refresh_can_info(
     const app_settings_t *settings
 );
 
+static void settings_screen_refresh_can_secondary_info(
+    const app_settings_t *settings
+);
+
 static void settings_screen_set_switch_state(
     lv_obj_t *switch_object,
     bool checked
 );
+
+static bool settings_screen_find_can_fd_data_bitrate(
+    uint32_t nominal_bitrate,
+    uint32_t requested_bitrate,
+    uint16_t *selected_index,
+    uint32_t *selected_bitrate
+)
+{
+    if ((selected_index == NULL) ||
+        (selected_bitrate == NULL)) {
+
+        return false;
+    }
+
+    const size_t bitrate_count =
+        sizeof(s_can_fd_data_bitrates) /
+        sizeof(s_can_fd_data_bitrates[0]);
+
+    /*
+     * Preserve the selected bitrate when it is valid.
+     */
+    for (size_t index = 0U;
+         index < bitrate_count;
+         ++index) {
+
+        if ((s_can_fd_data_bitrates[index] ==
+             requested_bitrate) &&
+            (requested_bitrate >
+             nominal_bitrate)) {
+
+            *selected_index =
+                (uint16_t)index;
+
+            *selected_bitrate =
+                requested_bitrate;
+
+            return true;
+        }
+    }
+
+    /*
+     * Otherwise select the first supported bitrate greater than the
+     * nominal bitrate.
+     */
+    for (size_t index = 0U;
+         index < bitrate_count;
+         ++index) {
+
+        if (s_can_fd_data_bitrates[index] >
+            nominal_bitrate) {
+
+            *selected_index =
+                (uint16_t)index;
+
+            *selected_bitrate =
+                s_can_fd_data_bitrates[index];
+
+            return true;
+        }
+    }
+
+    return false;
+}
 
 static void buzzer_volume_released_event_cb(
     lv_event_t *event
@@ -371,6 +498,10 @@ static void settings_screen_status_refresh_timer_cb(
         &settings
     );
 
+    settings_screen_refresh_can_secondary_info(
+        &settings
+    );
+
     s_updating_controls = false;
 }
 
@@ -382,17 +513,167 @@ static uint16_t settings_screen_can_bitrate_to_index(
          index < SETTINGS_CAN_BITRATE_COUNT;
          ++index) {
 
-        if (s_can_bitrates[index] ==
-            bitrate) {
-
+        if (s_can_bitrates[index] == bitrate) {
             return index;
         }
     }
 
     /*
-     * 500 kbit/s.
+     * Default: 500 kbit/s.
      */
-    return 4U;
+    return 8U;
+}
+
+static uint16_t settings_screen_can_fd_data_bitrate_to_index(
+    uint32_t bitrate,
+    uint32_t nominal_bitrate
+)
+{
+    uint16_t selected_index = 0U;
+    uint32_t selected_bitrate = 0U;
+
+    if (settings_screen_find_can_fd_data_bitrate(
+            nominal_bitrate,
+            bitrate,
+            &selected_index,
+            &selected_bitrate
+        )) {
+
+        return selected_index;
+    }
+
+    return 0U;
+}
+
+static void can_secondary_settings_event_cb(
+    lv_event_t *event
+)
+{
+    (void)event;
+
+    if (s_updating_controls ||
+        (s_can_secondary_enabled_switch == NULL) ||
+        (s_can_secondary_nominal_dropdown == NULL) ||
+        (s_can_secondary_data_dropdown == NULL) ||
+        (s_can_secondary_fd_switch == NULL) ||
+        (s_can_secondary_brs_switch == NULL) ||
+        (s_can_secondary_listen_only_switch == NULL)) {
+
+        return;
+    }
+
+    const uint16_t nominal_index =
+        lv_dropdown_get_selected(
+            s_can_secondary_nominal_dropdown
+        );
+
+    const uint16_t data_index =
+        lv_dropdown_get_selected(
+            s_can_secondary_data_dropdown
+        );
+
+    if ((nominal_index >= SETTINGS_CAN_BITRATE_COUNT) ||
+        (data_index >= SETTINGS_CAN_FD_DATA_BITRATE_COUNT)) {
+
+        (void)settings_screen_refresh();
+        return;
+    }
+
+    const bool enabled =
+        lv_obj_has_state(
+            s_can_secondary_enabled_switch,
+            LV_STATE_CHECKED
+        );
+
+    const bool fd_enabled =
+        lv_obj_has_state(
+            s_can_secondary_fd_switch,
+            LV_STATE_CHECKED
+        );
+
+    bool brs_enabled =
+        lv_obj_has_state(
+            s_can_secondary_brs_switch,
+            LV_STATE_CHECKED
+        );
+
+    const bool listen_only =
+        lv_obj_has_state(
+            s_can_secondary_listen_only_switch,
+            LV_STATE_CHECKED
+        );
+
+    const uint32_t nominal_bitrate =
+        s_can_bitrates[nominal_index];
+
+    uint32_t data_bitrate =
+        nominal_bitrate;
+
+    /*
+     * BRS is available only for CAN FD.
+     */
+    if (!fd_enabled) {
+        brs_enabled = false;
+    }
+
+    if (brs_enabled) {
+        const uint32_t requested_bitrate =
+            s_can_fd_data_bitrates[data_index];
+
+        uint16_t selected_index = 0U;
+
+        if (!settings_screen_find_can_fd_data_bitrate(
+                nominal_bitrate,
+                requested_bitrate,
+                &selected_index,
+                &data_bitrate
+            )) {
+
+            ESP_LOGW(
+                TAG,
+                "No valid CAN FD data bitrate above %lu bit/s",
+                (unsigned long)nominal_bitrate
+            );
+
+            (void)settings_screen_refresh();
+            return;
+        }
+
+        lv_dropdown_set_selected(
+            s_can_secondary_data_dropdown,
+            selected_index
+        );
+    }
+
+    if (!brs_enabled) {
+        data_bitrate =
+            nominal_bitrate;
+    }
+
+    const esp_err_t result =
+        settings_service_set_can_secondary(
+            enabled,
+            nominal_bitrate,
+            data_bitrate,
+            fd_enabled,
+            brs_enabled,
+            listen_only
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply secondary CAN settings "
+            "(nominal=%lu, data=%lu, FD=%s, BRS=%s): %s",
+            (unsigned long)nominal_bitrate,
+            (unsigned long)data_bitrate,
+            fd_enabled ? "enabled" : "disabled",
+            brs_enabled ? "enabled" : "disabled",
+            esp_err_to_name(result)
+        );
+    }
+
+    (void)settings_screen_refresh();
 }
 
 static void can_settings_event_cb(
@@ -452,6 +733,202 @@ static void can_settings_event_cb(
     }
 
     (void)settings_screen_refresh();
+}
+
+static const char *settings_screen_can_fd_state_to_string(
+    can_fd_mcp2518fd_state_t state
+)
+{
+    switch (state) {
+        case CAN_FD_MCP2518FD_STATE_STOPPED:
+            return "Stopped";
+
+        case CAN_FD_MCP2518FD_STATE_ERROR_ACTIVE:
+            return "Active";
+
+        case CAN_FD_MCP2518FD_STATE_ERROR_WARNING:
+            return "Warning";
+
+        case CAN_FD_MCP2518FD_STATE_ERROR_PASSIVE:
+            return "Error passive";
+
+        case CAN_FD_MCP2518FD_STATE_BUS_OFF:
+            return "Bus off";
+
+        case CAN_FD_MCP2518FD_STATE_UNKNOWN:
+        default:
+            return "Unknown";
+    }
+}
+
+static void settings_screen_refresh_can_secondary_info(
+    const app_settings_t *settings
+)
+{
+    if (settings == NULL) {
+        return;
+    }
+
+    const bool enabled =
+        settings->can_secondary.enabled;
+
+    const bool fd_enabled =
+        settings->can_secondary.fd_enabled;
+
+    const bool brs_enabled =
+        settings->can_secondary.brs_enabled;
+
+    settings_screen_set_switch_state(
+        s_can_secondary_enabled_switch,
+        enabled
+    );
+
+    settings_screen_set_switch_state(
+        s_can_secondary_fd_switch,
+        fd_enabled
+    );
+
+    settings_screen_set_switch_state(
+        s_can_secondary_brs_switch,
+        brs_enabled
+    );
+
+    settings_screen_set_switch_state(
+        s_can_secondary_listen_only_switch,
+        settings->can_secondary.listen_only
+    );
+
+    if (s_can_secondary_nominal_dropdown != NULL) {
+        lv_dropdown_set_selected(
+            s_can_secondary_nominal_dropdown,
+            settings_screen_can_bitrate_to_index(
+                settings->can_secondary.nominal_bitrate
+            )
+        );
+    }
+
+    if (s_can_secondary_data_dropdown != NULL) {
+        lv_dropdown_set_selected(
+            s_can_secondary_data_dropdown,
+            settings_screen_can_fd_data_bitrate_to_index(
+                settings->can_secondary.data_bitrate,
+                settings->can_secondary.nominal_bitrate
+            )
+        );
+    }
+
+    lv_obj_t *enabled_controls[] = {
+        s_can_secondary_nominal_dropdown,
+        s_can_secondary_fd_switch,
+        s_can_secondary_listen_only_switch,
+    };
+
+    for (size_t index = 0U;
+         index < sizeof(enabled_controls) /
+                 sizeof(enabled_controls[0]);
+         ++index) {
+
+        if (enabled_controls[index] == NULL) {
+            continue;
+        }
+
+        if (enabled) {
+            lv_obj_remove_state(
+                enabled_controls[index],
+                LV_STATE_DISABLED
+            );
+        } else {
+            lv_obj_add_state(
+                enabled_controls[index],
+                LV_STATE_DISABLED
+            );
+        }
+    }
+
+    if (s_can_secondary_brs_switch != NULL) {
+        if (enabled && fd_enabled) {
+            lv_obj_remove_state(
+                s_can_secondary_brs_switch,
+                LV_STATE_DISABLED
+            );
+        } else {
+            lv_obj_add_state(
+                s_can_secondary_brs_switch,
+                LV_STATE_DISABLED
+            );
+        }
+    }
+
+    if (s_can_secondary_data_dropdown != NULL) {
+        if (enabled && fd_enabled && brs_enabled) {
+            lv_obj_remove_state(
+                s_can_secondary_data_dropdown,
+                LV_STATE_DISABLED
+            );
+        } else {
+            lv_obj_add_state(
+                s_can_secondary_data_dropdown,
+                LV_STATE_DISABLED
+            );
+        }
+    }
+
+    if (s_can_secondary_info_label == NULL) {
+        return;
+    }
+
+    if (!enabled) {
+        lv_label_set_text_fmt(
+            s_can_secondary_info_label,
+            "State: Disabled\n"
+            "Nominal: %lu bit/s   Data: %lu bit/s",
+            (unsigned long)
+                settings->can_secondary.nominal_bitrate,
+            (unsigned long)
+                settings->can_secondary.data_bitrate
+        );
+
+        return;
+    }
+
+    can_fd_mcp2518fd_info_t info;
+
+    const esp_err_t result =
+        can_fd_service_get_info(
+            &info
+        );
+
+    if (result != ESP_OK) {
+        lv_label_set_text_fmt(
+            s_can_secondary_info_label,
+            "State: Unavailable\nError: %s",
+            esp_err_to_name(result)
+        );
+
+        return;
+    }
+
+    lv_label_set_text_fmt(
+        s_can_secondary_info_label,
+        "State: %s\n"
+        "Nominal: %lu   Data: %lu bit/s\n"
+        "FD: %s   BRS: %s\n"
+        "RX: %lu   TX: %lu   Dropped: %lu\n"
+        "TEC: %u   REC: %u   Bus errors: %lu",
+        settings_screen_can_fd_state_to_string(
+            info.state
+        ),
+        (unsigned long)info.nominal_bitrate,
+        (unsigned long)info.data_bitrate,
+        info.fd_enabled ? "On" : "Off",
+        info.brs_enabled ? "On" : "Off",
+        (unsigned long)info.received_frames,
+        (unsigned long)info.transmitted_frames,
+        (unsigned long)info.dropped_rx_frames,
+        (unsigned int)info.transmit_error_count,
+        (unsigned int)info.receive_error_count,
+        (unsigned long)info.bus_error_count
+    );
 }
 
 static const char *settings_screen_can_state_to_string(
@@ -656,6 +1133,13 @@ static void settings_screen_delete_event_cb(
     s_usb_rndis_info_label = NULL;
     s_system_info_label = NULL;
     s_updating_controls = false;
+    s_can_secondary_enabled_switch = NULL;
+    s_can_secondary_nominal_dropdown = NULL;
+    s_can_secondary_data_dropdown = NULL;
+    s_can_secondary_fd_switch = NULL;
+    s_can_secondary_brs_switch = NULL;
+    s_can_secondary_listen_only_switch = NULL;
+    s_can_secondary_info_label = NULL;
 
     memset(
         &s_selected_wifi_network,
@@ -1596,6 +2080,10 @@ static esp_err_t settings_screen_refresh(void)
     settings_screen_refresh_system_info();
 
     settings_screen_refresh_can_info(
+        &settings
+    );
+
+    settings_screen_refresh_can_secondary_info(
         &settings
     );
 
@@ -4116,6 +4604,110 @@ static esp_err_t settings_screen_create_wifi_tab(
     return ESP_OK;
 }
 
+static lv_obj_t *settings_screen_create_dropdown_card(
+    lv_obj_t *parent,
+    const char *title,
+    const char *options,
+    lv_event_cb_t event_callback
+)
+{
+    if ((parent == NULL) ||
+        (title == NULL) ||
+        (options == NULL)) {
+
+        return NULL;
+    }
+
+    lv_obj_t *card =
+        lv_obj_create(parent);
+
+    if (card == NULL) {
+        return NULL;
+    }
+
+    lv_obj_set_size(
+        card,
+        LV_PCT(100),
+        SETTINGS_ROW_CARD_HEIGHT
+    );
+
+    settings_screen_style_card(
+        card
+    );
+
+    lv_obj_t *label =
+        lv_label_create(card);
+
+    if (label == NULL) {
+        lv_obj_delete(card);
+        return NULL;
+    }
+
+    lv_label_set_text(
+        label,
+        title
+    );
+
+    lv_obj_add_style(
+        label,
+        gui_styles_text_small(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_align(
+        label,
+        LV_ALIGN_LEFT_MID,
+        0,
+        0
+    );
+
+    lv_obj_t *dropdown =
+        lv_dropdown_create(card);
+
+    if (dropdown == NULL) {
+        lv_obj_delete(card);
+        return NULL;
+    }
+
+    lv_dropdown_set_options(
+        dropdown,
+        options
+    );
+
+    lv_obj_set_width(
+        dropdown,
+        150
+    );
+
+    lv_obj_add_style(
+        dropdown,
+        gui_styles_input(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_align(
+        dropdown,
+        LV_ALIGN_RIGHT_MID,
+        0,
+        0
+    );
+
+    gui_feedback_attach(
+        dropdown
+    );
+
+    if (event_callback != NULL) {
+        lv_obj_add_event_cb(
+            dropdown,
+            event_callback,
+            LV_EVENT_VALUE_CHANGED,
+            NULL
+        );
+    }
+
+    return dropdown;
+}
+
 static esp_err_t settings_screen_create_can_tab(
     lv_obj_t *tab
 )
@@ -4194,13 +4786,7 @@ static esp_err_t settings_screen_create_can_tab(
 
     lv_dropdown_set_options(
         s_can_bitrate_dropdown,
-        "50 kbit/s\n"
-        "100 kbit/s\n"
-        "125 kbit/s\n"
-        "250 kbit/s\n"
-        "500 kbit/s\n"
-        "800 kbit/s\n"
-        "1 Mbit/s"
+        SETTINGS_CAN_NOMINAL_BITRATE_OPTIONS
     );
 
     lv_obj_set_width(
@@ -4286,6 +4872,136 @@ static esp_err_t settings_screen_create_can_tab(
     lv_obj_add_style(
         s_can_info_label,
         gui_styles_text_small(),
+        LV_PART_MAIN
+    );
+
+    s_can_secondary_enabled_switch =
+        settings_screen_create_switch_card(
+            tab,
+            "Secondary CAN (MCP2518FD)",
+            can_secondary_settings_event_cb
+        );
+
+    if (s_can_secondary_enabled_switch == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_can_secondary_nominal_dropdown =
+        settings_screen_create_dropdown_card(
+            tab,
+            "Nominal bitrate",
+            SETTINGS_CAN_NOMINAL_BITRATE_OPTIONS,
+            can_secondary_settings_event_cb
+        );
+
+    if (s_can_secondary_nominal_dropdown == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_can_secondary_data_dropdown =
+        settings_screen_create_dropdown_card(
+            tab,
+            "Data bitrate",
+            SETTINGS_CAN_FD_DATA_BITRATE_OPTIONS,
+            can_secondary_settings_event_cb
+        );
+
+    if (s_can_secondary_data_dropdown == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_can_secondary_fd_switch =
+        settings_screen_create_switch_card(
+            tab,
+            "CAN FD frames",
+            can_secondary_settings_event_cb
+        );
+
+    if (s_can_secondary_fd_switch == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_can_secondary_brs_switch =
+        settings_screen_create_switch_card(
+            tab,
+            "Bit rate switching",
+            can_secondary_settings_event_cb
+        );
+
+    if (s_can_secondary_brs_switch == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_can_secondary_listen_only_switch =
+        settings_screen_create_switch_card(
+            tab,
+            "Secondary listen-only mode",
+            can_secondary_settings_event_cb
+        );
+
+    if (s_can_secondary_listen_only_switch == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_t *secondary_info_card =
+        lv_obj_create(tab);
+
+    if (secondary_info_card == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        secondary_info_card,
+        LV_PCT(100)
+    );
+
+    lv_obj_set_height(
+        secondary_info_card,
+        LV_SIZE_CONTENT
+    );
+
+    settings_screen_style_card(
+        secondary_info_card
+    );
+
+    lv_obj_remove_flag(
+        secondary_info_card,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    s_can_secondary_info_label =
+        lv_label_create(
+            secondary_info_card
+        );
+
+    if (s_can_secondary_info_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_width(
+        s_can_secondary_info_label,
+        LV_PCT(100)
+    );
+
+    lv_label_set_long_mode(
+        s_can_secondary_info_label,
+        LV_LABEL_LONG_WRAP
+    );
+
+    lv_label_set_text(
+        s_can_secondary_info_label,
+        "State: Loading..."
+    );
+
+    lv_obj_add_style(
+        s_can_secondary_info_label,
+        gui_styles_text_small(),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_line_space(
+        s_can_secondary_info_label,
+        4,
         LV_PART_MAIN
     );
 
@@ -4864,6 +5580,13 @@ lv_obj_t *settings_screen_create(void)
     s_usb_rndis_info_label = NULL;
     s_system_info_label = NULL;
     s_updating_controls = false;
+    s_can_secondary_enabled_switch = NULL;
+    s_can_secondary_nominal_dropdown = NULL;
+    s_can_secondary_data_dropdown = NULL;
+    s_can_secondary_fd_switch = NULL;
+    s_can_secondary_brs_switch = NULL;
+    s_can_secondary_listen_only_switch = NULL;
+    s_can_secondary_info_label = NULL;
 
     memset(
         &s_selected_wifi_network,
@@ -5040,6 +5763,13 @@ void settings_screen_destroy(
     s_can_info_label = NULL;
     s_system_info_label = NULL;
     s_updating_controls = false;
+    s_can_secondary_enabled_switch = NULL;
+    s_can_secondary_nominal_dropdown = NULL;
+    s_can_secondary_data_dropdown = NULL;
+    s_can_secondary_fd_switch = NULL;
+    s_can_secondary_brs_switch = NULL;
+    s_can_secondary_listen_only_switch = NULL;
+    s_can_secondary_info_label = NULL;
 
     memset(
         &s_selected_wifi_network,
