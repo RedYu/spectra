@@ -34,6 +34,7 @@
 #include "crash_dump_service.h"
 #include "can_service.h"
 #include "can_fd_service.h"
+#include "can_router.h"
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
@@ -691,6 +692,43 @@ static void startup_task(
         "Before applying settings"
     );
 
+    const can_router_config_t can_router_config = {
+        .queue_depth =
+            64U,
+
+        .subscriber_capacity =
+            8U,
+
+        .pending_tx_capacity =
+            32U,
+    };
+
+    result =
+        can_router_start(
+            &can_router_config
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to start CAN router: %s",
+            esp_err_to_name(result)
+        );
+
+        (void)gui_service_set_boot_progress(
+            50U,
+            "CAN router unavailable"
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "CAN router started"
+    );
+
     result =
         settings_service_apply();
 
@@ -714,6 +752,27 @@ static void startup_task(
 
         vTaskDelete(NULL);
         return;
+    }
+
+    can_router_statistics_t router_statistics;
+
+    const esp_err_t router_statistics_result =
+        can_router_get_statistics(
+            &router_statistics
+        );
+
+    if (router_statistics_result == ESP_OK) {
+        ESP_LOGI(
+            TAG,
+            "CAN router ready: queue=%lu, subscribers=%lu, "
+            "pending TX=%lu",
+            (unsigned long)
+                router_statistics.queue_capacity,
+            (unsigned long)
+                router_statistics.subscriber_capacity,
+            (unsigned long)
+                router_statistics.pending_tx_capacity
+        );
     }
 
     if (settings.can_primary.enabled) {
