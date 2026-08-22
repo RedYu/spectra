@@ -15,6 +15,7 @@
 #include "app_config.h"
 #include "board_config.h"
 #include "gui_config.h"
+#include "buzzer_service.h"
 #include "storage_sd_service.h"
 #include "display_backlight.h"
 #include "settings_model.h"
@@ -25,7 +26,8 @@
 #include "usb_network_service.h"
 #include "can_service.h"
 #include "can_fd_service.h"
-#include "buzzer_service.h"
+#include "can_router.h"
+#include "can_router_service_adapter.h"
 
 #define SETTINGS_JSON_INDENT_SPACES  (4U)
 
@@ -2461,6 +2463,18 @@ static void settings_service_build_can_config(
 
     config->driver.transmit_retry_count =
         3;
+
+    config->common_receive_callback =
+        can_router_receive_callback;
+
+    config->common_receive_context =
+        NULL;
+
+    config->tx_confirmation_callback =
+        can_router_twai_tx_confirmation_callback;
+
+    config->tx_confirmation_context =
+        NULL;
 }
 
 static void settings_service_build_can_fd_config(
@@ -2508,15 +2522,17 @@ static void settings_service_build_can_fd_config(
     config->driver.retransmission =
         CAN_FD_MCP2518FD_RETRANSMISSION_UNLIMITED;
 
-    /*
-     * Frame processing callbacks will be connected to the application
-     * CAN routing layer later.
-     */
-    config->receive_callback = NULL;
-    config->receive_context = NULL;
+    config->common_receive_callback =
+        can_router_receive_callback;
 
-    config->tx_confirmation_callback = NULL;
-    config->tx_confirmation_context = NULL;
+    config->common_receive_context =
+        NULL;
+
+    config->tx_confirmation_callback =
+        can_router_mcp2518fd_tx_confirmation_callback;
+
+    config->tx_confirmation_context =
+        NULL;
 }
 
 static esp_err_t settings_service_apply_can_primary(
@@ -2525,6 +2541,17 @@ static esp_err_t settings_service_apply_can_primary(
 {
     if (settings == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    if (settings->enabled &&
+        !can_router_is_running()) {
+
+        ESP_LOGE(
+            TAG,
+            "Cannot enable CAN before CAN router is started"
+        );
+
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (!settings->enabled) {
@@ -2592,6 +2619,17 @@ static esp_err_t settings_service_apply_can_secondary(
 {
     if (settings == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    if (settings->enabled &&
+        !can_router_is_running()) {
+
+        ESP_LOGE(
+            TAG,
+            "Cannot enable CAN before CAN router is started"
+        );
+
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (!settings->enabled) {
