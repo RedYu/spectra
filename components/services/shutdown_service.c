@@ -20,10 +20,11 @@
 #include "system_service.h"
 #include "battery_service.h"
 #include "buzzer_service.h"
+#include "settings_service.h"
 #include "can_service.h"
 #include "can_fd_service.h"
 #include "can_router.h"
-#include "settings_service.h"
+#include "can_monitor_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
 #define SHUTDOWN_SERVICE_TASK_PRIORITY    (5U)
@@ -131,8 +132,31 @@ static void shutdown_service_task(
     }
 
     /*
+     * Stop CAN consumers before stopping CAN sources. This prevents the
+     * monitor from receiving events while its resources are released.
+     */
+    bool can_consumers_stopped = true;
+
+    if (can_monitor_service_is_running()) {
+        const esp_err_t monitor_result =
+            can_monitor_service_stop();
+
+        if ((monitor_result != ESP_OK) &&
+            (monitor_result != ESP_ERR_INVALID_STATE)) {
+
+            can_consumers_stopped = false;
+
+            ESP_LOGW(
+                TAG,
+                "Failed to stop CAN monitor service: %s",
+                esp_err_to_name(monitor_result)
+            );
+        }
+    }
+
+    /*
      * Stop CAN reception and abort pending transmissions after the web
-     * interface has stopped accepting CAN-related requests.
+     * interface and CAN consumers have stopped accepting CAN data.
      */
     bool can_sources_stopped = true;
 
@@ -170,7 +194,12 @@ static void shutdown_service_task(
         }
     }
 
-    if (can_sources_stopped &&
+    /*
+     * The router owns resources still referenced by CAN sources and
+     * subscribers. Stop it only after all of them have terminated.
+     */
+    if (can_consumers_stopped &&
+        can_sources_stopped &&
         can_router_is_running()) {
 
         const esp_err_t router_result =

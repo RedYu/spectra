@@ -35,6 +35,7 @@
 #include "can_service.h"
 #include "can_fd_service.h"
 #include "can_router.h"
+#include "can_monitor_service.h"
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
@@ -590,6 +591,44 @@ static void startup_task(
         "CAN router started"
     );
 
+    const can_monitor_service_config_t
+        can_monitor_config = {
+
+            .queue_depth =
+                16U,
+
+            .history_capacity =
+                128U,
+
+            .identifier_capacity =
+                128U,
+        };
+
+    result =
+        can_monitor_service_start(
+            &can_monitor_config
+        );
+
+    if (result != ESP_OK) {
+        startup_warning = true;
+
+        ESP_LOGW(
+            TAG,
+            "Failed to start CAN monitor: %s",
+            esp_err_to_name(result)
+        );
+
+        /*
+         * Monitoring is optional. CAN routing and both CAN interfaces can
+         * continue operating without accumulated monitor statistics.
+         */
+    } else {
+        ESP_LOGI(
+            TAG,
+            "CAN monitor service started"
+        );
+    }
+
     result = settings_service_init();
 
     if (result != ESP_OK) {
@@ -598,6 +637,25 @@ static void startup_task(
             "Configuration initialization failed: %s",
             esp_err_to_name(result)
         );
+
+        bool can_monitor_stopped = true;
+
+        if (can_monitor_service_is_running()) {
+            const esp_err_t monitor_result =
+                can_monitor_service_stop();
+
+            if ((monitor_result != ESP_OK) &&
+                (monitor_result != ESP_ERR_INVALID_STATE)) {
+
+                can_monitor_stopped = false;
+
+                ESP_LOGW(
+                    TAG,
+                    "Failed to stop CAN monitor after startup error: %s",
+                    esp_err_to_name(monitor_result)
+                );
+            }
+        }
 
         bool can_sources_stopped = true;
 
@@ -636,6 +694,7 @@ static void startup_task(
         }
 
         if (can_sources_stopped &&
+            can_monitor_stopped &&
             can_router_is_running()) {
 
             const esp_err_t router_result =
@@ -826,6 +885,30 @@ static void startup_task(
             (unsigned long)
                 router_statistics.pending_tx_capacity
         );
+    }
+
+    if (can_monitor_service_is_running()) {
+        can_monitor_service_statistics_t
+            monitor_statistics;
+
+        const esp_err_t monitor_result =
+            can_monitor_service_get_statistics(
+                &monitor_statistics
+            );
+
+        if (monitor_result == ESP_OK) {
+            ESP_LOGI(
+                TAG,
+                "CAN monitor ready: queue=%lu, history=%lu, "
+                "identifiers=%lu",
+                (unsigned long)
+                    monitor_statistics.input_queue_capacity,
+                (unsigned long)
+                    monitor_statistics.history_capacity,
+                (unsigned long)
+                    monitor_statistics.identifier_capacity
+            );
+        }
     }
 
     if (settings.can_primary.enabled) {

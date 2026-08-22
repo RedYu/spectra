@@ -7,6 +7,7 @@ idf_component_register(
 
     PRIV_REQUIRES
         app
+        can_monitor
         board
         drivers
         models

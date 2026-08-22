@@ -39,6 +39,7 @@ idf_component_register(
     REQUIRES
         models
         can
+        can_monitor
 
     PRIV_REQUIRES
         app
