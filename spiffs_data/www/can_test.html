@@ -73,6 +73,11 @@
             border-radius: 6px;
         }
 
+        #status.paused {
+            color: #f59e0b;
+            border-color: #f59e0b;
+        }
+
         .statistics-panel {
             box-sizing: border-box;
             min-width: 540px;
@@ -259,12 +264,6 @@
                     id="statistics-filtered"
                     class="statistics-value"
                 >0</span>
-
-                <span class="statistics-label">Stream state</span>
-                <span
-                    id="statistics-stream-state"
-                    class="statistics-value"
-                >Disconnected</span>
             </div>
         </section>
     </div>
@@ -333,9 +332,6 @@
 
             filtered:
                 document.getElementById("statistics-filtered"),
-
-            streamState:
-                document.getElementById("statistics-stream-state"),
         };
 
         function formatByteSize(value) {
@@ -766,8 +762,8 @@
                 return;
             }
 
-            statisticsElements.streamState.textContent =
-                "Connecting";
+            status.textContent = "Connecting";
+            status.classList.remove("paused");
 
             const scheme =
                 location.protocol === "https:"
@@ -786,6 +782,8 @@
                 () => {
                     status.textContent =
                         "Connected";
+
+                    status.classList.remove("paused");
 
                     appendLog(
                         "WebSocket connected"
@@ -826,10 +824,15 @@
                             } else if (message.type ===
                                        "subscription") {
 
-                                statisticsElements.streamState.textContent =
+                                status.textContent =
                                     message.paused
                                         ? "Paused"
-                                        : "Active";
+                                        : "Connected";
+
+                                status.classList.toggle(
+                                    "paused",
+                                    message.paused
+                                );
 
                                 appendLog(
                                     `Subscription updated: ${event.data}`
@@ -857,8 +860,8 @@
 
             socket.onerror =
                 () => {
-                    statisticsElements.streamState.textContent =
-                        "Error";
+                    status.textContent = "Error";
+                    status.classList.remove("paused");
 
                     appendLog(
                         "WebSocket error"
@@ -867,11 +870,10 @@
 
             socket.onclose =
                 event => {
-                    statisticsElements.streamState.textContent =
-                        "Disconnected";
-
                     status.textContent =
                         `Disconnected (${event.code})`;
+
+                    status.classList.remove("paused");
 
                     appendLog(
                         `WebSocket closed: ${event.code}`
