@@ -104,6 +104,15 @@ static atomic_bool s_sta_connected =
 static atomic_bool s_reconnect_allowed =
     ATOMIC_VAR_INIT(false);
 
+static atomic_bool s_sta_connecting =
+    ATOMIC_VAR_INIT(false);
+
+static atomic_bool s_scan_waiting_for_disconnect =
+    ATOMIC_VAR_INIT(false);
+
+static atomic_bool s_reconnect_after_scan =
+    ATOMIC_VAR_INIT(false);
+
 static char s_ap_ssid_base[
     WIFI_SERVICE_AP_SSID_MAX_LENGTH
 ] = "Spectra";
@@ -127,6 +136,8 @@ static char s_sta_password[
 static esp_err_t wifi_service_scan_lock(void);
 
 static void wifi_service_scan_unlock(void);
+
+static esp_err_t wifi_service_begin_scan(void);
 
 static void wifi_service_handle_scan_done(
     const wifi_event_sta_scan_done_t *event
@@ -262,6 +273,92 @@ static bool wifi_service_scan_is_running(void)
     wifi_service_scan_unlock();
 
     return running;
+}
+
+static esp_err_t wifi_service_begin_scan(void)
+{
+    const wifi_scan_config_t scan_config = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0U,
+        .show_hidden = true,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+    };
+
+    const esp_err_t result =
+        esp_wifi_scan_start(
+            &scan_config,
+            false
+        );
+
+    if (result != ESP_OK) {
+        if (wifi_service_scan_lock() == ESP_OK) {
+            if (s_scan_temporary_sta) {
+                const esp_err_t restore_result =
+                    esp_wifi_set_mode(
+                        WIFI_MODE_AP
+                    );
+
+                if (restore_result != ESP_OK) {
+                    ESP_LOGE(
+                        TAG,
+                        "Failed to restore AP mode: %s",
+                        esp_err_to_name(
+                            restore_result
+                        )
+                    );
+                }
+
+                s_scan_temporary_sta = false;
+            }
+
+            s_scan_info.state =
+                WIFI_SERVICE_SCAN_STATE_ERROR;
+
+            s_scan_info.last_error =
+                result;
+
+            wifi_service_scan_unlock();
+        }
+
+        atomic_store(
+            &s_scan_waiting_for_disconnect,
+            false
+        );
+
+        const bool reconnect =
+            atomic_exchange(
+                &s_reconnect_after_scan,
+                false
+            );
+
+        atomic_store(
+            &s_reconnect_allowed,
+            reconnect
+        );
+
+        if (reconnect &&
+            atomic_load(&s_sta_enabled) &&
+            !atomic_load(&s_sta_connected)) {
+
+            (void)wifi_service_schedule_reconnect();
+        }
+
+        ESP_LOGE(
+            TAG,
+            "Failed to start Wi-Fi scan: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "Asynchronous Wi-Fi scan started"
+    );
+
+    return ESP_OK;
 }
 
 static void wifi_service_sort_scan_results(void)
@@ -513,6 +610,17 @@ restore_mode:
 
     wifi_service_scan_unlock();
 
+    const bool reconnect =
+        atomic_exchange(
+            &s_reconnect_after_scan,
+            false
+        );
+
+    atomic_store(
+        &s_reconnect_allowed,
+        reconnect
+    );
+
     if (final_state ==
         WIFI_SERVICE_SCAN_STATE_COMPLETE) {
 
@@ -621,11 +729,21 @@ static void wifi_service_reconnect_timer_cb(
 
         return;
     }
+    
+    atomic_store(
+        &s_sta_connecting,
+        true
+    );
 
     const esp_err_t result =
         esp_wifi_connect();
 
     if (result != ESP_OK) {
+        atomic_store(
+            &s_sta_connecting,
+            false
+        );
+
         ESP_LOGW(
             TAG,
             "Delayed Station reconnect failed: %s",
@@ -780,10 +898,21 @@ static void wifi_service_event_handler(
     if (event_id == WIFI_EVENT_STA_START) {
         if (atomic_load(&s_sta_enabled) &&
             atomic_load(&s_reconnect_allowed)) {
+
+            atomic_store(
+                &s_sta_connecting,
+                true
+            );
+
             const esp_err_t result =
                 esp_wifi_connect();
 
             if (result != ESP_OK) {
+                atomic_store(
+                    &s_sta_connecting,
+                    false
+                );
+
                 ESP_LOGW(
                     TAG,
                     "Failed to start Station connection: %s",
@@ -803,6 +932,26 @@ static void wifi_service_event_handler(
             &s_sta_connected,
             false
         );
+
+        atomic_store(
+            &s_sta_connecting,
+            false
+        );
+
+        if (atomic_exchange(
+                &s_scan_waiting_for_disconnect,
+                false
+            )) {
+
+            ESP_LOGI(
+                TAG,
+                "Station connection stopped for Wi-Fi scan"
+            );
+
+            (void)wifi_service_begin_scan();
+
+            return;
+        }
 
         if (event != NULL) {
             ESP_LOGW(
@@ -886,6 +1035,11 @@ static void wifi_service_ip_event_handler(
                 )
             );
         }
+
+        atomic_store(
+            &s_sta_connecting,
+            false
+        );
 
         bool network_ready = false;
 
@@ -2038,6 +2192,10 @@ esp_err_t wifi_service_stop(void)
         );
     }
 
+    atomic_store(&s_sta_connecting, false);
+    atomic_store(&s_scan_waiting_for_disconnect, false);
+    atomic_store(&s_reconnect_after_scan, false);
+
     ESP_LOGI(
         TAG,
         "Wi-Fi service stopped"
@@ -3106,10 +3264,20 @@ esp_err_t wifi_service_set_sta_credentials(
     );
 
     if (s_started) {
+        atomic_store(
+            &s_sta_connecting,
+            true
+        );
+
         result =
             esp_wifi_connect();
 
         if (result != ESP_OK) {
+            atomic_store(
+                &s_sta_connecting,
+                false
+            );
+
             goto restore;
         }
     }
@@ -3161,10 +3329,25 @@ restore:
             reconnect_was_allowed &&
             (restore_result == ESP_OK)) {
 
+            atomic_store(
+                &s_sta_connecting,
+                true
+            );
+
+            atomic_store(
+                &s_sta_connecting,
+                true
+            );
+
             const esp_err_t connect_result =
                 esp_wifi_connect();
 
             if (connect_result != ESP_OK) {
+                atomic_store(
+                    &s_sta_connecting,
+                    false
+                );
+
                 ESP_LOGE(
                     TAG,
                     "Failed to reconnect using previous Station "
@@ -3254,58 +3437,96 @@ esp_err_t wifi_service_start_scan(void)
         s_scan_temporary_sta = true;
     }
 
-    const wifi_scan_config_t scan_config = {
-        .ssid = NULL,
-        .bssid = NULL,
-        .channel = 0U,
-        .show_hidden = true,
-        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-    };
-
-    result =
-        esp_wifi_scan_start(
-            &scan_config,
+    const bool reconnect_was_allowed =
+        atomic_exchange(
+            &s_reconnect_allowed,
             false
         );
 
-    if (result != ESP_OK) {
-        if (s_scan_temporary_sta) {
-            const esp_err_t restore_result =
-                esp_wifi_set_mode(
-                    WIFI_MODE_AP
-                );
+    atomic_store(
+        &s_reconnect_after_scan,
+        reconnect_was_allowed
+    );
 
-            if (restore_result != ESP_OK) {
-                ESP_LOGE(
-                    TAG,
-                    "Failed to restore AP mode: %s",
-                    esp_err_to_name(restore_result)
-                );
-            }
+    wifi_service_cancel_reconnect();
 
-            s_scan_temporary_sta = false;
+    const bool connection_in_progress =
+        atomic_load(&s_sta_connecting) &&
+        !atomic_load(&s_sta_connected);
+
+    if (connection_in_progress) {
+        atomic_store(
+            &s_scan_waiting_for_disconnect,
+            true
+        );
+
+        result =
+            esp_wifi_disconnect();
+
+        if (result == ESP_OK) {
+            wifi_service_scan_unlock();
+            wifi_service_unlock();
+
+            ESP_LOGI(
+                TAG,
+                "Waiting for Station disconnect before scan"
+            );
+
+            return ESP_OK;
         }
 
-        s_scan_info.state =
-            WIFI_SERVICE_SCAN_STATE_ERROR;
+        atomic_store(
+            &s_scan_waiting_for_disconnect,
+            false
+        );
 
-        s_scan_info.last_error = result;
+        if (result != ESP_ERR_WIFI_NOT_CONNECT) {
+            s_scan_info.state =
+                WIFI_SERVICE_SCAN_STATE_ERROR;
 
-        wifi_service_scan_unlock();
-        wifi_service_unlock();
+            s_scan_info.last_error =
+                result;
 
-        return result;
+            if (s_scan_temporary_sta) {
+                const esp_err_t restore_result =
+                    esp_wifi_set_mode(
+                        WIFI_MODE_AP
+                    );
+
+                if (restore_result != ESP_OK) {
+                    ESP_LOGE(
+                        TAG,
+                        "Failed to restore AP mode: %s",
+                        esp_err_to_name(
+                            restore_result
+                        )
+                    );
+                }
+
+                s_scan_temporary_sta = false;
+            }
+
+            atomic_store(
+                &s_reconnect_allowed,
+                reconnect_was_allowed
+            );
+
+            atomic_store(
+                &s_reconnect_after_scan,
+                false
+            );
+
+            wifi_service_scan_unlock();
+            wifi_service_unlock();
+
+            return result;
+        }
     }
 
     wifi_service_scan_unlock();
     wifi_service_unlock();
 
-    ESP_LOGI(
-        TAG,
-        "Asynchronous Wi-Fi scan started"
-    );
-
-    return ESP_OK;
+    return wifi_service_begin_scan();
 }
 
 esp_err_t wifi_service_get_scan_info(
