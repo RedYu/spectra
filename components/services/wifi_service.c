@@ -869,6 +869,9 @@ static const char *wifi_service_disconnect_reason_name(
         case WIFI_REASON_CONNECTION_FAIL:
             return "CONNECTION_FAIL";
 
+        case WIFI_REASON_ASSOC_COMEBACK_TIME_TOO_LONG:
+            return "ASSOC_COMEBACK_TIME_TOO_LONG";
+
         default:
             return "UNKNOWN";
     }
@@ -3346,11 +3349,6 @@ restore:
         if (s_started &&
             reconnect_was_allowed &&
             (restore_result == ESP_OK)) {
-
-            atomic_store(
-                &s_sta_connecting,
-                true
-            );
 
             atomic_store(
                 &s_sta_connecting,
