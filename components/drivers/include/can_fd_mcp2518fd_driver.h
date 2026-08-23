@@ -45,6 +45,10 @@ extern "C" {
 
 #define CAN_FD_MCP2518FD_FILTER_COUNT              (32U)
 
+#ifndef CAN_FD_MCP2518FD_ENABLE_PROFILING
+#define CAN_FD_MCP2518FD_ENABLE_PROFILING  (1)
+#endif
+
 /**
  * @brief MCP2518FD operating mode.
  */
@@ -488,6 +492,26 @@ typedef struct
 } can_fd_mcp2518fd_filter_t;
 
 /**
+ * @brief Accumulated MCP2518FD performance measurements.
+ *
+ * All time values include the complete synchronous operation as seen
+ * by the calling task, including SPI-driver scheduling and waiting for
+ * transaction completion.
+ */
+typedef struct
+{
+    uint64_t interrupt_time_us;
+    uint64_t fifo_status_time_us;
+    uint64_t object_read_time_us;
+    uint64_t fifo_increment_time_us;
+    uint64_t decode_time_us;
+
+    uint32_t interrupt_count;
+    uint32_t received_frames;
+
+} can_fd_mcp2518fd_profile_t;
+
+/**
  * @brief Initialize the MCP2518FD driver.
  *
  * Creates the dedicated SPI bus, registers the MCP2518FD SPI device,
@@ -787,6 +811,23 @@ bool can_fd_mcp2518fd_driver_is_initialized(void);
  * @brief Check whether the MCP2518FD CAN controller is running.
  */
 bool can_fd_mcp2518fd_driver_is_started(void);
+
+/**
+ * @brief Copy accumulated MCP2518FD performance measurements.
+ *
+ * Measurements are reset whenever the controller is successfully
+ * started.
+ *
+ * @param[out] profile Destination profile structure.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if profile is NULL,
+ * ESP_ERR_NOT_SUPPORTED if profiling is disabled,
+ * ESP_ERR_INVALID_STATE if the driver is not initialized, otherwise
+ * an ESP-IDF synchronization error.
+ */
+esp_err_t can_fd_mcp2518fd_driver_get_profile(
+    can_fd_mcp2518fd_profile_t *profile
+);
 
 #ifdef __cplusplus
 }

@@ -1229,6 +1229,48 @@ esp_err_t can_fd_service_get_info(
     return result;
 }
 
+esp_err_t can_fd_service_get_driver_profile(
+    can_fd_mcp2518fd_profile_t *profile
+)
+{
+    if (profile == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        profile,
+        0,
+        sizeof(*profile)
+    );
+
+    esp_err_t result =
+        can_fd_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!atomic_load(
+            &s_running
+        ) ||
+        atomic_load(
+            &s_stop_requested
+        )) {
+
+        can_fd_service_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    result =
+        can_fd_mcp2518fd_driver_get_profile(
+            profile
+        );
+
+    can_fd_service_unlock();
+
+    return result;
+}
+
 esp_err_t can_fd_service_get_statistics(
     can_fd_service_statistics_t *statistics
 )

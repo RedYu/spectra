@@ -14,6 +14,10 @@
 
 #include "esp_log.h"
 
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+#include "esp_timer.h"
+#endif
+
 #include "board.h"
 #include "board_config.h"
 
@@ -478,6 +482,8 @@ typedef struct
 
 } mcp2518fd_data_timing_t;
 
+static can_fd_mcp2518fd_profile_t s_profile;
+
 static spi_device_handle_t s_spi_device = NULL;
 static SemaphoreHandle_t s_mutex = NULL;
 
@@ -559,6 +565,22 @@ static void mcp2518fd_unlock(void)
         (void)xSemaphoreGive(s_mutex);
     }
 }
+
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+static uint64_t mcp2518fd_elapsed_us(
+    int64_t started_at
+)
+{
+    const int64_t elapsed =
+        esp_timer_get_time() -
+        started_at;
+
+    return
+        (elapsed > 0)
+            ? (uint64_t)elapsed
+            : 0U;
+}
+#endif
 
 static void mcp2518fd_invalidate_rx_fifo_address(void)
 {
@@ -2053,7 +2075,7 @@ static esp_err_t mcp2518fd_process_rx_overflow_unlocked(void)
     );
 }
 
-static esp_err_t mcp2518fd_process_interrupt_unlocked(
+static esp_err_t mcp2518fd_process_interrupt_internal_unlocked(
     bool *rx_pending
 )
 {
@@ -2187,6 +2209,31 @@ static esp_err_t mcp2518fd_process_interrupt_unlocked(
             );
     }
 
+    return result;
+}
+
+static esp_err_t mcp2518fd_process_interrupt_unlocked(
+    bool *rx_pending
+)
+{
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+    const int64_t started_at =
+        esp_timer_get_time();
+#endif
+
+    const esp_err_t result =
+        mcp2518fd_process_interrupt_internal_unlocked(
+            rx_pending
+        );
+
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+    s_profile.interrupt_time_us +=
+        mcp2518fd_elapsed_us(
+            started_at
+        );
+
+    ++s_profile.interrupt_count;
+#endif
     return result;
 }
 
@@ -5258,6 +5305,14 @@ esp_err_t can_fd_mcp2518fd_driver_start(void)
             CAN_FD_MCP2518FD_STATE_STOPPED;
     }
 
+    if (result == ESP_OK) {
+        memset(
+            &s_profile,
+            0,
+            sizeof(s_profile)
+        );
+    }
+
     mcp2518fd_unlock();
 
     if (result != ESP_OK) {
@@ -5907,11 +5962,23 @@ static esp_err_t mcp2518fd_receive_one_unlocked(
 
     uint32_t fifo_status = 0U;
 
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+    const int64_t status_started_at =
+        esp_timer_get_time();
+#endif
+
     esp_err_t result =
         mcp2518fd_read_register_unlocked(
             MCP2518FD_REGISTER_CIFIFOSTA2,
             &fifo_status
         );
+
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+    s_profile.fifo_status_time_us +=
+        mcp2518fd_elapsed_us(
+            status_started_at
+        );
+#endif
 
     if (result != ESP_OK) {
         return result;
@@ -5968,12 +6035,24 @@ static esp_err_t mcp2518fd_receive_one_unlocked(
         MCP2518FD_RX_OBJECT_MAX_SIZE
     ] = {0};
 
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+    const int64_t object_started_at =
+        esp_timer_get_time();
+#endif
+
     result =
         mcp2518fd_read_bytes_unlocked(
             ram_address,
             object,
             object_size
         );
+
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+    s_profile.object_read_time_us +=
+        mcp2518fd_elapsed_us(
+            object_started_at
+        );
+#endif
 
     if (result != ESP_OK) {
         ++s_info.dropped_rx_frames;
@@ -5984,8 +6063,20 @@ static esp_err_t mcp2518fd_receive_one_unlocked(
      * The FIFO object must be released only after its complete contents
      * have been copied from Message RAM.
      */
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+    const int64_t increment_started_at =
+        esp_timer_get_time();
+#endif
+
     result =
         mcp2518fd_increment_rx_fifo_unlocked();
+
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+    s_profile.fifo_increment_time_us +=
+        mcp2518fd_elapsed_us(
+            increment_started_at
+        );
+#endif
 
     if (result != ESP_OK) {
         ++s_info.dropped_rx_frames;
@@ -5994,14 +6085,30 @@ static esp_err_t mcp2518fd_receive_one_unlocked(
 
     mcp2518fd_advance_rx_fifo_address_unlocked();
 
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+    const int64_t decode_started_at =
+        esp_timer_get_time();
+#endif
+
     result =
         mcp2518fd_decode_rx_object(
             object,
             frame
         );
 
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+    s_profile.decode_time_us +=
+        mcp2518fd_elapsed_us(
+            decode_started_at
+        );
+#endif
+
     if (result == ESP_OK) {
         ++s_info.received_frames;
+
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+        ++s_profile.received_frames;
+#endif
     } else {
         ++s_info.dropped_rx_frames;
     }
@@ -6299,4 +6406,50 @@ bool can_fd_mcp2518fd_driver_is_initialized(void)
 bool can_fd_mcp2518fd_driver_is_started(void)
 {
     return s_initialized && s_started;
+}
+
+esp_err_t can_fd_mcp2518fd_driver_get_profile(
+    can_fd_mcp2518fd_profile_t *profile
+)
+{
+    if (profile == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+#if !CAN_FD_MCP2518FD_ENABLE_PROFILING
+
+    memset(
+        profile,
+        0,
+        sizeof(*profile)
+    );
+
+    return ESP_ERR_NOT_SUPPORTED;
+
+#else
+
+    if (!s_initialized) {
+        memset(
+            profile,
+            0,
+            sizeof(*profile)
+        );
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const esp_err_t lock_result =
+        mcp2518fd_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    *profile = s_profile;
+
+    mcp2518fd_unlock();
+
+    return ESP_OK;
+
+#endif
 }

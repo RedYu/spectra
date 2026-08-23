@@ -27,12 +27,15 @@
 #include "board_config.h"
 #include "system_model.h"
 #include "shutdown_service.h"
+#include "can_fd_service.h"
 
 #define SYSTEM_RESTART_DELAY_MAX_MS     (60000U)
 
 #define SYSTEM_TEMPERATURE_MIN_C             (10)
 #define SYSTEM_TEMPERATURE_MAX_C             (80)
 #define SYSTEM_TEMPERATURE_UPDATE_INTERVAL   (5U)
+
+#define SYSTEM_CAN_FD_PROFILE_INTERVAL  (10U)
 
 #define SYSTEM_TASK_STACK_SIZE          (3072U)
 #define SYSTEM_TASK_PRIORITY            (2U)
@@ -52,6 +55,22 @@ static temperature_sensor_handle_t
     s_temperature_sensor = NULL;
 
 static uint32_t s_temperature_update_counter = 0U;
+
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+
+static can_fd_mcp2518fd_profile_t
+    s_previous_can_fd_profile;
+
+static int64_t
+    s_previous_can_fd_profile_time_us = 0;
+
+static uint32_t
+    s_can_fd_profile_update_counter = 0U;
+
+static bool
+    s_previous_can_fd_profile_valid = false;
+
+#endif
 
 #if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
 
@@ -80,6 +99,158 @@ static void system_service_reset_cpu_usage(void)
     );
 
     s_previous_cpu_sample_valid = false;
+
+#endif
+}
+
+static void system_service_update_can_fd_profile(void)
+{
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+
+    ++s_can_fd_profile_update_counter;
+
+    if (s_can_fd_profile_update_counter <
+        SYSTEM_CAN_FD_PROFILE_INTERVAL) {
+
+        return;
+    }
+
+    s_can_fd_profile_update_counter = 0U;
+
+    if (!can_fd_service_is_running()) {
+        s_previous_can_fd_profile_valid = false;
+        s_previous_can_fd_profile_time_us = 0;
+        return;
+    }
+
+    can_fd_mcp2518fd_profile_t current;
+
+    const esp_err_t result =
+        can_fd_service_get_driver_profile(
+            &current
+        );
+
+    if (result != ESP_OK) {
+        if ((result != ESP_ERR_INVALID_STATE) &&
+            (result != ESP_ERR_NOT_SUPPORTED)) {
+
+            ESP_LOGW(
+                TAG,
+                "Failed to read MCP2518FD profile: %s",
+                esp_err_to_name(result)
+            );
+        }
+
+        s_previous_can_fd_profile_valid = false;
+        s_previous_can_fd_profile_time_us = 0;
+        return;
+    }
+
+    const int64_t current_time_us =
+        esp_timer_get_time();
+
+    /*
+     * The first sample establishes the baseline. Also establish a new
+     * baseline if the driver was restarted and its counters reset.
+     */
+    const bool profile_reset =
+        (current.interrupt_count <
+        s_previous_can_fd_profile.interrupt_count) ||
+        (current.received_frames <
+        s_previous_can_fd_profile.received_frames) ||
+        (current.interrupt_time_us <
+        s_previous_can_fd_profile.interrupt_time_us) ||
+        (current.fifo_status_time_us <
+        s_previous_can_fd_profile.fifo_status_time_us) ||
+        (current.object_read_time_us <
+        s_previous_can_fd_profile.object_read_time_us) ||
+        (current.fifo_increment_time_us <
+        s_previous_can_fd_profile.fifo_increment_time_us) ||
+        (current.decode_time_us <
+        s_previous_can_fd_profile.decode_time_us);
+
+    if (!s_previous_can_fd_profile_valid ||
+        profile_reset) {
+
+        s_previous_can_fd_profile = current;
+        s_previous_can_fd_profile_time_us =
+            current_time_us;
+        s_previous_can_fd_profile_valid = true;
+
+        return;
+    }
+
+    const uint32_t interrupt_delta =
+        current.interrupt_count -
+        s_previous_can_fd_profile.interrupt_count;
+
+    const uint32_t frame_delta =
+        current.received_frames -
+        s_previous_can_fd_profile.received_frames;
+
+    const uint64_t interrupt_time_delta =
+        current.interrupt_time_us -
+        s_previous_can_fd_profile.interrupt_time_us;
+
+    const uint64_t status_time_delta =
+        current.fifo_status_time_us -
+        s_previous_can_fd_profile.fifo_status_time_us;
+
+    const uint64_t read_time_delta =
+        current.object_read_time_us -
+        s_previous_can_fd_profile.object_read_time_us;
+
+    const uint64_t increment_time_delta =
+        current.fifo_increment_time_us -
+        s_previous_can_fd_profile.fifo_increment_time_us;
+
+    const uint64_t decode_time_delta =
+        current.decode_time_us -
+        s_previous_can_fd_profile.decode_time_us;
+
+    const int64_t interval_us =
+        current_time_us -
+        s_previous_can_fd_profile_time_us;
+
+    const uint32_t frames_per_second =
+        (interval_us > 0)
+            ? (uint32_t)(
+                ((uint64_t)frame_delta * 1000000ULL) /
+                (uint64_t)interval_us
+            )
+            : 0U;
+
+    const uint64_t average_irq_time_us =
+        (interrupt_delta > 0U)
+            ? interrupt_time_delta /
+              (uint64_t)interrupt_delta
+            : 0ULL;
+
+    const uint64_t average_read_time_us =
+        (frame_delta > 0U)
+            ? read_time_delta /
+              (uint64_t)frame_delta
+            : 0ULL;
+
+    ESP_LOGI(
+        TAG,
+        "MCP2518FD profile: "
+        "RX=%lu (%lu frame/s), IRQ=%lu, "
+        "IRQ avg=%llu us, read avg=%llu us, "
+        "status=%llu us, UINC=%llu us, decode=%llu us",
+        (unsigned long)frame_delta,
+        (unsigned long)frames_per_second,
+        (unsigned long)interrupt_delta,
+        (unsigned long long)average_irq_time_us,
+        (unsigned long long)average_read_time_us,
+        (unsigned long long)status_time_delta,
+        (unsigned long long)increment_time_delta,
+        (unsigned long long)decode_time_delta
+    );
+
+    s_previous_can_fd_profile = current;
+    s_previous_can_fd_profile_time_us =
+        current_time_us;
 
 #endif
 }
@@ -552,6 +723,8 @@ static esp_err_t system_service_update_runtime(void)
         }
     }
 
+    system_service_update_can_fd_profile();
+
     return ESP_OK;
 }
 
@@ -560,6 +733,20 @@ static void system_service_task(
 )
 {
     (void)argument;
+
+#if CAN_FD_MCP2518FD_ENABLE_PROFILING
+
+    memset(
+        &s_previous_can_fd_profile,
+        0,
+        sizeof(s_previous_can_fd_profile)
+    );
+
+    s_previous_can_fd_profile_time_us = 0;
+    s_can_fd_profile_update_counter = 0U;
+    s_previous_can_fd_profile_valid = false;
+
+#endif
 
     while (true) {
         /*

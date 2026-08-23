@@ -359,6 +359,20 @@ esp_err_t can_fd_service_reset_statistics(void);
  */
 bool can_fd_service_is_running(void);
 
+/**
+ * @brief Copy MCP2518FD driver performance measurements.
+ *
+ * @param[out] profile Destination profile structure.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if profile is NULL,
+ * ESP_ERR_INVALID_STATE if the service is not running,
+ * ESP_ERR_NOT_SUPPORTED if driver profiling is disabled, otherwise
+ * an ESP-IDF driver error.
+ */
+esp_err_t can_fd_service_get_driver_profile(
+    can_fd_mcp2518fd_profile_t *profile
+);
+
 #ifdef __cplusplus
 }
 #endif
