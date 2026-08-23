@@ -391,6 +391,8 @@ static void wifi_service_handle_scan_done(
     const wifi_event_sta_scan_done_t *event
 )
 {
+    bool network_mode_changed = false;
+
     if (wifi_service_scan_lock() != ESP_OK) {
         ESP_LOGE(
             TAG,
@@ -576,6 +578,9 @@ static void wifi_service_handle_scan_done(
     wifi_service_sort_scan_results();
 
 restore_mode:
+    network_mode_changed =
+        s_scan_temporary_sta;
+
     if (s_scan_temporary_sta) {
         const esp_err_t restore_result =
             esp_wifi_set_mode(
@@ -620,6 +625,19 @@ restore_mode:
         &s_reconnect_allowed,
         reconnect
     );
+
+    if (network_mode_changed) {
+        const esp_err_t refresh_result =
+            network_service_request_mdns_refresh();
+
+        if (refresh_result != ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Failed to request mDNS refresh: %s",
+                esp_err_to_name(refresh_result)
+            );
+        }
+    }
 
     if (final_state ==
         WIFI_SERVICE_SCAN_STATE_COMPLETE) {

@@ -25,6 +25,7 @@
 #include "can_fd_service.h"
 #include "can_router.h"
 #include "can_monitor_service.h"
+#include "network_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
 #define SHUTDOWN_SERVICE_TASK_PRIORITY    (5U)
@@ -98,9 +99,29 @@ static void shutdown_service_task(
     }
 
     /*
-     * Stop network consumers before shutting down the network interfaces.
+     * Stop network consumers and asynchronous mDNS maintenance before
+     * releasing mDNS and network-interface resources.
      */
     internet_service_stop();
+
+    /*
+     * Reject new asynchronous mDNS refresh requests and wait until any
+     * refresh currently in progress completes before releasing mDNS
+     * resources.
+     */
+    const esp_err_t network_result =
+        network_service_prepare_shutdown();
+
+    if ((network_result != ESP_OK) &&
+        (network_result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGW(
+            TAG,
+            "Failed to prepare network shutdown: %s",
+            esp_err_to_name(network_result)
+        );
+    }
+
     mdns_service_stop();
 
     /*

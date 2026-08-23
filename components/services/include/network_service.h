@@ -73,6 +73,30 @@ esp_err_t network_service_get_dns_info(
     network_service_dns_info_t *info
 );
 
+/**
+ * @brief Request an asynchronous mDNS refresh.
+ *
+ * The request is processed by the network maintenance task outside
+ * the ESP event-loop context. Multiple pending refresh requests may
+ * be coalesced into one operation.
+ *
+ * @return ESP_OK when the request is accepted or a refresh is already
+ * pending, or ESP_ERR_INVALID_STATE if the network service is not
+ * initialized.
+ */
+esp_err_t network_service_request_mdns_refresh(void);
+
+/**
+ * @brief Stop accepting asynchronous network maintenance requests.
+ *
+ * Pending mDNS refresh requests are discarded. The global ESP-NETIF
+ * and event-loop resources remain initialized until restart.
+ *
+ * @return ESP_OK on success or ESP_ERR_INVALID_STATE if the
+ * maintenance worker is unavailable.
+ */
+esp_err_t network_service_prepare_shutdown(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -63,6 +63,19 @@ esp_err_t mdns_service_start(void);
 void mdns_service_stop(void);
 
 /**
+ * @brief Restart the mDNS responder.
+ *
+ * Use this function after a Wi-Fi mode or network-interface change.
+ * The function stops the current responder and registers the hostname
+ * and HTTP service again.
+ *
+ * This function must not be called from the ESP event-loop task.
+ *
+ * @return ESP_OK on success, otherwise an ESP-IDF error code.
+ */
+esp_err_t mdns_service_refresh(void);
+
+/**
  * @brief Get the current mDNS service information.
  *
  * This function also succeeds when mDNS is stopped. In that case,

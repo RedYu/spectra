@@ -234,3 +234,28 @@ esp_err_t mdns_service_get_info(
 
     return ESP_OK;
 }
+
+esp_err_t mdns_service_refresh(void)
+{
+    mdns_service_stop();
+
+    const esp_err_t result =
+        mdns_service_start();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to refresh mDNS service: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "mDNS service refreshed"
+    );
+
+    return ESP_OK;
+}
