@@ -422,21 +422,24 @@ static const char *TAG =
  *   including the INT open-drain mode and any transceiver standby
  *   control required by the board.
  *
- * - Asynchronous SPI DMA:
- *   The SPI bus already uses DMA, but Message RAM transfers currently
- *   use spi_device_polling_transmit(), which keeps the calling CPU core
- *   occupied until each transaction completes.
+ * - Pipelined SPI DMA:
+ *   Message RAM transfers use spi_device_transmit(), which internally
+ *   queues the DMA transaction and waits for its completion without
+ *   actively polling the SPI peripheral.
  *
- *   After measuring CPU usage under sustained CAN FD traffic, consider
- *   moving large TX, RX, TEF and Message RAM initialization transfers
- *   to spi_device_queue_trans() and spi_device_get_trans_result().
- *   Keep short register transactions synchronous when their lower
- *   latency outweighs the scheduling overhead.
+ *   Consider explicit spi_device_queue_trans() and
+ *   spi_device_get_trans_result() only when independent transactions
+ *   can be safely pipelined. RX FIFO reads currently require the
+ *   sequence:
  *
- *   Ensure queued transfer descriptors and DMA buffers remain valid
- *   until the transaction completes. Preserve serialization with the
- *   existing driver mutex and do not release an RX FIFO object before
- *   its DMA read has completed.
+ *       read object -> wait for DMA -> UINC -> read next object
+ *
+ *   Therefore multiple RX objects cannot be queued in advance without
+ *   changing the FIFO-draining architecture.
+ *
+ *   If pipelining is introduced, ensure transaction descriptors and
+ *   DMA buffers remain valid until completion and preserve
+ *   serialization with the driver mutex.
  *
  * - SPI CRC:
  *   Implement READ_CRC and WRITE_CRC transfers, CRC calculation,
@@ -1028,32 +1031,28 @@ static esp_err_t mcp2518fd_write_bytes_unlocked(
         MCP2518FD_SPI_COMMAND_SIZE
     ];
 
-    transmit_buffer[0] =
-        (uint8_t)(
-            (MCP2518FD_SPI_INSTRUCTION_WRITE << 4U) |
-            ((address >> 8U) & 0x0FU)
-        );
-
-    transmit_buffer[1] =
-        (uint8_t)(address & 0xFFU);
+    mcp2518fd_build_command(
+        MCP2518FD_SPI_INSTRUCTION_WRITE,
+        address,
+        transmit_buffer
+    );
 
     memcpy(
-        &transmit_buffer[2],
+        &transmit_buffer[
+            MCP2518FD_SPI_COMMAND_SIZE
+        ],
         data,
         data_size
     );
 
-    const spi_transaction_t transaction = {
-        .length =
-            (2U + data_size) * 8U,
+    const size_t transfer_size =
+        MCP2518FD_SPI_COMMAND_SIZE +
+        data_size;
 
-        .tx_buffer =
-            transmit_buffer,
-    };
-
-    return spi_device_polling_transmit(
-        s_spi_device,
-        (spi_transaction_t *)&transaction
+    return mcp2518fd_spi_transmit(
+        transmit_buffer,
+        NULL,
+        transfer_size
     );
 }
 
