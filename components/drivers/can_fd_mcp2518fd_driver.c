@@ -374,6 +374,8 @@
 
 #define MCP2518FD_MESSAGE_RAM_CLEAR_CHUNK (64U)
 
+#define MCP2518FD_RX_ADDRESS_VERIFY_INTERVAL (32U)
+
 static const char *TAG =
     "can_fd_mcp2518fd";
 
@@ -499,6 +501,14 @@ static uint32_t s_next_tx_sequence = 0U;
 
 static uint32_t s_rx_fifo_control = 0U;
 
+static bool s_rx_fifo_address_valid = false;
+
+static uint16_t s_rx_fifo_base_address = 0U;
+static uint16_t s_rx_fifo_next_address = 0U;
+static uint16_t s_rx_fifo_end_address = 0U;
+
+static uint32_t s_rx_fifo_address_uses = 0U;
+
 static esp_err_t mcp2518fd_process_tef_unlocked(void);
 static uint32_t mcp2518fd_get_tx_attempt_configuration(void);
 
@@ -510,6 +520,15 @@ static bool mcp2518fd_length_to_dlc(
 static bool mcp2518fd_dlc_to_length(
     uint8_t dlc,
     uint8_t *length
+);
+
+static esp_err_t mcp2518fd_read_register_unlocked(
+    uint16_t address,
+    uint32_t *value
+);
+
+static size_t mcp2518fd_rx_object_size(
+    const can_fd_mcp2518fd_config_t *config
 );
 
 static esp_err_t mcp2518fd_lock(void)
@@ -536,6 +555,231 @@ static void mcp2518fd_unlock(void)
     if (s_mutex != NULL) {
         (void)xSemaphoreGive(s_mutex);
     }
+}
+
+static void mcp2518fd_invalidate_rx_fifo_address(void)
+{
+    s_rx_fifo_address_valid = false;
+    s_rx_fifo_base_address = 0U;
+    s_rx_fifo_next_address = 0U;
+    s_rx_fifo_end_address = 0U;
+    s_rx_fifo_address_uses = 0U;
+}
+
+static esp_err_t mcp2518fd_initialize_rx_fifo_address_unlocked(
+    void
+)
+{
+    uint32_t user_address = 0U;
+
+    const esp_err_t result =
+        mcp2518fd_read_register_unlocked(
+            MCP2518FD_REGISTER_CIFIFOUA2,
+            &user_address
+        );
+
+    if (result != ESP_OK) {
+        mcp2518fd_invalidate_rx_fifo_address();
+        return result;
+    }
+
+    const size_t object_size =
+        mcp2518fd_rx_object_size(
+            &s_config
+        );
+
+    const size_t fifo_size =
+        object_size *
+        (size_t)s_config.rx_fifo_depth;
+
+    const uint16_t base_address =
+        (uint16_t)(
+            MCP2518FD_MESSAGE_RAM_BASE +
+            (
+                user_address &
+                MCP2518FD_MESSAGE_RAM_OFFSET_MASK
+            )
+        );
+
+    const uint32_t end_address =
+        (uint32_t)base_address +
+        fifo_size;
+
+    if ((object_size == 0U) ||
+        (fifo_size == 0U) ||
+        (end_address >
+         (MCP2518FD_MESSAGE_RAM_BASE +
+          MCP2518FD_MESSAGE_RAM_SIZE))) {
+
+        mcp2518fd_invalidate_rx_fifo_address();
+
+        ESP_LOGE(
+            TAG,
+            "Invalid RX FIFO address range: "
+            "base=0x%03X, size=%u",
+            (unsigned int)base_address,
+            (unsigned int)fifo_size
+        );
+
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    s_rx_fifo_base_address =
+        base_address;
+
+    s_rx_fifo_next_address =
+        base_address;
+
+    s_rx_fifo_end_address =
+        (uint16_t)end_address;
+
+    s_rx_fifo_address_uses = 0U;
+    s_rx_fifo_address_valid = true;
+
+    ESP_LOGI(
+        TAG,
+        "RX FIFO address cache initialized: "
+        "base=0x%03X, end=0x%03X, object=%u",
+        (unsigned int)s_rx_fifo_base_address,
+        (unsigned int)s_rx_fifo_end_address,
+        (unsigned int)object_size
+    );
+
+    return ESP_OK;
+}
+
+static esp_err_t mcp2518fd_get_rx_fifo_address_unlocked(
+    uint16_t *address
+)
+{
+    if (address == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_rx_fifo_address_valid) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /*
+     * Periodically compare the software address with the controller UA.
+     * This protects against unexpected FIFO resets or lost UINC writes.
+     */
+    if (s_rx_fifo_address_uses >=
+        MCP2518FD_RX_ADDRESS_VERIFY_INTERVAL) {
+
+        uint32_t user_address = 0U;
+
+        const esp_err_t result =
+            mcp2518fd_read_register_unlocked(
+                MCP2518FD_REGISTER_CIFIFOUA2,
+                &user_address
+            );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        const uint16_t hardware_address =
+            (uint16_t)(
+                MCP2518FD_MESSAGE_RAM_BASE +
+                (
+                    user_address &
+                    MCP2518FD_MESSAGE_RAM_OFFSET_MASK
+                )
+            );
+
+        if (hardware_address !=
+            s_rx_fifo_next_address) {
+
+            const size_t object_size =
+                mcp2518fd_rx_object_size(
+                    &s_config
+                );
+
+            const bool address_in_range =
+                (hardware_address >=
+                s_rx_fifo_base_address) &&
+                (hardware_address <
+                s_rx_fifo_end_address);
+
+            /*
+             * address_in_range protects the subtraction from unsigned
+             * underflow through short-circuit evaluation.
+             */
+            const bool address_aligned =
+                address_in_range &&
+                (object_size > 0U) &&
+                ((((uint32_t)hardware_address -
+                s_rx_fifo_base_address) %
+                object_size) == 0U);
+
+            if (!address_aligned) {
+                ESP_LOGE(
+                    TAG,
+                    "Invalid RX FIFO hardware address: "
+                    "cached=0x%03X, hardware=0x%03X, "
+                    "base=0x%03X, end=0x%03X, object=%u",
+                    (unsigned int)s_rx_fifo_next_address,
+                    (unsigned int)hardware_address,
+                    (unsigned int)s_rx_fifo_base_address,
+                    (unsigned int)s_rx_fifo_end_address,
+                    (unsigned int)object_size
+                );
+
+                mcp2518fd_invalidate_rx_fifo_address();
+
+                return ESP_ERR_INVALID_RESPONSE;
+            }
+
+            ESP_LOGW(
+                TAG,
+                "RX FIFO address cache resynchronized: "
+                "cached=0x%03X, hardware=0x%03X",
+                (unsigned int)s_rx_fifo_next_address,
+                (unsigned int)hardware_address
+            );
+
+            s_rx_fifo_next_address =
+                hardware_address;
+        }
+
+        s_rx_fifo_address_uses = 0U;
+    }
+
+    *address =
+        s_rx_fifo_next_address;
+
+    return ESP_OK;
+}
+
+static void mcp2518fd_advance_rx_fifo_address_unlocked(
+    void
+)
+{
+    if (!s_rx_fifo_address_valid) {
+        return;
+    }
+
+    const size_t object_size =
+        mcp2518fd_rx_object_size(
+            &s_config
+        );
+
+    uint32_t next_address =
+        (uint32_t)s_rx_fifo_next_address +
+        object_size;
+
+    if (next_address >=
+        s_rx_fifo_end_address) {
+
+        next_address =
+            s_rx_fifo_base_address;
+    }
+
+    s_rx_fifo_next_address =
+        (uint16_t)next_address;
+
+    ++s_rx_fifo_address_uses;
 }
 
 static void mcp2518fd_build_command(
@@ -2690,6 +2934,15 @@ static esp_err_t mcp2518fd_configure_fifos_unlocked(void)
         return result;
     }
 
+    mcp2518fd_invalidate_rx_fifo_address();
+
+    result =
+        mcp2518fd_initialize_rx_fifo_address_unlocked();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
     ESP_LOGI(
         TAG,
         "FIFO configured: payload=%u, "
@@ -3745,6 +3998,8 @@ static esp_err_t mcp2518fd_wait_for_oscillator(void)
 
 static void mcp2518fd_release_resources(void)
 {
+    mcp2518fd_invalidate_rx_fifo_address();
+
     (void)gpio_intr_disable(
         CAN_FD_PIN_INT
     );
@@ -5104,6 +5359,8 @@ esp_err_t can_fd_mcp2518fd_driver_stop(void)
     s_info.state =
         CAN_FD_MCP2518FD_STATE_STOPPED;
 
+    mcp2518fd_invalidate_rx_fifo_address();
+
     mcp2518fd_unlock();
 
     if (s_rx_ready_semaphore != NULL) {
@@ -5131,6 +5388,8 @@ esp_err_t can_fd_mcp2518fd_driver_deinit(void)
             return result;
         }
     }
+
+    mcp2518fd_invalidate_rx_fifo_address();
 
     mcp2518fd_release_resources();
 
@@ -5674,37 +5933,34 @@ static esp_err_t mcp2518fd_receive_one_unlocked(
         return ESP_ERR_TIMEOUT;
     }
 
-    uint32_t user_address = 0U;
+    uint16_t ram_address = 0U;
 
     result =
-        mcp2518fd_read_register_unlocked(
-            MCP2518FD_REGISTER_CIFIFOUA2,
-            &user_address
+        mcp2518fd_get_rx_fifo_address_unlocked(
+            &ram_address
         );
 
     if (result != ESP_OK) {
         return result;
     }
 
-    const uint16_t ram_address =
-        (uint16_t)(
-            MCP2518FD_MESSAGE_RAM_BASE +
-            (
-                user_address &
-                MCP2518FD_MESSAGE_RAM_OFFSET_MASK
-            )
-        );
-
-    if (((uint32_t)ram_address +
-         object_size) >
-        (MCP2518FD_MESSAGE_RAM_BASE +
-         MCP2518FD_MESSAGE_RAM_SIZE)) {
+    if (!s_rx_fifo_address_valid ||
+        (ram_address <
+        s_rx_fifo_base_address) ||
+        (((uint32_t)ram_address +
+        object_size) >
+        s_rx_fifo_end_address)) {
 
         ESP_LOGE(
             TAG,
-            "Invalid RX FIFO address: UA=0x%08lX",
-            (unsigned long)user_address
+            "Invalid cached RX FIFO address: "
+            "address=0x%03X, base=0x%03X, end=0x%03X",
+            (unsigned int)ram_address,
+            (unsigned int)s_rx_fifo_base_address,
+            (unsigned int)s_rx_fifo_end_address
         );
+
+        mcp2518fd_invalidate_rx_fifo_address();
 
         return ESP_ERR_INVALID_RESPONSE;
     }
@@ -5736,6 +5992,8 @@ static esp_err_t mcp2518fd_receive_one_unlocked(
         ++s_info.dropped_rx_frames;
         return result;
     }
+
+    mcp2518fd_advance_rx_fifo_address_unlocked();
 
     result =
         mcp2518fd_decode_rx_object(
