@@ -47,121 +47,146 @@ typedef enum
 
 } service_requirement_t;
 
+typedef struct
+{
+    size_t internal_free;
+    size_t internal_minimum;
+    size_t internal_largest;
+
+    size_t dma_free;
+    size_t dma_largest;
+
+    size_t psram_free;
+    size_t psram_largest;
+
+} memory_snapshot_t;
+
 static const char *TAG = "app_main";
 
-static void log_heap_region(
-    const char *name,
-    uint32_t capabilities
-)
+static memory_snapshot_t capture_memory_snapshot(void)
 {
-    if (name == NULL) {
-        return;
-    }
+    const memory_snapshot_t snapshot = {
+        .internal_free =
+            heap_caps_get_free_size(
+                MALLOC_CAP_INTERNAL |
+                MALLOC_CAP_8BIT
+            ),
 
-    multi_heap_info_t info = {0};
+        .internal_minimum =
+            heap_caps_get_minimum_free_size(
+                MALLOC_CAP_INTERNAL |
+                MALLOC_CAP_8BIT
+            ),
 
-    heap_caps_get_info(
-        &info,
-        capabilities
-    );
+        .internal_largest =
+            heap_caps_get_largest_free_block(
+                MALLOC_CAP_INTERNAL |
+                MALLOC_CAP_8BIT
+            ),
 
-    const size_t total =
-        info.total_allocated_bytes +
-        info.total_free_bytes;
+        .dma_free =
+            heap_caps_get_free_size(
+                MALLOC_CAP_INTERNAL |
+                MALLOC_CAP_DMA |
+                MALLOC_CAP_8BIT
+            ),
 
-    ESP_LOGI(
-        "memory",
-        "%s: tot=%u, usd=%u, fr=%u, "
-        "min=%u, larg=%u, "
-        "alloc_b=%u, free_b=%u",
-        name,
-        (unsigned int)total,
-        (unsigned int)
-            info.total_allocated_bytes,
-        (unsigned int)
-            info.total_free_bytes,
-        (unsigned int)
-            info.minimum_free_bytes,
-        (unsigned int)
-            info.largest_free_block,
-        (unsigned int)
-            info.allocated_blocks,
-        (unsigned int)
-            info.free_blocks
-    );
+        .dma_largest =
+            heap_caps_get_largest_free_block(
+                MALLOC_CAP_INTERNAL |
+                MALLOC_CAP_DMA |
+                MALLOC_CAP_8BIT
+            ),
+
+        .psram_free =
+            heap_caps_get_free_size(
+                MALLOC_CAP_SPIRAM |
+                MALLOC_CAP_8BIT
+            ),
+
+        .psram_largest =
+            heap_caps_get_largest_free_block(
+                MALLOC_CAP_SPIRAM |
+                MALLOC_CAP_8BIT
+            ),
+    };
+
+    return snapshot;
 }
 
 static void log_memory_status(
     const char *stage
 )
 {
+    const memory_snapshot_t snapshot =
+        capture_memory_snapshot();
+
     ESP_LOGI(
         "memory",
-        "Memory status: %s",
+        "%s: internal=%u, min=%u, largest=%u, "
+        "DMA=%u, DMA largest=%u, "
+        "PSRAM=%u, PSRAM largest=%u",
         stage != NULL
             ? stage
-            : "unknown"
-    );
-
-    log_heap_region(
-        "Internal",
-        MALLOC_CAP_INTERNAL |
-        MALLOC_CAP_8BIT
-    );
-
-    log_heap_region(
-        "Internal DMA",
-        MALLOC_CAP_INTERNAL |
-        MALLOC_CAP_DMA |
-        MALLOC_CAP_8BIT
-    );
-
-    log_heap_region(
-        "DMA",
-        MALLOC_CAP_DMA |
-        MALLOC_CAP_8BIT
-    );
-
-    log_heap_region(
-        "PSRAM",
-        MALLOC_CAP_SPIRAM |
-        MALLOC_CAP_8BIT
-    );
-
-    log_heap_region(
-        "Default",
-        MALLOC_CAP_DEFAULT
+            : "unknown",
+        (unsigned int)snapshot.internal_free,
+        (unsigned int)snapshot.internal_minimum,
+        (unsigned int)snapshot.internal_largest,
+        (unsigned int)snapshot.dma_free,
+        (unsigned int)snapshot.dma_largest,
+        (unsigned int)snapshot.psram_free,
+        (unsigned int)snapshot.psram_largest
     );
 }
 
-static void log_service_memory(
-    const char *service,
-    const char *state
+static int32_t memory_free_delta(
+    size_t before,
+    size_t after
 )
 {
-    char stage[64];
-
-    const int written =
-        snprintf(
-            stage,
-            sizeof(stage),
-            "%s %s",
-            service,
-            state
+    return
+        (int32_t)(
+            (int64_t)after -
+            (int64_t)before
         );
+}
 
-    if ((written < 0) ||
-        ((size_t)written >= sizeof(stage))) {
-
-        log_memory_status(
-            service
-        );
+static void log_service_memory_delta(
+    const char *service,
+    const memory_snapshot_t *before,
+    const memory_snapshot_t *after,
+    bool started
+)
+{
+    if ((service == NULL) ||
+        (before == NULL) ||
+        (after == NULL)) {
 
         return;
     }
 
-    log_memory_status(
-        stage
+    ESP_LOGI(
+        "memory",
+        "%s %s: internal=%ld, DMA=%ld, PSRAM=%ld, "
+        "largest=%u -> %u",
+        service,
+        started
+            ? "start"
+            : "failed start",
+        (long)memory_free_delta(
+            before->internal_free,
+            after->internal_free
+        ),
+        (long)memory_free_delta(
+            before->dma_free,
+            after->dma_free
+        ),
+        (long)memory_free_delta(
+            before->psram_free,
+            after->psram_free
+        ),
+        (unsigned int)before->internal_largest,
+        (unsigned int)after->internal_largest
     );
 }
 
@@ -203,10 +228,8 @@ static esp_err_t start_service(
         return ESP_ERR_INVALID_ARG;
     }
 
-    log_service_memory(
-        name,
-        "before start"
-    );
+    const memory_snapshot_t memory_before =
+        capture_memory_snapshot();
 
     ESP_LOGI(
         TAG,
@@ -220,11 +243,14 @@ static esp_err_t start_service(
     /*
      * Record memory even when service initialization fails.
      */
-    log_service_memory(
+    const memory_snapshot_t memory_after =
+        capture_memory_snapshot();
+
+    log_service_memory_delta(
         name,
+        &memory_before,
+        &memory_after,
         result == ESP_OK
-            ? "after start"
-            : "after failed start"
     );
 
     if (result != ESP_OK) {
