@@ -52,6 +52,8 @@ typedef struct
 
     bool client_connected;
 
+    uint64_t filtered_events;
+
 } web_can_stream_service_statistics_t;
 
 /**

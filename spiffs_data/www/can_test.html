@@ -18,15 +18,6 @@
             font-family: monospace;
         }
 
-        button {
-            margin-right: 8px;
-            padding: 8px 14px;
-        }
-
-        #status {
-            margin: 16px 0;
-        }
-
         #log {
             height: 70vh;
             overflow: auto;
@@ -34,6 +25,11 @@
             white-space: pre;
             background: #111821;
             border: 1px solid #374151;
+        }
+
+        button {
+            margin: 0;
+            padding: 8px 14px;
         }
 
         .page-header {
@@ -44,12 +40,42 @@
             margin-bottom: 16px;
         }
 
+        .page-header-main {
+            min-width: 0;
+        }
+
         .page-title {
             margin: 0 0 16px;
         }
 
+        .connection-toolbar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .connection-actions {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        #status {
+            box-sizing: border-box;
+            min-width: 150px;
+            margin: 0;
+            padding: 8px 12px;
+            color: #d1d5db;
+            background: #111821;
+            border: 1px solid #374151;
+            border-radius: 6px;
+        }
+
         .statistics-panel {
-            min-width: 280px;
+            box-sizing: border-box;
+            min-width: 540px;
             padding: 14px 16px;
             background: #111821;
             border: 1px solid #374151;
@@ -66,8 +92,10 @@
 
         .statistics-grid {
             display: grid;
-            grid-template-columns: 1fr auto;
-            gap: 6px 16px;
+            grid-template-columns:
+                minmax(130px, 1fr) auto
+                minmax(130px, 1fr) auto;
+            gap: 7px 18px;
             font-size: 13px;
         }
 
@@ -76,6 +104,7 @@
         }
 
         .statistics-value {
+            min-width: 44px;
             color: #e5e7eb;
             text-align: right;
         }
@@ -88,15 +117,26 @@
             color: #f05252;
         }
 
-        @media (max-width: 720px) {
+        @media (max-width: 860px) {
             .page-header {
                 flex-direction: column;
             }
 
             .statistics-panel {
-                box-sizing: border-box;
                 width: 100%;
                 min-width: 0;
+            }
+        }
+
+        @media (max-width: 560px) {
+            .connection-toolbar {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .statistics-grid {
+                grid-template-columns:
+                    minmax(130px, 1fr) auto;
             }
         }
     </style>
@@ -104,14 +144,30 @@
 
 <body>
     <div class="page-header">
-        <div>
+        <div class="page-header-main">
             <h1 class="page-title">
                 CAN WebSocket Test
             </h1>
 
-            <button id="connect">Connect</button>
-            <button id="disconnect">Disconnect</button>
-            <button id="clear">Clear</button>
+            <div class="connection-toolbar">
+                <div id="status">
+                    Disconnected
+                </div>
+
+                <div class="connection-actions">
+                    <button id="connect">
+                        Connect
+                    </button>
+
+                    <button id="disconnect">
+                        Disconnect
+                    </button>
+
+                    <button id="clear">
+                        Clear
+                    </button>
+                </div>
+            </div>
         </div>
 
         <section class="statistics-panel">
@@ -167,11 +223,22 @@
                     id="statistics-events"
                     class="statistics-value"
                 >0</span>
+
+                <span class="statistics-label">Filtered events</span>
+                <span
+                    id="statistics-filtered"
+                    class="statistics-value"
+                >0</span>
+
+                <span class="statistics-label">Stream state</span>
+                <span
+                    id="statistics-stream-state"
+                    class="statistics-value"
+                >Disconnected</span>
             </div>
         </section>
     </div>
 
-    <div id="status">Disconnected</div>
     <div id="log"></div>
 
     <script>
@@ -207,7 +274,13 @@
                 document.getElementById("statistics-batches"),
 
             events:
-                document.getElementById("statistics-events")
+                document.getElementById("statistics-events"),
+
+            filtered:
+                document.getElementById("statistics-filtered"),
+
+            streamState:
+                document.getElementById("statistics-stream-state"),
         };
 
         function updateStreamStatistics(statistics) {
@@ -239,6 +312,9 @@
                 "error",
                 Number(statistics.send_failures) > 0
             );
+
+            statisticsElements.filtered.textContent =
+                statistics.filtered_events ?? 0;
         }
 
         const status =
@@ -248,13 +324,27 @@
             document.getElementById("log");
 
         const LOG_LINE_LIMIT = 1000;
+        const LOG_FLUSH_INTERVAL_MS = 50;
 
         const logLines = [];
+        const pendingLogLines = [];
 
-        function appendLog(message) {
-            logLines.push(
-                message
-            );
+        let logFlushTimer = null;
+
+        function flushLog() {
+            logFlushTimer = null;
+
+            if (pendingLogLines.length === 0) {
+                return;
+            }
+
+            for (const line of pendingLogLines) {
+                logLines.push(
+                    line
+                );
+            }
+
+            pendingLogLines.length = 0;
 
             if (logLines.length >
                 LOG_LINE_LIMIT) {
@@ -271,6 +361,40 @@
 
             log.scrollTop =
                 log.scrollHeight;
+
+            statisticsElements.batches.textContent =
+                receivedBatches;
+
+            statisticsElements.events.textContent =
+                receivedEvents;
+        }
+
+        function appendLogBatch(messages) {
+            if ((messages === null) ||
+                (messages.length === 0)) {
+
+                return;
+            }
+
+            for (const message of messages) {
+                pendingLogLines.push(
+                    message
+                );
+            }
+
+            if (logFlushTimer === null) {
+                logFlushTimer =
+                    setTimeout(
+                        flushLog,
+                        LOG_FLUSH_INTERVAL_MS
+                    );
+            }
+        }
+
+        function appendLog(message) {
+            appendLogBatch(
+                [message]
+            );
         }
 
         function eventName(value) {
@@ -306,7 +430,11 @@
                 .padStart(width, "0");
         }
 
-        function parseEvent(view, offset) {
+        function parseEvent(
+            view,
+            offset,
+            lines
+        ) {
             if ((offset + EVENT_HEADER_SIZE) >
                 view.byteLength) {
 
@@ -405,7 +533,7 @@
                     (lastSequence + 1) >>> 0;
 
                 if (eventSequence !== expected) {
-                    appendLog(
+                    lines.push(
                         `WARNING: sequence gap, expected ` +
                         `${expected}, received ${eventSequence}`
                     );
@@ -430,7 +558,7 @@
             const esi =
                 (flags & (1 << 4)) !== 0;
 
-            appendLog(
+            lines.push(
                 `${eventSequence} ` +
                 `${eventName(type)} ` +
                 `${busName(bus)} ` +
@@ -448,6 +576,8 @@
         }
 
         function parseBatch(buffer) {
+            const batchLines = [];
+
             const view =
                 new DataView(buffer);
 
@@ -505,7 +635,8 @@
                 offset +=
                     parseEvent(
                         view,
-                        offset
+                        offset,
+                        batchLines
                     );
             }
 
@@ -515,20 +646,22 @@
                 );
             }
 
+            appendLogBatch(
+                batchLines
+            );
+
             receivedBatches += 1;
             receivedEvents += eventCount;
 
-            statisticsElements.batches.textContent =
-                receivedBatches;
-
-            statisticsElements.events.textContent =
-                receivedEvents;
         }
 
         function connect() {
             if (socket !== null) {
                 return;
             }
+
+            statisticsElements.streamState.textContent =
+                "Connecting";
 
             const scheme =
                 location.protocol === "https:"
@@ -557,7 +690,14 @@
                      * bidirectional WebSocket connection.
                      */
                     socket.send(
-                        "ping"
+                        JSON.stringify({
+                            command: "subscribe",
+                            primary: true,
+                            secondary: true,
+                            rx: true,
+                            tx: true,
+                            paused: false
+                        })
                     );
                 };
 
@@ -575,6 +715,18 @@
 
                                 updateStreamStatistics(
                                     message
+                                );
+
+                            } else if (message.type ===
+                                       "subscription") {
+
+                                statisticsElements.streamState.textContent =
+                                    message.paused
+                                        ? "Paused"
+                                        : "Active";
+
+                                appendLog(
+                                    `Subscription updated: ${event.data}`
                                 );
 
                             } else {
@@ -599,6 +751,9 @@
 
             socket.onerror =
                 () => {
+                    statisticsElements.streamState.textContent =
+                        "Error";
+
                     appendLog(
                         "WebSocket error"
                     );
@@ -606,6 +761,9 @@
 
             socket.onclose =
                 event => {
+                    statisticsElements.streamState.textContent =
+                        "Disconnected";
+
                     status.textContent =
                         `Disconnected (${event.code})`;
 
@@ -646,6 +804,15 @@
             .addEventListener(
                 "click",
                 () => {
+                    if (logFlushTimer !== null) {
+                        clearTimeout(
+                            logFlushTimer
+                        );
+
+                        logFlushTimer = null;
+                    }
+
+                    pendingLogLines.length = 0;
                     logLines.length = 0;
                     log.textContent = "";
 

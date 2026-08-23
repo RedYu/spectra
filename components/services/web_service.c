@@ -136,7 +136,7 @@ esp_err_t web_service_start(void)
         can_stream_config = {
 
             .queue_depth =
-                64U,
+                512U,
 
             .statistics_interval_ms =
                 1000U,

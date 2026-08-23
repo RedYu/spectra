@@ -16,6 +16,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "cJSON.h"
+
 #include "can_frame.h"
 #include "can_router.h"
 #include "web_can_protocol.h"
@@ -23,10 +25,10 @@
 #define WEB_CAN_STREAM_URI                 "/ws/can"
 
 #define WEB_CAN_STREAM_TASK_STACK_SIZE     (4096U)
-#define WEB_CAN_STREAM_TASK_PRIORITY       (5U)
+#define WEB_CAN_STREAM_TASK_PRIORITY       (4U)
 
-#define WEB_CAN_STREAM_BATCH_MAX_EVENTS    (16U)
-#define WEB_CAN_STREAM_BATCH_MAX_SIZE      (2048U)
+#define WEB_CAN_STREAM_BATCH_MAX_EVENTS    (64U)
+#define WEB_CAN_STREAM_BATCH_MAX_SIZE      (4096U)
 #define WEB_CAN_STREAM_BATCH_TIMEOUT_MS    (10U)
 
 #define WEB_CAN_STREAM_IDLE_WAIT_MS        (100U)
@@ -85,6 +87,24 @@ static atomic_uint_fast64_t s_send_failures =
 static atomic_uint s_queue_peak =
     ATOMIC_VAR_INIT(0U);
 
+static atomic_bool s_primary_enabled =
+    ATOMIC_VAR_INIT(true);
+
+static atomic_bool s_secondary_enabled =
+    ATOMIC_VAR_INIT(true);
+
+static atomic_bool s_rx_enabled =
+    ATOMIC_VAR_INIT(true);
+
+static atomic_bool s_tx_enabled =
+    ATOMIC_VAR_INIT(true);
+
+static atomic_bool s_paused =
+    ATOMIC_VAR_INIT(false);
+
+static atomic_uint_fast64_t s_filtered_events =
+    ATOMIC_VAR_INIT(0U);
+
 static void web_can_stream_update_queue_peak(void)
 {
     if (s_event_queue == NULL) {
@@ -123,6 +143,43 @@ static void web_can_stream_clear_client(
     );
 }
 
+static bool web_can_stream_event_allowed(
+    const can_event_t *event
+)
+{
+    if ((event == NULL) ||
+        atomic_load(&s_paused)) {
+
+        return false;
+    }
+
+    if ((event->frame.bus == CAN_BUS_PRIMARY) &&
+        !atomic_load(&s_primary_enabled)) {
+
+        return false;
+    }
+
+    if ((event->frame.bus == CAN_BUS_SECONDARY) &&
+        !atomic_load(&s_secondary_enabled)) {
+
+        return false;
+    }
+
+    if ((event->direction == CAN_FRAME_DIRECTION_RX) &&
+        !atomic_load(&s_rx_enabled)) {
+
+        return false;
+    }
+
+    if ((event->direction == CAN_FRAME_DIRECTION_TX) &&
+        !atomic_load(&s_tx_enabled)) {
+
+        return false;
+    }
+
+    return true;
+}
+
 static void web_can_stream_router_callback(
     const can_event_t *event,
     void *context
@@ -149,6 +206,23 @@ static void web_can_stream_router_callback(
         return;
     }
 
+    if (!web_can_stream_event_allowed(
+            event
+        )) {
+
+        atomic_fetch_add(
+            &s_filtered_events,
+            1U
+        );
+
+        atomic_fetch_sub(
+            &s_active_callbacks,
+            1U
+        );
+
+        return;
+    }
+
     if (xQueueSend(
             s_event_queue,
             event,
@@ -159,8 +233,6 @@ static void web_can_stream_router_callback(
             &s_queued_events,
             1U
         );
-
-        web_can_stream_update_queue_peak();
 
     } else {
         atomic_fetch_add(
@@ -263,6 +335,7 @@ static void web_can_stream_send_statistics(
                 "\"sent_events\":%" PRIuFAST64 ","
                 "\"dropped_events\":%" PRIuFAST64 ","
                 "\"send_failures\":%" PRIuFAST64 ","
+                "\"filtered_events\":%" PRIuFAST64 ","
                 "\"queue_current\":%" PRIu32 ","
                 "\"queue_peak\":%" PRIu32 ","
                 "\"queue_capacity\":%" PRIu32
@@ -271,6 +344,7 @@ static void web_can_stream_send_statistics(
             atomic_load(&s_sent_events),
             atomic_load(&s_dropped_events),
             atomic_load(&s_send_failures),
+            atomic_load(&s_filtered_events),
             queue_current,
             queue_peak,
             s_config.queue_depth
@@ -335,27 +409,35 @@ static esp_err_t web_can_stream_send_batch(
     while (event_count <
            WEB_CAN_STREAM_BATCH_MAX_EVENTS) {
 
-        size_t encoded_size = 0U;
+        if (!web_can_stream_event_allowed(
+                &current_event
+            )) {
 
-        const esp_err_t encode_result =
-            web_can_protocol_encode_event(
-                &current_event,
-                &s_batch_buffer[used],
-                WEB_CAN_STREAM_BATCH_MAX_SIZE - used,
-                &encoded_size
-            );
-
-        if (encode_result != ESP_OK) {
             atomic_fetch_add(
-                &s_dropped_events,
+                &s_filtered_events,
                 1U
             );
 
         } else {
-            used +=
-                encoded_size;
+            size_t encoded_size = 0U;
 
-            ++event_count;
+            const esp_err_t encode_result =
+                web_can_protocol_encode_event(
+                    &current_event,
+                    &s_batch_buffer[used],
+                    WEB_CAN_STREAM_BATCH_MAX_SIZE - used,
+                    &encoded_size
+                );
+
+            if (encode_result != ESP_OK) {
+                atomic_fetch_add(
+                    &s_dropped_events,
+                    1U
+                );
+            } else {
+                used += encoded_size;
+                ++event_count;
+            }
         }
 
         if (event_count >=
@@ -374,6 +456,15 @@ static esp_err_t web_can_stream_send_batch(
             break;
         }
 
+        if (xQueueReceive(
+                s_event_queue,
+                &current_event,
+                0U
+            ) == pdPASS) {
+
+            continue;
+        }
+
         const int64_t now_us =
             esp_timer_get_time();
 
@@ -390,7 +481,9 @@ static esp_err_t web_can_stream_send_batch(
         if (xQueueReceive(
                 s_event_queue,
                 &current_event,
-                pdMS_TO_TICKS(remaining_ms)
+                pdMS_TO_TICKS(
+                    remaining_ms
+                )
             ) != pdPASS) {
 
             break;
@@ -435,6 +528,168 @@ static esp_err_t web_can_stream_send_batch(
     return send_result;
 }
 
+static esp_err_t web_can_stream_handle_subscribe(
+    httpd_req_t *request,
+    const uint8_t *payload,
+    size_t length
+)
+{
+    if ((request == NULL) ||
+        (payload == NULL) ||
+        (length == 0U)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    cJSON *root =
+        cJSON_ParseWithLength(
+            (const char *)payload,
+            length
+        );
+
+    if (root == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const cJSON *command =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "command"
+        );
+
+    const cJSON *primary =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "primary"
+        );
+
+    const cJSON *secondary =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "secondary"
+        );
+
+    const cJSON *rx =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "rx"
+        );
+
+    const cJSON *tx =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "tx"
+        );
+
+    const cJSON *paused =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "paused"
+        );
+
+    const bool valid =
+        cJSON_IsString(command) &&
+        (strcmp(command->valuestring, "subscribe") == 0) &&
+        cJSON_IsBool(primary) &&
+        cJSON_IsBool(secondary) &&
+        cJSON_IsBool(rx) &&
+        cJSON_IsBool(tx) &&
+        cJSON_IsBool(paused);
+
+    if (!valid) {
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const bool requested_paused =
+        cJSON_IsTrue(paused);
+
+    /*
+     * Prevent the router callback from observing a partially updated
+     * subscription.
+     */
+    atomic_store(
+        &s_paused,
+        true
+    );
+
+    atomic_store(
+        &s_primary_enabled,
+        cJSON_IsTrue(primary)
+    );
+
+    atomic_store(
+        &s_secondary_enabled,
+        cJSON_IsTrue(secondary)
+    );
+
+    atomic_store(
+        &s_rx_enabled,
+        cJSON_IsTrue(rx)
+    );
+
+    atomic_store(
+        &s_tx_enabled,
+        cJSON_IsTrue(tx)
+    );
+
+    /*
+     * Publish the complete subscription.
+     */
+    atomic_store(
+        &s_paused,
+        requested_paused
+    );
+
+    cJSON_Delete(root);
+
+    char response[192];
+
+    const int response_length =
+        snprintf(
+            response,
+            sizeof(response),
+            "{"
+                "\"type\":\"subscription\","
+                "\"primary\":%s,"
+                "\"secondary\":%s,"
+                "\"rx\":%s,"
+                "\"tx\":%s,"
+                "\"paused\":%s"
+            "}",
+            atomic_load(&s_primary_enabled)
+                ? "true" : "false",
+            atomic_load(&s_secondary_enabled)
+                ? "true" : "false",
+            atomic_load(&s_rx_enabled)
+                ? "true" : "false",
+            atomic_load(&s_tx_enabled)
+                ? "true" : "false",
+            atomic_load(&s_paused)
+                ? "true" : "false"
+        );
+
+    if ((response_length <= 0) ||
+        ((size_t)response_length >=
+         sizeof(response))) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    httpd_ws_frame_t response_frame = {
+        .final = true,
+        .fragmented = false,
+        .type = HTTPD_WS_TYPE_TEXT,
+        .payload = (uint8_t *)response,
+        .len = (size_t)response_length,
+    };
+
+    return httpd_ws_send_frame(
+        request,
+        &response_frame
+    );
+}
+
 static void web_can_stream_task(
     void *argument
 )
@@ -463,6 +718,8 @@ static void web_can_stream_task(
                     WEB_CAN_STREAM_IDLE_WAIT_MS
                 )
             ) == pdPASS) {
+
+            web_can_stream_update_queue_peak();
 
             const int socket =
                 atomic_load(
@@ -602,36 +859,40 @@ static esp_err_t web_can_stream_receive_frame(
         );
     }
 
-    if ((frame.type == HTTPD_WS_TYPE_TEXT) &&
-        (strcmp(
-            (const char *)payload,
-            "ping"
-        ) == 0)) {
+    if (frame.type == HTTPD_WS_TYPE_TEXT) {
+        const esp_err_t command_result =
+            web_can_stream_handle_subscribe(
+                request,
+                payload,
+                frame.len
+            );
 
-        static uint8_t response[] =
-            "{\"type\":\"pong\"}";
+        if (command_result != ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Invalid CAN WebSocket command: %s",
+                esp_err_to_name(command_result)
+            );
 
-        httpd_ws_frame_t response_frame = {
-            .final =
-                true,
+            static uint8_t response[] =
+                "{\"type\":\"error\","
+                "\"code\":\"invalid_command\"}";
 
-            .fragmented =
-                false,
+            httpd_ws_frame_t response_frame = {
+                .final = true,
+                .fragmented = false,
+                .type = HTTPD_WS_TYPE_TEXT,
+                .payload = response,
+                .len = sizeof(response) - 1U,
+            };
 
-            .type =
-                HTTPD_WS_TYPE_TEXT,
+            return httpd_ws_send_frame(
+                request,
+                &response_frame
+            );
+        }
 
-            .payload =
-                response,
-
-            .len =
-                sizeof(response) - 1U,
-        };
-
-        return httpd_ws_send_frame(
-            request,
-            &response_frame
-        );
+        return ESP_OK;
     }
 
     /*
@@ -664,45 +925,103 @@ static esp_err_t web_can_stream_websocket_handler(
         return ESP_FAIL;
     }
 
-    const int current_socket =
+    int current_socket =
         atomic_load(
             &s_client_socket
         );
 
-    if (current_socket != socket) {
-        const int previous_socket =
-            atomic_exchange(
-                &s_client_socket,
-                socket
-            );
+    /*
+     * ESP-IDF may invoke this handler for the first time only after
+     * completing the WebSocket handshake. Register the client on its
+     * first handler invocation instead of relying only on HTTP_GET.
+     */
+    if (current_socket ==
+        WEB_CAN_STREAM_CLIENT_NONE) {
 
-        if ((previous_socket !=
-            WEB_CAN_STREAM_CLIENT_NONE) &&
-            (previous_socket != socket) &&
-            (s_server != NULL)) {
-
-            (void)httpd_sess_trigger_close(
-                s_server,
-                previous_socket
-            );
-        }
-
+        /*
+         * Clear data left by a previously disconnected client before
+         * publishing the new socket.
+         */
         if (s_event_queue != NULL) {
             (void)xQueueReset(
                 s_event_queue
             );
         }
 
-        ESP_LOGI(
-            TAG,
-            "CAN WebSocket client registered: socket=%d",
-            socket
+        atomic_store(
+            &s_primary_enabled,
+            true
         );
+
+        atomic_store(
+            &s_secondary_enabled,
+            true
+        );
+
+        atomic_store(
+            &s_rx_enabled,
+            true
+        );
+
+        atomic_store(
+            &s_tx_enabled,
+            true
+        );
+
+        atomic_store(
+            &s_paused,
+            false
+        );
+
+        int expected =
+            WEB_CAN_STREAM_CLIENT_NONE;
+
+        if (atomic_compare_exchange_strong(
+                &s_client_socket,
+                &expected,
+                socket
+            )) {
+
+            current_socket =
+                socket;
+
+            ESP_LOGI(
+                TAG,
+                "CAN WebSocket client registered: socket=%d",
+                socket
+            );
+        } else {
+            current_socket =
+                expected;
+        }
     }
 
     /*
-     * ESP-IDF invokes the handler once for the initial WebSocket
-     * handshake. Later invocations contain WebSocket frames.
+     * Only one CAN stream client is supported. Reject an additional
+     * socket without disturbing the active client.
+     */
+    if (current_socket != socket) {
+        ESP_LOGW(
+            TAG,
+            "Rejecting additional CAN WebSocket client: "
+            "socket=%d, active=%d",
+            socket,
+            current_socket
+        );
+
+        if (s_server != NULL) {
+            (void)httpd_sess_trigger_close(
+                s_server,
+                socket
+            );
+        }
+
+        return ESP_OK;
+    }
+
+    /*
+     * Compatibility with ESP-IDF configurations that invoke the URI
+     * handler during the initial handshake.
      */
     if (request->method == HTTP_GET) {
         return ESP_OK;
@@ -795,6 +1114,11 @@ esp_err_t web_can_stream_service_start(
     atomic_store(
         &s_accepting_events,
         false
+    );
+
+    atomic_store(
+        &s_filtered_events,
+        0U
     );
 
     atomic_store(
@@ -1241,6 +1565,11 @@ esp_err_t web_can_stream_service_get_statistics(
             &s_client_socket
         ) != WEB_CAN_STREAM_CLIENT_NONE;
 
+    statistics->filtered_events =
+        atomic_load(
+            &s_filtered_events
+        );
+
     return ESP_OK;
 }
 
@@ -1270,6 +1599,11 @@ esp_err_t web_can_stream_service_reset_statistics(void)
 
     atomic_store(
         &s_send_failures,
+        0U
+    );
+
+    atomic_store(
+        &s_filtered_events,
         0U
     );
 
