@@ -36,7 +36,7 @@
 #define WEB_CAN_STREAM_CALLBACK_WAIT_MS    (100U)
 
 #define WEB_CAN_STREAM_RX_BUFFER_SIZE      (256U)
-#define WEB_CAN_STREAM_STATISTICS_SIZE     (384U)
+#define WEB_CAN_STREAM_STATISTICS_SIZE     (512U)
 
 static const char *TAG =
     "web_can_stream";
@@ -87,6 +87,18 @@ static atomic_uint_fast64_t s_send_failures =
 static atomic_uint s_queue_peak =
     ATOMIC_VAR_INIT(0U);
 
+static atomic_uint_fast64_t s_sent_batches =
+    ATOMIC_VAR_INIT(0U);
+
+static atomic_uint_fast64_t s_sent_binary_bytes =
+    ATOMIC_VAR_INIT(0U);
+
+static atomic_uint_fast64_t s_batch_events_total =
+    ATOMIC_VAR_INIT(0U);
+
+static atomic_uint s_batch_events_peak =
+    ATOMIC_VAR_INIT(0U);
+
 static atomic_bool s_primary_enabled =
     ATOMIC_VAR_INIT(true);
 
@@ -126,6 +138,27 @@ static void web_can_stream_update_queue_peak(void)
                &s_queue_peak,
                &peak,
                current
+           )) {
+    }
+}
+
+static void web_can_stream_update_batch_peak(
+    uint32_t event_count
+)
+{
+    uint32_t peak =
+        atomic_load_explicit(
+            &s_batch_events_peak,
+            memory_order_relaxed
+        );
+
+    while ((event_count > peak) &&
+           !atomic_compare_exchange_weak_explicit(
+               &s_batch_events_peak,
+               &peak,
+               event_count,
+               memory_order_relaxed,
+               memory_order_relaxed
            )) {
     }
 }
@@ -325,6 +358,26 @@ static void web_can_stream_send_statistics(
             &s_queue_peak
         );
 
+    const uint64_t sent_batches =
+        atomic_load_explicit(
+            &s_sent_batches,
+            memory_order_relaxed
+        );
+
+    const uint64_t batch_events_total =
+        atomic_load_explicit(
+            &s_batch_events_total,
+            memory_order_relaxed
+        );
+
+    const uint32_t batch_events_average =
+        (sent_batches > 0U)
+            ? (uint32_t)(
+                batch_events_total /
+                sent_batches
+            )
+            : 0U;
+
     const int length =
         snprintf(
             message,
@@ -338,7 +391,12 @@ static void web_can_stream_send_statistics(
                 "\"filtered_events\":%" PRIuFAST64 ","
                 "\"queue_current\":%" PRIu32 ","
                 "\"queue_peak\":%" PRIu32 ","
-                "\"queue_capacity\":%" PRIu32
+                "\"queue_capacity\":%" PRIu32 ","
+                "\"sent_batches\":%" PRIu64 ","
+                "\"sent_binary_bytes\":%" PRIuFAST64 ","
+                "\"batch_events_total\":%" PRIu64 ","
+                "\"batch_events_peak\":%" PRIu32 ","
+                "\"batch_events_average\":%" PRIu32
             "}",
             atomic_load(&s_queued_events),
             atomic_load(&s_sent_events),
@@ -347,7 +405,18 @@ static void web_can_stream_send_statistics(
             atomic_load(&s_filtered_events),
             queue_current,
             queue_peak,
-            s_config.queue_depth
+            s_config.queue_depth,
+            sent_batches,
+            atomic_load_explicit(
+                &s_sent_binary_bytes,
+                memory_order_relaxed
+            ),
+            batch_events_total,
+            (uint32_t)atomic_load_explicit(
+                &s_batch_events_peak,
+                memory_order_relaxed
+            ),
+            batch_events_average
         );
 
     if ((length <= 0) ||
@@ -519,8 +588,31 @@ static esp_err_t web_can_stream_send_batch(
         );
 
     if (send_result == ESP_OK) {
-        atomic_fetch_add(
+        atomic_fetch_add_explicit(
             &s_sent_events,
+            event_count,
+            memory_order_relaxed
+        );
+
+        atomic_fetch_add_explicit(
+            &s_sent_batches,
+            1U,
+            memory_order_relaxed
+        );
+
+        atomic_fetch_add_explicit(
+            &s_sent_binary_bytes,
+            used,
+            memory_order_relaxed
+        );
+
+        atomic_fetch_add_explicit(
+            &s_batch_events_total,
+            event_count,
+            memory_order_relaxed
+        );
+
+        web_can_stream_update_batch_peak(
             event_count
         );
     }
@@ -1132,6 +1224,26 @@ esp_err_t web_can_stream_service_start(
     );
 
     atomic_store(
+        &s_sent_batches,
+        0U
+    );
+
+    atomic_store(
+        &s_sent_binary_bytes,
+        0U
+    );
+
+    atomic_store(
+        &s_batch_events_total,
+        0U
+    );
+
+    atomic_store(
+        &s_batch_events_peak,
+        0U
+    );
+
+    atomic_store(
         &s_active_callbacks,
         0U
     );
@@ -1557,6 +1669,38 @@ esp_err_t web_can_stream_service_get_statistics(
             &s_queue_peak
         );
 
+    statistics->sent_batches =
+        atomic_load_explicit(
+            &s_sent_batches,
+            memory_order_relaxed
+        );
+
+    statistics->sent_binary_bytes =
+        atomic_load_explicit(
+            &s_sent_binary_bytes,
+            memory_order_relaxed
+        );
+
+    statistics->batch_events_total =
+        atomic_load_explicit(
+            &s_batch_events_total,
+            memory_order_relaxed
+        );
+
+    statistics->batch_events_peak =
+        atomic_load_explicit(
+            &s_batch_events_peak,
+            memory_order_relaxed
+        );
+
+    statistics->batch_events_average =
+        (statistics->sent_batches > 0U)
+            ? (uint32_t)(
+                statistics->batch_events_total /
+                statistics->sent_batches
+            )
+            : 0U;
+
     statistics->queue_capacity =
         s_config.queue_depth;
 
@@ -1614,6 +1758,30 @@ esp_err_t web_can_stream_service_reset_statistics(void)
                   s_event_queue
               )
             : 0U
+    );
+
+    atomic_store_explicit(
+        &s_sent_batches,
+        0U,
+        memory_order_relaxed
+    );
+
+    atomic_store_explicit(
+        &s_sent_binary_bytes,
+        0U,
+        memory_order_relaxed
+    );
+
+    atomic_store_explicit(
+        &s_batch_events_total,
+        0U,
+        memory_order_relaxed
+    );
+
+    atomic_store_explicit(
+        &s_batch_events_peak,
+        0U,
+        memory_order_relaxed
     );
 
     return ESP_OK;

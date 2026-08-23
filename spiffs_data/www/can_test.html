@@ -212,6 +212,36 @@
                     class="statistics-value"
                 >0</span>
 
+                <span class="statistics-label">Sent batches</span>
+                <span
+                    id="statistics-sent-batches"
+                    class="statistics-value"
+                >0</span>
+
+                <span class="statistics-label">Binary payload</span>
+                <span
+                    id="statistics-binary-bytes"
+                    class="statistics-value"
+                >0 B</span>
+
+                <span class="statistics-label">Batch events total</span>
+                <span
+                    id="statistics-batch-events-total"
+                    class="statistics-value"
+                >0</span>
+
+                <span class="statistics-label">Batch average</span>
+                <span
+                    id="statistics-batch-average"
+                    class="statistics-value"
+                >0</span>
+
+                <span class="statistics-label">Batch peak</span>
+                <span
+                    id="statistics-batch-peak"
+                    class="statistics-value"
+                >0</span>
+
                 <span class="statistics-label">Received batches</span>
                 <span
                     id="statistics-batches"
@@ -270,6 +300,31 @@
             queuePeak:
                 document.getElementById("statistics-queue-peak"),
 
+            sentBatches:
+                document.getElementById(
+                    "statistics-sent-batches"
+                ),
+
+            binaryBytes:
+                document.getElementById(
+                    "statistics-binary-bytes"
+                ),
+
+            batchEventsTotal:
+                document.getElementById(
+                    "statistics-batch-events-total"
+                ),
+
+            batchAverage:
+                document.getElementById(
+                    "statistics-batch-average"
+                ),
+
+            batchPeak:
+                document.getElementById(
+                    "statistics-batch-peak"
+                ),
+
             batches:
                 document.getElementById("statistics-batches"),
 
@@ -282,6 +337,29 @@
             streamState:
                 document.getElementById("statistics-stream-state"),
         };
+
+        function formatByteSize(value) {
+            const bytes =
+                Number(value ?? 0);
+
+            if (!Number.isFinite(bytes) ||
+                (bytes <= 0)) {
+
+                return "0 B";
+            }
+
+            if (bytes < 1024) {
+                return `${bytes} B`;
+            }
+
+            if (bytes < (1024 * 1024)) {
+                return `${(bytes / 1024).toFixed(1)} KB`;
+            }
+
+            return (
+                `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+            );
+        }
 
         function updateStreamStatistics(statistics) {
             statisticsElements.queued.textContent =
@@ -303,6 +381,23 @@
             statisticsElements.queuePeak.textContent =
                 statistics.queue_peak ?? 0;
 
+            statisticsElements.sentBatches.textContent =
+                statistics.sent_batches ?? 0;
+
+            statisticsElements.binaryBytes.textContent =
+                formatByteSize(
+                    statistics.sent_binary_bytes
+                );
+
+            statisticsElements.batchEventsTotal.textContent =
+                statistics.batch_events_total ?? 0;
+
+            statisticsElements.batchAverage.textContent =
+                statistics.batch_events_average ?? 0;
+
+            statisticsElements.batchPeak.textContent =
+                statistics.batch_events_peak ?? 0;
+
             statisticsElements.dropped.classList.toggle(
                 "warning",
                 Number(statistics.dropped_events) > 0
@@ -315,6 +410,17 @@
 
             statisticsElements.filtered.textContent =
                 statistics.filtered_events ?? 0;
+
+            const batchAverage =
+                Number(
+                    statistics.batch_events_average ?? 0
+                );
+
+            statisticsElements.batchAverage.classList.toggle(
+                "warning",
+                (batchAverage > 0) &&
+                (batchAverage < 32)
+            );
         }
 
         const status =

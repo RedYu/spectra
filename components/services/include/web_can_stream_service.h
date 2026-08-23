@@ -54,6 +54,31 @@ typedef struct
 
     uint64_t filtered_events;
 
+    /**
+     * Number of successfully transmitted binary event batches.
+     */
+    uint64_t sent_batches;
+
+    /**
+     * Total number of bytes in successfully transmitted binary batches.
+     */
+    uint64_t sent_binary_bytes;
+
+    /**
+     * Combined number of events contained in successful batches.
+     */
+    uint64_t batch_events_total;
+
+    /**
+     * Maximum number of events in one successful batch.
+     */
+    uint32_t batch_events_peak;
+
+    /**
+     * Average number of events per successful batch.
+     */
+    uint32_t batch_events_average;
+
 } web_can_stream_service_statistics_t;
 
 /**
