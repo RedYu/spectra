@@ -30,6 +30,8 @@
     (CAN_FD_SERVICE_SELF_TEST_RX_BIT |       \
      CAN_FD_SERVICE_SELF_TEST_TX_BIT)
 
+#define CAN_FD_SERVICE_RX_BATCH_SIZE         (8U)
+
 static const char *TAG =
     "can_fd_service";
 
@@ -88,6 +90,8 @@ static EventGroupHandle_t
 static atomic_uint_fast32_t
     s_self_test_observed_sequence =
         ATOMIC_VAR_INIT(0U);
+
+static void can_fd_service_drain_tx_events(void);
 
 static esp_err_t can_fd_service_lock(void)
 {
@@ -274,51 +278,6 @@ static void can_fd_service_deliver_tx_event(
     );
 }
 
-static void can_fd_service_drain_receive_queue(void)
-{
-    while (!atomic_load(
-               &s_stop_requested
-           )) {
-
-        can_fd_mcp2518fd_frame_t frame;
-
-        const esp_err_t result =
-            can_fd_mcp2518fd_driver_receive(
-                &frame,
-                0U
-            );
-
-        if (result == ESP_ERR_TIMEOUT) {
-            break;
-        }
-
-        if (result != ESP_OK) {
-            if (!atomic_load(
-                    &s_stop_requested
-                )) {
-
-                (void)atomic_fetch_add_explicit(
-                    &s_receive_errors,
-                    1U,
-                    memory_order_relaxed
-                );
-
-                ESP_LOGW(
-                    TAG,
-                    "Failed to drain RX queue: %s",
-                    esp_err_to_name(result)
-                );
-            }
-
-            break;
-        }
-
-        can_fd_service_deliver_frame(
-            &frame
-        );
-    }
-}
-
 static void can_fd_service_drain_tx_events(void)
 {
     while (!atomic_load(
@@ -434,30 +393,43 @@ static void can_fd_service_task(
         "CAN FD processing task started"
     );
 
+    can_fd_mcp2518fd_frame_t frames[
+        CAN_FD_SERVICE_RX_BATCH_SIZE
+    ];
+
     while (!atomic_load(
                &s_stop_requested
            )) {
 
-        /*
-         * Wait for one received frame. The timeout also gives the task
-         * an opportunity to process TEF events when there is no RX
-         * traffic.
-         */
-        can_fd_mcp2518fd_frame_t frame;
+        size_t received_count = 0U;
 
         const esp_err_t receive_result =
-            can_fd_mcp2518fd_driver_receive(
-                &frame,
+            can_fd_mcp2518fd_driver_receive_batch(
+                frames,
+                CAN_FD_SERVICE_RX_BATCH_SIZE,
+                &received_count,
                 CAN_FD_SERVICE_RECEIVE_TIMEOUT_MS
             );
 
         if (receive_result == ESP_OK) {
-            can_fd_service_deliver_frame(
-                &frame
-            );
+            for (size_t index = 0U;
+                 index < received_count;
+                 ++index) {
 
-            can_fd_service_drain_receive_queue();
-        } else if (receive_result != ESP_ERR_TIMEOUT) {
+                if (atomic_load(
+                        &s_stop_requested
+                    )) {
+
+                    break;
+                }
+
+                can_fd_service_deliver_frame(
+                    &frames[index]
+                );
+            }
+        } else if (receive_result !=
+                   ESP_ERR_TIMEOUT) {
+
             if (!atomic_load(
                     &s_stop_requested
                 )) {
@@ -470,8 +442,10 @@ static void can_fd_service_task(
 
                 ESP_LOGW(
                     TAG,
-                    "Failed to receive CAN FD frame: %s",
-                    esp_err_to_name(receive_result)
+                    "Failed to receive CAN FD batch: %s",
+                    esp_err_to_name(
+                        receive_result
+                    )
                 );
 
                 vTaskDelay(
@@ -482,14 +456,21 @@ static void can_fd_service_task(
             }
         }
 
+        /*
+         * Process transmission confirmations after every RX batch.
+         * This prevents continuous RX traffic from starving TEF.
+         */
         can_fd_service_drain_tx_events();
     }
 
-    /*
-     * Do not process callbacks after shutdown has been requested.
-     * Remaining hardware transmissions are handled by the abort
-     * operation in can_fd_service_stop().
-     */
+    ESP_LOGI(
+        TAG,
+        "CAN FD task stack minimum free: %u bytes",
+        (unsigned int)uxTaskGetStackHighWaterMark(
+            NULL
+        )
+    );
+
     ESP_LOGI(
         TAG,
         "CAN FD processing task stopped"

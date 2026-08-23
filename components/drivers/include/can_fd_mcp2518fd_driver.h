@@ -656,6 +656,33 @@ esp_err_t can_fd_mcp2518fd_driver_receive(
 );
 
 /**
+ * @brief Receive multiple frames from RX FIFO2.
+ *
+ * The function waits up to timeout_ms for the first frame. After the
+ * first frame is received, all immediately available frames are drained
+ * without additional waiting, up to frame_capacity.
+ *
+ * The returned frames are ordered from oldest to newest.
+ *
+ * @param[out] frames Destination frame array.
+ * @param[in] frame_capacity Number of elements available in frames.
+ * @param[out] received_count Number of frames successfully received.
+ * @param[in] timeout_ms Maximum time to wait for the first frame.
+ *
+ * @return ESP_OK when at least one frame is received,
+ * ESP_ERR_INVALID_ARG for invalid arguments,
+ * ESP_ERR_INVALID_STATE if the driver is not running,
+ * ESP_ERR_TIMEOUT when no frame arrives before the timeout,
+ * otherwise an ESP-IDF error code.
+ */
+esp_err_t can_fd_mcp2518fd_driver_receive_batch(
+    can_fd_mcp2518fd_frame_t *frames,
+    size_t frame_capacity,
+    size_t *received_count,
+    uint32_t timeout_ms
+);
+
+/**
  * @brief Confirm automatic recovery from the Bus-off state.
  *
  * MCP2518FD starts Bus-off recovery automatically. This function

@@ -162,7 +162,8 @@
 #define MCP2518FD_CIINT_RXOVIE                (1UL << 27U)
 #define MCP2518FD_CIINT_TXATIE                (1UL << 26U)
 #define MCP2518FD_CIINT_ECCIE                 (1UL << 24U)
-
+#define MCP2518FD_CIINT_RXIE                  (1UL << 17U)
+#define MCP2518FD_CIINT_RXIF                  (1UL << 1U)
 #define MCP2518FD_CIINT_CERRIF                (1UL << 13U)
 #define MCP2518FD_CIINT_SERRIF                (1UL << 12U)
 #define MCP2518FD_CIINT_RXOVIF                (1UL << 11U)
@@ -283,6 +284,7 @@
 #define MCP2518FD_TIMESTAMP_FREQUENCY_HZ      (1000000U)
 
 #define MCP2518FD_FIFO_RXTSEN                 (1UL << 5U)
+#define MCP2518FD_FIFO_TFNRFNIE               (1UL << 0U)
 
 #define MCP2518FD_TEF_OBJECT_SIZE             (12U)
 #define MCP2518FD_TEF_TIMESTAMP_OFFSET        (8U)
@@ -485,6 +487,8 @@ static TaskHandle_t s_interrupt_task = NULL;
 
 static QueueHandle_t s_tx_event_queue = NULL;
 
+static SemaphoreHandle_t s_rx_ready_semaphore = NULL;
+
 static atomic_bool s_interrupt_task_stop =
     ATOMIC_VAR_INIT(false);
 
@@ -492,6 +496,8 @@ static bool s_gpio_handler_registered = false;
 
 static uint32_t s_pending_tx_frames = 0U;
 static uint32_t s_next_tx_sequence = 0U;
+
+static uint32_t s_rx_fifo_control = 0U;
 
 static esp_err_t mcp2518fd_process_tef_unlocked(void);
 static uint32_t mcp2518fd_get_tx_attempt_configuration(void);
@@ -1752,20 +1758,10 @@ static esp_err_t mcp2518fd_process_tx_status_unlocked(void)
     return result;
 }
 
-static esp_err_t mcp2518fd_process_rx_overflow_unlocked(void)
+static esp_err_t mcp2518fd_handle_rx_overflow_unlocked(
+    uint32_t fifo_status
+)
 {
-    uint32_t fifo_status = 0U;
-
-    esp_err_t result =
-        mcp2518fd_read_register_unlocked(
-            MCP2518FD_REGISTER_CIFIFOSTA2,
-            &fifo_status
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
     if ((fifo_status &
          MCP2518FD_FIFO_STATUS_RXOVIF) == 0U) {
 
@@ -1775,10 +1771,18 @@ static esp_err_t mcp2518fd_process_rx_overflow_unlocked(void)
     ++s_info.receive_overflow_count;
     ++s_info.dropped_rx_frames;
 
-    ESP_LOGW(
-        TAG,
-        "MCP2518FD RX FIFO2 overflow"
-    );
+    const uint32_t count =
+        s_info.receive_overflow_count;
+
+    if ((count == 1U) ||
+        ((count & (count - 1U)) == 0U)) {
+
+        ESP_LOGW(
+            TAG,
+            "MCP2518FD RX FIFO2 overflow: count=%lu",
+            (unsigned long)count
+        );
+    }
 
     return mcp2518fd_write_register_unlocked(
         MCP2518FD_REGISTER_CIFIFOSTA2,
@@ -1787,10 +1791,35 @@ static esp_err_t mcp2518fd_process_rx_overflow_unlocked(void)
     );
 }
 
+static esp_err_t mcp2518fd_process_rx_overflow_unlocked(void)
+{
+    uint32_t fifo_status = 0U;
+
+    const esp_err_t result =
+        mcp2518fd_read_register_unlocked(
+            MCP2518FD_REGISTER_CIFIFOSTA2,
+            &fifo_status
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return mcp2518fd_handle_rx_overflow_unlocked(
+        fifo_status
+    );
+}
+
 static esp_err_t mcp2518fd_process_interrupt_unlocked(
-    void
+    bool *rx_pending
 )
 {
+    if (rx_pending == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *rx_pending = false;
+
     uint32_t interrupt_register = 0U;
 
     esp_err_t result =
@@ -1808,6 +1837,18 @@ static esp_err_t mcp2518fd_process_interrupt_unlocked(
 
     s_info.interrupt_flags =
         interrupt_flags;
+
+    if ((interrupt_flags &
+         MCP2518FD_CIINT_RXIF) != 0U) {
+
+        *rx_pending = true;
+
+        if (s_rx_ready_semaphore != NULL) {
+            (void)xSemaphoreGive(
+                s_rx_ready_semaphore
+            );
+        }
+    }
 
     if ((interrupt_flags &
          MCP2518FD_CIINT_TEFIF) != 0U) {
@@ -1871,11 +1912,23 @@ static esp_err_t mcp2518fd_process_interrupt_unlocked(
         ++s_info.bus_error_count;
     }
 
-    result =
-        mcp2518fd_update_error_state_unlocked();
+    const uint32_t error_flags =
+        interrupt_flags &
+        (
+            MCP2518FD_CIINT_CERRIF |
+            MCP2518FD_CIINT_SERRIF |
+            MCP2518FD_CIINT_RXOVIF |
+            MCP2518FD_CIINT_TXATIF |
+            MCP2518FD_CIINT_ECCIF
+        );
 
-    if (result != ESP_OK) {
-        return result;
+    if (error_flags != 0U) {
+        result =
+            mcp2518fd_update_error_state_unlocked();
+
+        if (result != ESP_OK) {
+            return result;
+        }
     }
 
     const uint32_t flags_to_clear =
@@ -1939,6 +1992,8 @@ static void mcp2518fd_interrupt_task(
 
         esp_err_t result = ESP_OK;
 
+        bool rx_pending = false;
+
         for (uint32_t iteration = 0U;
             iteration < 16U;
             ++iteration) {
@@ -1952,11 +2007,17 @@ static void mcp2518fd_interrupt_task(
             }
 
             result =
-                mcp2518fd_process_interrupt_unlocked();
+                mcp2518fd_process_interrupt_unlocked(
+                    &rx_pending
+                );
 
             mcp2518fd_unlock();
 
             if (result != ESP_OK) {
+                break;
+            }
+
+            if (rx_pending) {
                 break;
             }
 
@@ -1978,6 +2039,7 @@ static void mcp2518fd_interrupt_task(
          * generate another falling edge while it remains asserted.
          */
         if ((result == ESP_OK) &&
+            !rx_pending &&
             (gpio_get_level(
                 CAN_FD_PIN_INT
             ) == 0)) {
@@ -2053,6 +2115,7 @@ static esp_err_t mcp2518fd_enable_interrupts_unlocked(void)
     }
 
     const uint32_t interrupt_enable =
+        MCP2518FD_CIINT_RXIE |
         MCP2518FD_CIINT_CERRIE |
         MCP2518FD_CIINT_SERRIE |
         MCP2518FD_CIINT_RXOVIE |
@@ -2266,24 +2329,10 @@ static esp_err_t mcp2518fd_request_tx_unlocked(void)
 
 static esp_err_t mcp2518fd_increment_rx_fifo_unlocked(void)
 {
-    uint32_t fifo_control = 0U;
-
-    esp_err_t result =
-        mcp2518fd_read_register_unlocked(
-            MCP2518FD_REGISTER_CIFIFOCON2,
-            &fifo_control
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    fifo_control |=
-        MCP2518FD_FIFO_UINC;
-
     return mcp2518fd_write_register_unlocked(
         MCP2518FD_REGISTER_CIFIFOCON2,
-        fifo_control
+        s_rx_fifo_control |
+        MCP2518FD_FIFO_UINC
     );
 }
 
@@ -2624,7 +2673,12 @@ static esp_err_t mcp2518fd_configure_fifos_unlocked(void)
         ) |
         MCP2518FD_FIFO_RXTSEN |
         MCP2518FD_FIFO_RXOVIE |
+        MCP2518FD_FIFO_TFNRFNIE |
         MCP2518FD_FIFO_FRESET;
+
+    s_rx_fifo_control =
+        rx_fifo_config &
+        ~MCP2518FD_FIFO_FRESET;
 
     result =
         mcp2518fd_write_register_unlocked(
@@ -3771,6 +3825,14 @@ static void mcp2518fd_release_resources(void)
         s_tx_event_queue = NULL;
     }
 
+    if (s_rx_ready_semaphore != NULL) {
+        vSemaphoreDelete(
+            s_rx_ready_semaphore
+        );
+
+        s_rx_ready_semaphore = NULL;
+    }
+
     if (s_mutex != NULL) {
         vSemaphoreDelete(s_mutex);
         s_mutex = NULL;
@@ -3784,6 +3846,8 @@ static void mcp2518fd_release_resources(void)
 
     s_next_tx_sequence = 0U;
     s_pending_tx_frames = 0U;
+
+    s_rx_fifo_control = 0U;
 }
 
 static esp_err_t mcp2518fd_abort_transmissions_unlocked(
@@ -4418,6 +4482,19 @@ esp_err_t can_fd_mcp2518fd_driver_init(
         return ESP_ERR_NO_MEM;
     }
 
+    s_rx_ready_semaphore =
+        xSemaphoreCreateBinary();
+
+    if (s_rx_ready_semaphore == NULL) {
+        vSemaphoreDelete(
+            s_mutex
+        );
+
+        s_mutex = NULL;
+
+        return ESP_ERR_NO_MEM;
+    }
+
     s_tx_event_queue =
         xQueueCreate(
             config->tx_fifo_depth,
@@ -5029,6 +5106,12 @@ esp_err_t can_fd_mcp2518fd_driver_stop(void)
 
     mcp2518fd_unlock();
 
+    if (s_rx_ready_semaphore != NULL) {
+        (void)xSemaphoreGive(
+            s_rx_ready_semaphore
+        );
+    }
+
     return ESP_OK;
 }
 
@@ -5545,9 +5628,8 @@ static esp_err_t mcp2518fd_process_tef_unlocked(void)
     }
 }
 
-esp_err_t can_fd_mcp2518fd_driver_receive(
-    can_fd_mcp2518fd_frame_t *frame,
-    uint32_t timeout_ms
+static esp_err_t mcp2518fd_receive_one_unlocked(
+    can_fd_mcp2518fd_frame_t *frame
 )
 {
     if (frame == NULL) {
@@ -5560,7 +5642,135 @@ esp_err_t can_fd_mcp2518fd_driver_receive(
         sizeof(*frame)
     );
 
-    if (!s_initialized || !s_started) {
+    const size_t object_size =
+        mcp2518fd_rx_object_size(
+            &s_config
+        );
+
+    uint32_t fifo_status = 0U;
+
+    esp_err_t result =
+        mcp2518fd_read_register_unlocked(
+            MCP2518FD_REGISTER_CIFIFOSTA2,
+            &fifo_status
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        mcp2518fd_handle_rx_overflow_unlocked(
+            fifo_status
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if ((fifo_status &
+         MCP2518FD_FIFO_STATUS_TFNRFNIF) == 0U) {
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+    uint32_t user_address = 0U;
+
+    result =
+        mcp2518fd_read_register_unlocked(
+            MCP2518FD_REGISTER_CIFIFOUA2,
+            &user_address
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    const uint16_t ram_address =
+        (uint16_t)(
+            MCP2518FD_MESSAGE_RAM_BASE +
+            (
+                user_address &
+                MCP2518FD_MESSAGE_RAM_OFFSET_MASK
+            )
+        );
+
+    if (((uint32_t)ram_address +
+         object_size) >
+        (MCP2518FD_MESSAGE_RAM_BASE +
+         MCP2518FD_MESSAGE_RAM_SIZE)) {
+
+        ESP_LOGE(
+            TAG,
+            "Invalid RX FIFO address: UA=0x%08lX",
+            (unsigned long)user_address
+        );
+
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    uint8_t object[
+        MCP2518FD_RX_OBJECT_MAX_SIZE
+    ] = {0};
+
+    result =
+        mcp2518fd_read_bytes_unlocked(
+            ram_address,
+            object,
+            object_size
+        );
+
+    if (result != ESP_OK) {
+        ++s_info.dropped_rx_frames;
+        return result;
+    }
+
+    /*
+     * The FIFO object must be released only after its complete contents
+     * have been copied from Message RAM.
+     */
+    result =
+        mcp2518fd_increment_rx_fifo_unlocked();
+
+    if (result != ESP_OK) {
+        ++s_info.dropped_rx_frames;
+        return result;
+    }
+
+    result =
+        mcp2518fd_decode_rx_object(
+            object,
+            frame
+        );
+
+    if (result == ESP_OK) {
+        ++s_info.received_frames;
+    } else {
+        ++s_info.dropped_rx_frames;
+    }
+
+    return result;
+}
+
+esp_err_t can_fd_mcp2518fd_driver_receive_batch(
+    can_fd_mcp2518fd_frame_t *frames,
+    size_t frame_capacity,
+    size_t *received_count,
+    uint32_t timeout_ms
+)
+{
+    if ((frames == NULL) ||
+        (frame_capacity == 0U) ||
+        (received_count == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *received_count = 0U;
+
+    if (!s_initialized ||
+        !s_started) {
+
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -5591,144 +5801,93 @@ esp_err_t can_fd_mcp2518fd_driver_receive(
             return ESP_ERR_INVALID_STATE;
         }
 
-        const size_t object_size =
-            mcp2518fd_rx_object_size(
-                &s_config
-            );
+        esp_err_t result = ESP_OK;
 
-        uint32_t fifo_status = 0U;
+        while (*received_count <
+               frame_capacity) {
 
-        esp_err_t result =
-            mcp2518fd_read_register_unlocked(
-                MCP2518FD_REGISTER_CIFIFOSTA2,
-                &fifo_status
-            );
-
-        if (result != ESP_OK) {
-            mcp2518fd_unlock();
-            return result;
-        }
-
-        if ((fifo_status &
-             MCP2518FD_FIFO_STATUS_RXOVIF) != 0U) {
-
-            ++s_info.receive_overflow_count;
-            ++s_info.dropped_rx_frames;
-
-            /*
-             * RXOVIF is a clearable status bit. Preserve the remaining
-             * status value and write RXOVIF as zero.
-             */
-            (void)mcp2518fd_write_register_unlocked(
-                MCP2518FD_REGISTER_CIFIFOSTA2,
-                fifo_status &
-                ~MCP2518FD_FIFO_STATUS_RXOVIF
-            );
-        }
-
-        const bool frame_available =
-            (fifo_status &
-             MCP2518FD_FIFO_STATUS_TFNRFNIF) != 0U;
-
-        if (!frame_available) {
-            mcp2518fd_unlock();
-
-            if (timeout_ms == 0U) {
-                return ESP_ERR_TIMEOUT;
-            }
-
-            if ((xTaskGetTickCount() -
-                 started_at) >=
-                timeout_ticks) {
-
-                return ESP_ERR_TIMEOUT;
-            }
-
-            vTaskDelay(1U);
-            continue;
-        }
-
-        uint32_t user_address = 0U;
-
-        result =
-            mcp2518fd_read_register_unlocked(
-                MCP2518FD_REGISTER_CIFIFOUA2,
-                &user_address
-            );
-
-        if (result != ESP_OK) {
-            mcp2518fd_unlock();
-            return result;
-        }
-
-        /*
-         * FIFOUA contains an offset inside the 2 KB Message RAM.
-         */
-        const uint16_t ram_address =
-            (uint16_t)(
-                MCP2518FD_MESSAGE_RAM_BASE +
-                (
-                    user_address &
-                    MCP2518FD_MESSAGE_RAM_OFFSET_MASK
-                )
-            );
-
-        if (((uint32_t)ram_address +
-            object_size) >
-            (
-                MCP2518FD_MESSAGE_RAM_BASE +
-                MCP2518FD_MESSAGE_RAM_SIZE
-            )) {
-
-            mcp2518fd_unlock();
-
-            ESP_LOGE(
-                TAG,
-                "Invalid RX FIFO address: UA=0x%08lX",
-                (unsigned long)user_address
-            );
-
-            return ESP_ERR_INVALID_RESPONSE;
-        }
-
-        uint8_t object[
-            MCP2518FD_RX_OBJECT_MAX_SIZE
-        ] = {0};
-
-        result =
-            mcp2518fd_read_bytes_unlocked(
-                ram_address,
-                object,
-                object_size
-            );
-
-        if (result == ESP_OK) {
-            /*
-             * Release the object only after it has been copied into
-             * local memory.
-             */
             result =
-                mcp2518fd_increment_rx_fifo_unlocked();
-        }
-
-        if (result == ESP_OK) {
-            result =
-                mcp2518fd_decode_rx_object(
-                    object,
-                    frame
+                mcp2518fd_receive_one_unlocked(
+                    &frames[*received_count]
                 );
-        }
 
-        if (result == ESP_OK) {
-            ++s_info.received_frames;
-        } else {
-            ++s_info.dropped_rx_frames;
+            if (result == ESP_OK) {
+                (*received_count)++;
+                continue;
+            }
+
+            break;
         }
 
         mcp2518fd_unlock();
 
+        /*
+         * Return successfully as soon as at least one frame has been
+         * received. ESP_ERR_TIMEOUT here only means that the hardware
+         * FIFO became empty after the received batch.
+         */
+        if (*received_count > 0U) {
+            return ESP_OK;
+        }
+
+        if (result != ESP_ERR_TIMEOUT) {
+            return result;
+        }
+
+        if (timeout_ms == 0U) {
+            return ESP_ERR_TIMEOUT;
+        }
+
+        const TickType_t elapsed =
+            xTaskGetTickCount() -
+            started_at;
+
+        if (elapsed >= timeout_ticks) {
+            return ESP_ERR_TIMEOUT;
+        }
+
+        const TickType_t remaining =
+            timeout_ticks -
+            elapsed;
+
+        if ((s_rx_ready_semaphore == NULL) ||
+            (xSemaphoreTake(
+                s_rx_ready_semaphore,
+                remaining
+            ) != pdTRUE)) {
+
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+}
+
+esp_err_t can_fd_mcp2518fd_driver_receive(
+    can_fd_mcp2518fd_frame_t *frame,
+    uint32_t timeout_ms
+)
+{
+    if (frame == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t received_count = 0U;
+
+    const esp_err_t result =
+        can_fd_mcp2518fd_driver_receive_batch(
+            frame,
+            1U,
+            &received_count,
+            timeout_ms
+        );
+
+    if (result != ESP_OK) {
         return result;
     }
+
+    return
+        (received_count == 1U)
+            ? ESP_OK
+            : ESP_ERR_INVALID_RESPONSE;
 }
 
 esp_err_t can_fd_mcp2518fd_driver_recover(void)
