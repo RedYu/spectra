@@ -23,6 +23,7 @@ idf_component_register(
         "can_fd_service.c"
         "can_twai_frame_adapter.c"
         "can_mcp2518fd_frame_adapter.c"
+        "web_can_stream_service.c"
 
         "web_api/web_api_common.c"
         "web_api/web_system_api.c"
@@ -30,6 +31,7 @@ idf_component_register(
         "web_api/web_settings_api.c"
         "web_api/web_files_api.c"
         "web_api/web_network_api.c"
+        "web_api/web_can_protocol.c"
 
     INCLUDE_DIRS
         "include"

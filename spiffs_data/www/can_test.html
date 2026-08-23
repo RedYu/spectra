@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <title>CAN WebSocket Test</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            color: #e5e7eb;
+            background: #0b0f14;
+            font-family: monospace;
+        }
+
+        button {
+            margin-right: 8px;
+            padding: 8px 14px;
+        }
+
+        #status {
+            margin: 16px 0;
+        }
+
+        #log {
+            height: 70vh;
+            overflow: auto;
+            padding: 12px;
+            white-space: pre;
+            background: #111821;
+            border: 1px solid #374151;
+        }
+
+        .page-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 24px;
+            margin-bottom: 16px;
+        }
+
+        .page-title {
+            margin: 0 0 16px;
+        }
+
+        .statistics-panel {
+            min-width: 280px;
+            padding: 14px 16px;
+            background: #111821;
+            border: 1px solid #374151;
+            border-radius: 10px;
+        }
+
+        .statistics-title {
+            margin: 0 0 10px;
+            color: #f9fafb;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .statistics-grid {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 6px 16px;
+            font-size: 13px;
+        }
+
+        .statistics-label {
+            color: #9ca3af;
+        }
+
+        .statistics-value {
+            color: #e5e7eb;
+            text-align: right;
+        }
+
+        .statistics-value.warning {
+            color: #f59e0b;
+        }
+
+        .statistics-value.error {
+            color: #f05252;
+        }
+
+        @media (max-width: 720px) {
+            .page-header {
+                flex-direction: column;
+            }
+
+            .statistics-panel {
+                box-sizing: border-box;
+                width: 100%;
+                min-width: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">
+                CAN WebSocket Test
+            </h1>
+
+            <button id="connect">Connect</button>
+            <button id="disconnect">Disconnect</button>
+            <button id="clear">Clear</button>
+        </div>
+
+        <section class="statistics-panel">
+            <h2 class="statistics-title">
+                Stream statistics
+            </h2>
+
+            <div class="statistics-grid">
+                <span class="statistics-label">Queued events</span>
+                <span
+                    id="statistics-queued"
+                    class="statistics-value"
+                >0</span>
+
+                <span class="statistics-label">Sent events</span>
+                <span
+                    id="statistics-sent"
+                    class="statistics-value"
+                >0</span>
+
+                <span class="statistics-label">Dropped events</span>
+                <span
+                    id="statistics-dropped"
+                    class="statistics-value"
+                >0</span>
+
+                <span class="statistics-label">Send failures</span>
+                <span
+                    id="statistics-failures"
+                    class="statistics-value"
+                >0</span>
+
+                <span class="statistics-label">Queue</span>
+                <span
+                    id="statistics-queue"
+                    class="statistics-value"
+                >0 / 64</span>
+
+                <span class="statistics-label">Queue peak</span>
+                <span
+                    id="statistics-queue-peak"
+                    class="statistics-value"
+                >0</span>
+
+                <span class="statistics-label">Received batches</span>
+                <span
+                    id="statistics-batches"
+                    class="statistics-value"
+                >0</span>
+
+                <span class="statistics-label">Received events</span>
+                <span
+                    id="statistics-events"
+                    class="statistics-value"
+                >0</span>
+            </div>
+        </section>
+    </div>
+
+    <div id="status">Disconnected</div>
+    <div id="log"></div>
+
+    <script>
+        const BATCH_HEADER_SIZE = 8;
+        const EVENT_HEADER_SIZE = 40;
+
+        let socket = null;
+        let lastSequence = null;
+
+        let receivedBatches = 0;
+        let receivedEvents = 0;
+
+        const statisticsElements = {
+            queued:
+                document.getElementById("statistics-queued"),
+
+            sent:
+                document.getElementById("statistics-sent"),
+
+            dropped:
+                document.getElementById("statistics-dropped"),
+
+            failures:
+                document.getElementById("statistics-failures"),
+
+            queue:
+                document.getElementById("statistics-queue"),
+
+            queuePeak:
+                document.getElementById("statistics-queue-peak"),
+
+            batches:
+                document.getElementById("statistics-batches"),
+
+            events:
+                document.getElementById("statistics-events")
+        };
+
+        function updateStreamStatistics(statistics) {
+            statisticsElements.queued.textContent =
+                statistics.queued_events ?? 0;
+
+            statisticsElements.sent.textContent =
+                statistics.sent_events ?? 0;
+
+            statisticsElements.dropped.textContent =
+                statistics.dropped_events ?? 0;
+
+            statisticsElements.failures.textContent =
+                statistics.send_failures ?? 0;
+
+            statisticsElements.queue.textContent =
+                `${statistics.queue_current ?? 0} / ` +
+                `${statistics.queue_capacity ?? 0}`;
+
+            statisticsElements.queuePeak.textContent =
+                statistics.queue_peak ?? 0;
+
+            statisticsElements.dropped.classList.toggle(
+                "warning",
+                Number(statistics.dropped_events) > 0
+            );
+
+            statisticsElements.failures.classList.toggle(
+                "error",
+                Number(statistics.send_failures) > 0
+            );
+        }
+
+        const status =
+            document.getElementById("status");
+
+        const log =
+            document.getElementById("log");
+
+        const LOG_LINE_LIMIT = 1000;
+
+        const logLines = [];
+
+        function appendLog(message) {
+            logLines.push(
+                message
+            );
+
+            if (logLines.length >
+                LOG_LINE_LIMIT) {
+
+                logLines.splice(
+                    0,
+                    logLines.length -
+                        LOG_LINE_LIMIT
+                );
+            }
+
+            log.textContent =
+                `${logLines.join("\n")}\n`;
+
+            log.scrollTop =
+                log.scrollHeight;
+        }
+
+        function eventName(value) {
+            return [
+                "RX",
+                "TX_QUEUED",
+                "TX_COMPLETED",
+                "TX_FAILED",
+                "TX_ABORTED"
+            ][value] ?? `UNKNOWN(${value})`;
+        }
+
+        function busName(value) {
+            return value === 0
+                ? "Primary"
+                : value === 1
+                    ? "Secondary"
+                    : `Bus(${value})`;
+        }
+
+        function timestampSourceName(value) {
+            return [
+                "none",
+                "software",
+                "hardware"
+            ][value] ?? `unknown(${value})`;
+        }
+
+        function hex(value, width) {
+            return value
+                .toString(16)
+                .toUpperCase()
+                .padStart(width, "0");
+        }
+
+        function parseEvent(view, offset) {
+            if ((offset + EVENT_HEADER_SIZE) >
+                view.byteLength) {
+
+                throw new Error("Truncated event header");
+            }
+
+            const type =
+                view.getUint8(offset + 0);
+
+            const bus =
+                view.getUint8(offset + 1);
+
+            const direction =
+                view.getUint8(offset + 2);
+
+            const flags =
+                view.getUint8(offset + 3);
+
+            const dlc =
+                view.getUint8(offset + 4);
+
+            const dataLength =
+                view.getUint8(offset + 5);
+
+            const timestampSource =
+                view.getUint8(offset + 6);
+
+            const eventSequence =
+                view.getUint32(
+                    offset + 8,
+                    true
+                );
+
+            const transactionId =
+                view.getUint32(
+                    offset + 12,
+                    true
+                );
+
+            const nativeSequence =
+                view.getUint32(
+                    offset + 16,
+                    true
+                );
+
+            const identifier =
+                view.getUint32(
+                    offset + 20,
+                    true
+                );
+
+            const result =
+                view.getInt32(
+                    offset + 24,
+                    true
+                );
+
+            const timestampUs =
+                view.getBigUint64(
+                    offset + 28,
+                    true
+                );
+
+            if (dataLength > 64) {
+                throw new Error(
+                    `Invalid payload length ${dataLength}`
+                );
+            }
+
+            const eventSize =
+                EVENT_HEADER_SIZE +
+                dataLength;
+
+            if ((offset + eventSize) >
+                view.byteLength) {
+
+                throw new Error("Truncated event payload");
+            }
+
+            const data =
+                new Uint8Array(
+                    view.buffer,
+                    view.byteOffset +
+                        offset +
+                        EVENT_HEADER_SIZE,
+                    dataLength
+                );
+
+            const dataText =
+                Array.from(data)
+                    .map(byte => hex(byte, 2))
+                    .join(" ");
+
+            if (lastSequence !== null) {
+                const expected =
+                    (lastSequence + 1) >>> 0;
+
+                if (eventSequence !== expected) {
+                    appendLog(
+                        `WARNING: sequence gap, expected ` +
+                        `${expected}, received ${eventSequence}`
+                    );
+                }
+            }
+
+            lastSequence =
+                eventSequence;
+
+            const extended =
+                (flags & (1 << 0)) !== 0;
+
+            const remote =
+                (flags & (1 << 1)) !== 0;
+
+            const fd =
+                (flags & (1 << 2)) !== 0;
+
+            const brs =
+                (flags & (1 << 3)) !== 0;
+
+            const esi =
+                (flags & (1 << 4)) !== 0;
+
+            appendLog(
+                `${eventSequence} ` +
+                `${eventName(type)} ` +
+                `${busName(bus)} ` +
+                `${direction === 0 ? "RX" : "TX"} ` +
+                `ID=${hex(identifier, extended ? 8 : 3)} ` +
+                `DLC=${dlc} LEN=${dataLength} ` +
+                `FD=${fd} BRS=${brs} RTR=${remote} ESI=${esi} ` +
+                `TXID=${transactionId} NATIVE=${nativeSequence} ` +
+                `RESULT=${result} ` +
+                `TS=${timestampUs}(${timestampSourceName(timestampSource)}) ` +
+                `[${dataText}]`
+            );
+
+            return eventSize;
+        }
+
+        function parseBatch(buffer) {
+            const view =
+                new DataView(buffer);
+
+            if (view.byteLength <
+                BATCH_HEADER_SIZE) {
+
+                throw new Error("Truncated batch header");
+            }
+
+            const version =
+                view.getUint8(0);
+
+            const messageType =
+                view.getUint8(1);
+
+            const eventCount =
+                view.getUint16(
+                    2,
+                    true
+                );
+
+            const payloadSize =
+                view.getUint32(
+                    4,
+                    true
+                );
+
+            if (version !== 1) {
+                throw new Error(
+                    `Unsupported protocol version ${version}`
+                );
+            }
+
+            if (messageType !== 1) {
+                throw new Error(
+                    `Unsupported binary message type ${messageType}`
+                );
+            }
+
+            if ((BATCH_HEADER_SIZE + payloadSize) !==
+                view.byteLength) {
+
+                throw new Error(
+                    "Batch payload size mismatch"
+                );
+            }
+
+            let offset =
+                BATCH_HEADER_SIZE;
+
+            for (let index = 0;
+                 index < eventCount;
+                 ++index) {
+
+                offset +=
+                    parseEvent(
+                        view,
+                        offset
+                    );
+            }
+
+            if (offset !== view.byteLength) {
+                throw new Error(
+                    "Unexpected trailing batch data"
+                );
+            }
+
+            receivedBatches += 1;
+            receivedEvents += eventCount;
+
+            statisticsElements.batches.textContent =
+                receivedBatches;
+
+            statisticsElements.events.textContent =
+                receivedEvents;
+        }
+
+        function connect() {
+            if (socket !== null) {
+                return;
+            }
+
+            const scheme =
+                location.protocol === "https:"
+                    ? "wss:"
+                    : "ws:";
+
+            socket =
+                new WebSocket(
+                    `${scheme}//${location.host}/ws/can`
+                );
+
+            socket.binaryType =
+                "arraybuffer";
+
+            socket.onopen =
+                () => {
+                    status.textContent =
+                        "Connected";
+
+                    appendLog(
+                        "WebSocket connected"
+                    );
+
+                    /*
+                     * Activate server-side CAN streaming and verify the
+                     * bidirectional WebSocket connection.
+                     */
+                    socket.send(
+                        "ping"
+                    );
+                };
+
+            socket.onmessage =
+                event => {
+                    try {
+                        if (typeof event.data === "string") {
+                            const message =
+                                JSON.parse(
+                                    event.data
+                                );
+
+                            if (message.type ===
+                                "stream_statistics") {
+
+                                updateStreamStatistics(
+                                    message
+                                );
+
+                            } else {
+                                appendLog(
+                                    `JSON: ${event.data}`
+                                );
+                            }
+
+                            return;
+                        }
+
+                        parseBatch(
+                            event.data
+                        );
+
+                    } catch (error) {
+                        appendLog(
+                            `PARSE ERROR: ${error.message}`
+                        );
+                    }
+                };
+
+            socket.onerror =
+                () => {
+                    appendLog(
+                        "WebSocket error"
+                    );
+                };
+
+            socket.onclose =
+                event => {
+                    status.textContent =
+                        `Disconnected (${event.code})`;
+
+                    appendLog(
+                        `WebSocket closed: ${event.code}`
+                    );
+
+                    socket = null;
+                    lastSequence = null;
+                };
+        }
+
+        function disconnect() {
+            if (socket !== null) {
+                socket.close(
+                    1000,
+                    "Test completed"
+                );
+            }
+        }
+
+        document
+            .getElementById("connect")
+            .addEventListener(
+                "click",
+                connect
+            );
+
+        document
+            .getElementById("disconnect")
+            .addEventListener(
+                "click",
+                disconnect
+            );
+
+        document
+            .getElementById("clear")
+            .addEventListener(
+                "click",
+                () => {
+                    logLines.length = 0;
+                    log.textContent = "";
+
+                    lastSequence = null;
+                    receivedBatches = 0;
+                    receivedEvents = 0;
+
+                    statisticsElements.batches.textContent =
+                        "0";
+
+                    statisticsElements.events.textContent =
+                        "0";
+                }
+            );
+    </script>
+</body>
+</html>

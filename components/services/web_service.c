@@ -11,6 +11,7 @@
 #include "web_settings_api.h"
 #include "web_files_api.h"
 #include "web_network_api.h"
+#include "web_can_stream_service.h"
 
 #define WEB_SERVICE_MAX_URI_HANDLERS  (32U)
 
@@ -31,7 +32,7 @@ esp_err_t web_service_start(void)
     config.ctrl_port = 32768U;
     config.max_uri_handlers = WEB_SERVICE_MAX_URI_HANDLERS;
     config.stack_size = 6144U;
-    config.max_open_sockets = 3U;
+    config.max_open_sockets = 4U;
     config.backlog_conn = 2U;
     config.lru_purge_enable = true;
     config.send_wait_timeout = 15U;
@@ -131,6 +132,32 @@ esp_err_t web_service_start(void)
         goto registration_failed;
     }
 
+    const web_can_stream_service_config_t
+        can_stream_config = {
+
+            .queue_depth =
+                64U,
+
+            .statistics_interval_ms =
+                1000U,
+        };
+
+    result =
+        web_can_stream_service_start(
+            s_server,
+            &can_stream_config
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to start CAN WebSocket stream: %s",
+            esp_err_to_name(result)
+        );
+
+        goto registration_failed;
+    }
+
     ESP_LOGI(
         TAG,
         "Web server started at http://spectra.device"
@@ -141,13 +168,43 @@ esp_err_t web_service_start(void)
 registration_failed:
     ESP_LOGE(
         TAG,
-        "Failed to register HTTP handler: %s",
+        "Failed to initialize web service: %s",
         esp_err_to_name(result)
     );
 
-    (void)httpd_stop(
-        s_server
-    );
+    if (web_can_stream_service_is_running()) {
+        const esp_err_t stream_result =
+            web_can_stream_service_stop();
+
+        if (stream_result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to roll back CAN WebSocket stream: %s",
+                esp_err_to_name(stream_result)
+            );
+
+            /*
+             * The stream task may still use s_server. Preserve the
+             * server and allow web_service_stop() to retry cleanup.
+             */
+            return stream_result;
+        }
+    }
+
+    const esp_err_t stop_result =
+        httpd_stop(
+            s_server
+        );
+
+    if (stop_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to roll back HTTP server: %s",
+            esp_err_to_name(stop_result)
+        );
+
+        return stop_result;
+    }
 
     s_server = NULL;
 
@@ -158,6 +215,25 @@ esp_err_t web_service_stop(void)
 {
     if (s_server == NULL) {
         return ESP_ERR_INVALID_STATE;
+    }
+
+    if (web_can_stream_service_is_running()) {
+        const esp_err_t stream_result =
+            web_can_stream_service_stop();
+
+        if (stream_result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to stop CAN WebSocket stream: %s",
+                esp_err_to_name(stream_result)
+            );
+
+            /*
+             * The stream task may still be using the HTTP server.
+             * Do not destroy the server until stream shutdown succeeds.
+             */
+            return stream_result;
+        }
     }
 
     const esp_err_t result =

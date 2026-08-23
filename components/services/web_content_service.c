@@ -274,6 +274,17 @@ static esp_err_t web_content_files_page_handler(
     );
 }
 
+static esp_err_t web_content_can_test_page_handler(
+    httpd_req_t *request
+)
+{
+    return web_content_send_storage_file(
+        request,
+        "/storage/www/can_test.html",
+        "text/html; charset=utf-8"
+    );
+}
+
 static esp_err_t web_content_files_script_handler(
     httpd_req_t *request
 )
@@ -334,6 +345,20 @@ esp_err_t web_content_service_register(
         .handler =
             web_content_files_page_handler,
         .user_ctx = NULL,
+    };
+
+    static const httpd_uri_t can_test_page_uri = {
+        .uri =
+            "/can_test",
+
+        .method =
+            HTTP_GET,
+
+        .handler =
+            web_content_can_test_page_handler,
+
+        .user_ctx =
+            NULL,
     };
 
     static const httpd_uri_t files_script_uri = {
@@ -420,7 +445,27 @@ esp_err_t web_content_service_register(
             "Failed to register GET /files.js: %s",
             esp_err_to_name(result)
         );
+
+        return result;
     }
+
+    result =
+        httpd_register_uri_handler(
+            server,
+            &can_test_page_uri
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to register GET /can_test: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    return ESP_OK;
 
     return result;
 }
