@@ -32,6 +32,8 @@
 
 #define CAN_FD_SERVICE_RX_BATCH_SIZE         (8U)
 
+#define CAN_FD_SERVICE_RX_DRAIN_LIMIT        (64U)
+
 static const char *TAG =
     "can_fd_service";
 
@@ -401,17 +403,66 @@ static void can_fd_service_task(
                &s_stop_requested
            )) {
 
-        size_t received_count = 0U;
+        size_t processed_count = 0U;
+        uint32_t receive_timeout_ms =
+            CAN_FD_SERVICE_RECEIVE_TIMEOUT_MS;
 
-        const esp_err_t receive_result =
-            can_fd_mcp2518fd_driver_receive_batch(
-                frames,
-                CAN_FD_SERVICE_RX_BATCH_SIZE,
-                &received_count,
-                CAN_FD_SERVICE_RECEIVE_TIMEOUT_MS
-            );
+        while (!atomic_load(
+                   &s_stop_requested
+               ) &&
+               (processed_count <
+                CAN_FD_SERVICE_RX_DRAIN_LIMIT)) {
 
-        if (receive_result == ESP_OK) {
+            size_t received_count = 0U;
+
+            const esp_err_t receive_result =
+                can_fd_mcp2518fd_driver_receive_batch(
+                    frames,
+                    CAN_FD_SERVICE_RX_BATCH_SIZE,
+                    &received_count,
+                    receive_timeout_ms
+                );
+
+            /*
+             * Only the first receive in this processing pass waits for
+             * an interrupt. Further receives drain an already active
+             * FIFO without blocking.
+             */
+            receive_timeout_ms = 0U;
+
+            if (receive_result == ESP_ERR_TIMEOUT) {
+                break;
+            }
+
+            if (receive_result != ESP_OK) {
+                if (!atomic_load(
+                        &s_stop_requested
+                    )) {
+
+                    (void)atomic_fetch_add_explicit(
+                        &s_receive_errors,
+                        1U,
+                        memory_order_relaxed
+                    );
+
+                    ESP_LOGW(
+                        TAG,
+                        "Failed to receive CAN FD batch: %s",
+                        esp_err_to_name(
+                            receive_result
+                        )
+                    );
+
+                    vTaskDelay(
+                        pdMS_TO_TICKS(
+                            CAN_FD_SERVICE_ERROR_DELAY_MS
+                        )
+                    );
+                }
+
+                break;
+            }
+
             for (size_t index = 0U;
                  index < received_count;
                  ++index) {
@@ -427,38 +478,20 @@ static void can_fd_service_task(
                     &frames[index]
                 );
             }
-        } else if (receive_result !=
-                   ESP_ERR_TIMEOUT) {
 
-            if (!atomic_load(
-                    &s_stop_requested
-                )) {
+            processed_count +=
+                received_count;
 
-                (void)atomic_fetch_add_explicit(
-                    &s_receive_errors,
-                    1U,
-                    memory_order_relaxed
-                );
-
-                ESP_LOGW(
-                    TAG,
-                    "Failed to receive CAN FD batch: %s",
-                    esp_err_to_name(
-                        receive_result
-                    )
-                );
-
-                vTaskDelay(
-                    pdMS_TO_TICKS(
-                        CAN_FD_SERVICE_ERROR_DELAY_MS
-                    )
-                );
-            }
+            /*
+             * Do not starve transmission confirmations during
+             * continuous RX traffic.
+             */
+            can_fd_service_drain_tx_events();
         }
 
         /*
-         * Process transmission confirmations after every RX batch.
-         * This prevents continuous RX traffic from starving TEF.
+         * This is also required when the wake-up was caused only by a
+         * TX event or when no RX frame arrived during the timeout.
          */
         can_fd_service_drain_tx_events();
     }
