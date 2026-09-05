@@ -6,7 +6,7 @@
 ![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v6.0.2%20%2B%20VFS%20fix-E7352C?logo=espressif)
 ![LVGL](https://img.shields.io/badge/LVGL-v9-00AEEF)
 ![Platform](https://img.shields.io/badge/Platform-ESP32--S3-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)
 
 **Modern Automotive CAN Analyzer**  
 A modular ESP32-S3 diagnostic platform built with ESP-IDF, FreeRTOS, and LVGL 9.
@@ -427,4 +427,6 @@ idf.py fullclean
 
 ## License
 
-This project is licensed under the MIT License. See the [`LICENSE`](LICENSE) file for details.
+Spectra is licensed under the GNU General Public License v3.0 only.
+
+See [LICENSE](LICENSE) for the complete license terms.
