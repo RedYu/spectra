@@ -300,7 +300,9 @@ Detailed request and response documentation is available in
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/api/system` | Read system, CPU, memory, storage, and reset information |
+| `POST` | `/api/system/restart` | Request a graceful device restart |
 | `GET` | `/api/network` | Read Wi-Fi, USB RNDIS, DNS, and mDNS information |
+| `POST` | `/api/network/wifi/scan` | Start a Wi-Fi network scan |
 | `GET` | `/api/power` | Read PMIC and battery information |
 | `GET` | `/api/settings` | Read current settings |
 | `PUT` | `/api/settings` | Apply device and CAN settings |

@@ -52,8 +52,10 @@ Clients should primarily use the HTTP status for control flow and treat
 | Method | Endpoint | Purpose |
 |---|---|---|
 | `GET` | `/api/system` | System identity, runtime, memory, storage, and reset state |
+| `POST` | `/api/system/restart` | Schedule a graceful restart |
 | `GET` | `/api/power` | PMIC, charger, rail, interrupt, and battery state |
 | `GET` | `/api/network` | Wi-Fi, USB RNDIS, DNS, and mDNS state |
+| `POST` | `/api/network/wifi/scan` | Start an asynchronous Wi-Fi scan |
 | `GET` | `/api/settings` | Read the active configuration |
 | `PUT` | `/api/settings` | Validate and apply configuration |
 | `POST` | `/api/settings/save` | Persist the active configuration |
@@ -82,7 +84,7 @@ Response members:
 | `hardware_version` | string | Hardware revision |
 | `firmware_version` | string | Running firmware version |
 | `chip_model` | string | ESP chip model |
-| `chip_revision` | string | Chip revision |
+| `chip_revision` | number | Chip revision |
 | `chip_cores` | number | Number of CPU cores |
 | `cpu_frequency_mhz` | number | Configured CPU frequency |
 | `cpu_usage` | number | Measured CPU usage |
@@ -109,6 +111,37 @@ Response members:
 
 Temperature and SD-card capacity fields must be used only when their matching
 validity flag is true.
+
+### `POST /api/system/restart`
+
+Schedules a graceful restart after a 500 ms delay. The delay allows the HTTP
+response to be transmitted before shutdown processing begins.
+
+```bash
+curl -X POST http://spectra.device/api/system/restart
+```
+
+No request body is required. A newly accepted request returns `202 Accepted`:
+
+```json
+{
+  "success": true,
+  "message": "Graceful restart scheduled"
+}
+```
+
+If a restart is already scheduled, the endpoint returns `409 Conflict`:
+
+```json
+{
+  "success": false,
+  "message": "Restart is already scheduled"
+}
+```
+
+The system service performs the restart asynchronously. Persistent settings
+must be saved before calling this endpoint if the client expects unsaved
+runtime changes to survive the restart.
 
 ## Power API
 
@@ -155,7 +188,8 @@ Top-level sections include:
 |---|---|
 | `wifi` | Wi-Fi initialization and operating mode |
 | `wifi.softap` | SoftAP enable state, SSID, channel, address, and clients |
-| `wifi.station` | STA enable/connection state, SSID, RSSI, BSSID, and IPv4 configuration |
+| `wifi.station` | STA enable/connection state, SSID, RSSI, and IPv4 configuration |
+| `wifi.scan` | Asynchronous scan state and discovered networks |
 | `usb_rndis` | USB network state and IPv4 configuration |
 | `dns` | Local DNS service state and name |
 | `mdns` | mDNS state, hostname, service, and instance name |
@@ -164,11 +198,57 @@ Frequently used fields include `initialized`, `started`, `enabled`,
 `connected`, `host_connected`, `mode`, `ssid`, `channel`, `rssi`,
 `mac_address`, `ip_address`, `netmask`, `gateway`, and `client_count`.
 
-The SoftAP `clients` array contains connected-station information where
-available. IPv4 address pools are represented using `start` and `end` members.
+The SoftAP `clients` array contains `mac_address`, `rssi`, and `ip_address` for
+each known client. IPv4 address pools are represented using `start` and `end`.
 
-This endpoint reports state only. The currently registered backend API does not
-define a separate `/api/network/wifi/scan` route.
+The `wifi.scan` object has this shape:
+
+```json
+{
+  "state": "complete",
+  "result_count": 2,
+  "truncated": false,
+  "last_error": 0,
+  "last_error_name": "ESP_OK",
+  "networks": [
+    {
+      "ssid": "Example",
+      "bssid": "00:11:22:33:44:55",
+      "rssi": -48,
+      "channel": 6,
+      "password_required": true
+    }
+  ]
+}
+```
+
+`state` is `idle`, `running`, `complete`, `error`, or `unknown`. The `networks`
+array is populated only when the state is `complete`. `result_count` reports
+the scan result count; `truncated` indicates that not every discovered network
+fit in the service result buffer.
+
+### `POST /api/network/wifi/scan`
+
+Starts an asynchronous Wi-Fi scan. Scanning is not performed inside the HTTP
+handler, so the initial response does not contain results.
+
+```bash
+curl -X POST http://spectra.device/api/network/wifi/scan
+```
+
+A successfully started scan returns `202 Accepted`:
+
+```json
+{
+  "success": true,
+  "message": "Wi-Fi scan started"
+}
+```
+
+Poll `GET /api/network` and inspect `wifi.scan.state` until it becomes
+`complete` or `error`. Starting another scan while one is running returns
+`409 Conflict`. If the Wi-Fi scan service is unavailable or cannot start, the
+endpoint returns `503 Service Unavailable`.
 
 ## Settings API
 
