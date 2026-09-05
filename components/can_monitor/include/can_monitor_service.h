@@ -100,6 +100,17 @@ typedef struct
 } can_monitor_service_statistics_t;
 
 /**
+ * @brief Direction of the latest CAN traffic event.
+ */
+typedef enum
+{
+    CAN_MONITOR_DIRECTION_NONE = 0,
+    CAN_MONITOR_DIRECTION_RX,
+    CAN_MONITOR_DIRECTION_TX,
+
+} can_monitor_direction_t;
+
+/**
  * @brief Statistics for one observed CAN identifier.
  *
  * Standard and extended identifiers with the same numeric value are
@@ -121,6 +132,19 @@ typedef struct
 
     uint64_t first_seen_timestamp_us;
     uint64_t last_seen_timestamp_us;
+
+    /**
+     * Direction of the latest frame observed for this identifier.
+     */
+    can_monitor_direction_t last_direction;
+
+    /**
+     * Local monotonic time when the latest event was processed.
+     *
+     * Unlike the frame timestamp, this value always uses the ESP timer
+     * time base and can therefore be used to calculate event age.
+     */
+    uint64_t last_activity_timestamp_us;
 
     /**
      * Last RX or TX frame observed for this identifier.

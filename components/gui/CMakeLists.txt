@@ -33,5 +33,6 @@ idf_component_register(
         services
         drivers
         can_monitor
+        esp_timer
 )
 

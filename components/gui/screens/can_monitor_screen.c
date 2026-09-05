@@ -9,6 +9,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 
 #include "can_frame.h"
 #include "can_monitor_service.h"
@@ -108,6 +109,23 @@ static void can_monitor_screen_back_action(void)
     }
 }
 
+static const char *can_monitor_screen_direction_name(
+    can_monitor_direction_t direction
+)
+{
+    switch (direction) {
+        case CAN_MONITOR_DIRECTION_RX:
+            return "RX";
+
+        case CAN_MONITOR_DIRECTION_TX:
+            return "TX";
+
+        case CAN_MONITOR_DIRECTION_NONE:
+        default:
+            return "None";
+    }
+}
+
 static const char *can_monitor_screen_timestamp_name(
     can_timestamp_source_t source
 )
@@ -170,32 +188,61 @@ static void can_monitor_screen_format_details(
     const can_frame_t *frame =
         &identifier->last_frame;
 
+    const uint64_t now_us =
+        (uint64_t)esp_timer_get_time();
+
+    uint64_t age_ms = 0U;
+
+    if ((identifier->last_activity_timestamp_us != 0U) &&
+        (now_us >= identifier->last_activity_timestamp_us)) {
+
+        age_ms =
+            (now_us -
+             identifier->last_activity_timestamp_us) /
+            1000U;
+    }
+
     const int written =
         snprintf(
             text,
             text_size,
             "Channel: %s\n"
+            "Direction: %s\n"
             "Format: %s\n"
             "Type: %s\n"
             "DLC: %u   Length: %u bytes\n"
             "RX: %llu   TX: %llu\n"
+            "Last seen: %llu ms ago\n"
             "Timestamp: %llu us (%s)\n"
             "Data:",
             identifier->bus == CAN_BUS_PRIMARY
                 ? "Primary"
                 : "Secondary",
+
+            can_monitor_screen_direction_name(
+                identifier->last_direction
+            ),
+
             identifier->extended
                 ? "Extended 29-bit"
                 : "Standard 11-bit",
+
             can_monitor_screen_frame_type(frame),
+
             (unsigned int)frame->dlc,
             (unsigned int)frame->data_length,
+
             (unsigned long long)
                 identifier->received_frames,
+
             (unsigned long long)
                 identifier->transmitted_frames,
+
+            (unsigned long long)age_ms,
+
             (unsigned long long)
                 frame->timestamp_us,
+
             can_monitor_screen_timestamp_name(
                 frame->timestamp_source
             )

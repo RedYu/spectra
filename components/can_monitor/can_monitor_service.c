@@ -7,6 +7,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -312,12 +313,21 @@ static void can_monitor_update_identifier(
 
         slot->info.received_bytes +=
             event->frame.data_length;
-    } else {
+
+        slot->info.last_direction =
+            CAN_MONITOR_DIRECTION_RX;
+    } else if (event->type == CAN_EVENT_TX_COMPLETED) {
         ++slot->info.transmitted_frames;
 
         slot->info.transmitted_bytes +=
             event->frame.data_length;
+
+        slot->info.last_direction =
+            CAN_MONITOR_DIRECTION_TX;
     }
+
+    slot->info.last_activity_timestamp_us =
+        (uint64_t)esp_timer_get_time();
 
     slot->info.last_frame =
         event->frame;

@@ -12,4 +12,5 @@ idf_component_register(
     PRIV_REQUIRES
         app_task_config
         freertos
+        esp_timer
 )
