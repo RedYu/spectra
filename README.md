@@ -123,6 +123,9 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 
 ## Architecture
 
+The detailed firmware architecture is documented in
+[docs/architecture.md](docs/architecture.md).
+
 ```text
 CAN bus                     CAN FD bus
    |                            |
