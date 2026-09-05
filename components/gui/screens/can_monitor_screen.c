@@ -21,6 +21,7 @@
 #include "gui_theme.h"
 #include "screen_manager.h"
 #include "widgets/toolbar.h"
+#include "widgets/modal_dialog.h"
 
 #define CAN_MONITOR_TOOLBAR_HEIGHT \
     GUI_THEME_TOOLBAR_HEIGHT
@@ -31,6 +32,8 @@
 #define CAN_MONITOR_PAYLOAD_TEXT_SIZE      (32U)
 
 #define CAN_MONITOR_IDENTIFIER_SNAPSHOT_CAPACITY (16U)
+
+#define CAN_MONITOR_DETAILS_TEXT_SIZE (512U)
 
 typedef enum
 {
@@ -61,13 +64,25 @@ typedef struct
 
     can_monitor_identifier_info_t *identifiers;
 
+    size_t row_identifier_index[
+        CAN_MONITOR_IDENTIFIER_SNAPSHOT_CAPACITY
+    ];
+
+    size_t displayed_identifier_count;
+
 } can_monitor_screen_context_t;
 
 static const char *TAG = "can_monitor_screen";
 
 static can_monitor_screen_context_t s_context = {0};
 
+static modal_dialog_t s_frame_dialog = {0};
+
 static void can_monitor_screen_update(void);
+
+static const char *can_monitor_screen_bus_name(
+    can_bus_id_t bus
+);
 
 static void can_monitor_screen_back_action(void)
 {
@@ -91,6 +106,335 @@ static void can_monitor_screen_back_action(void)
             esp_err_to_name(result)
         );
     }
+}
+
+static const char *can_monitor_screen_timestamp_name(
+    can_timestamp_source_t source
+)
+{
+    switch (source) {
+        case CAN_TIMESTAMP_SOURCE_SOFTWARE:
+            return "Software";
+
+        case CAN_TIMESTAMP_SOURCE_HARDWARE:
+            return "Hardware";
+
+        case CAN_TIMESTAMP_SOURCE_NONE:
+        default:
+            return "None";
+    }
+}
+
+static const char *can_monitor_screen_frame_type(
+    const can_frame_t *frame
+)
+{
+    if (frame == NULL) {
+        return "Unknown";
+    }
+
+    if ((frame->flags &
+         CAN_FRAME_FLAG_REMOTE) != 0U) {
+
+        return "Classical RTR";
+    }
+
+    if ((frame->flags &
+         CAN_FRAME_FLAG_FD) == 0U) {
+
+        return "Classical";
+    }
+
+    if ((frame->flags &
+         CAN_FRAME_FLAG_BRS) != 0U) {
+
+        return "CAN FD + BRS";
+    }
+
+    return "CAN FD";
+}
+
+static void can_monitor_screen_format_details(
+    const can_monitor_identifier_info_t *identifier,
+    char *text,
+    size_t text_size
+)
+{
+    if ((identifier == NULL) ||
+        (text == NULL) ||
+        (text_size == 0U)) {
+
+        return;
+    }
+
+    const can_frame_t *frame =
+        &identifier->last_frame;
+
+    const int written =
+        snprintf(
+            text,
+            text_size,
+            "Channel: %s\n"
+            "Format: %s\n"
+            "Type: %s\n"
+            "DLC: %u   Length: %u bytes\n"
+            "RX: %llu   TX: %llu\n"
+            "Timestamp: %llu us (%s)\n"
+            "Data:",
+            identifier->bus == CAN_BUS_PRIMARY
+                ? "Primary"
+                : "Secondary",
+            identifier->extended
+                ? "Extended 29-bit"
+                : "Standard 11-bit",
+            can_monitor_screen_frame_type(frame),
+            (unsigned int)frame->dlc,
+            (unsigned int)frame->data_length,
+            (unsigned long long)
+                identifier->received_frames,
+            (unsigned long long)
+                identifier->transmitted_frames,
+            (unsigned long long)
+                frame->timestamp_us,
+            can_monitor_screen_timestamp_name(
+                frame->timestamp_source
+            )
+        );
+
+    if (written < 0) {
+        text[0] = '\0';
+        return;
+    }
+
+    size_t offset =
+        (size_t)written < text_size
+            ? (size_t)written
+            : text_size - 1U;
+
+    if ((frame->flags &
+         CAN_FRAME_FLAG_REMOTE) != 0U) {
+
+        (void)snprintf(
+            &text[offset],
+            text_size - offset,
+            " RTR"
+        );
+
+        return;
+    }
+
+    if (frame->data_length == 0U) {
+        (void)snprintf(
+            &text[offset],
+            text_size - offset,
+            " empty"
+        );
+
+        return;
+    }
+
+    for (size_t index = 0U;
+         index < frame->data_length;
+         index++) {
+
+        const char *format =
+            (index % 16U) == 0U
+                ? "\n%02X"
+                : " %02X";
+
+        const int data_written =
+            snprintf(
+                &text[offset],
+                text_size - offset,
+                format,
+                frame->data[index]
+            );
+
+        if ((data_written < 0) ||
+            ((size_t)data_written >=
+             (text_size - offset))) {
+
+            text[text_size - 1U] = '\0';
+            return;
+        }
+
+        offset +=
+            (size_t)data_written;
+    }
+}
+
+static void can_monitor_screen_table_event_cb(
+    lv_event_t *event
+)
+{
+    if (lv_event_get_code(event) !=
+        LV_EVENT_VALUE_CHANGED) {
+
+        return;
+    }
+
+    uint32_t row = 0U;
+    uint32_t column = 0U;
+
+    lv_table_get_selected_cell(
+        s_context.table,
+        &row,
+        &column
+    );
+
+    (void)column;
+
+    /*
+     * Row zero contains table headers.
+     */
+    if (row == 0U) {
+        return;
+    }
+
+    const size_t displayed_index =
+        (size_t)(row - 1U);
+
+    if (displayed_index >=
+        s_context.displayed_identifier_count) {
+
+        return;
+    }
+
+    const size_t identifier_index =
+        s_context.row_identifier_index[
+            displayed_index
+        ];
+
+    if (identifier_index >=
+        CAN_MONITOR_IDENTIFIER_SNAPSHOT_CAPACITY) {
+
+        return;
+    }
+
+    const can_monitor_identifier_info_t *identifier =
+        &s_context.identifiers[
+            identifier_index
+        ];
+
+    char title[32] = {0};
+
+    if (identifier->extended) {
+        (void)snprintf(
+            title,
+            sizeof(title),
+            "%s  %08lX",
+            can_monitor_screen_bus_name(
+                identifier->bus
+            ),
+            (unsigned long)
+                identifier->identifier
+        );
+    } else {
+        (void)snprintf(
+            title,
+            sizeof(title),
+            "%s  %03lX",
+            can_monitor_screen_bus_name(
+                identifier->bus
+            ),
+            (unsigned long)
+                identifier->identifier
+        );
+    }
+
+    char details[
+        CAN_MONITOR_DETAILS_TEXT_SIZE
+    ] = {0};
+
+    can_monitor_screen_format_details(
+        identifier,
+        details,
+        sizeof(details)
+    );
+
+    if (modal_dialog_is_open(
+            &s_frame_dialog
+        )) {
+
+        modal_dialog_close(
+            &s_frame_dialog
+        );
+    }
+
+    const modal_dialog_config_t config = {
+        .title = title,
+        .message = details,
+
+        .icon = NULL,
+
+        .primary_button_text = "Close",
+        .primary_action = NULL,
+        .close_on_primary_action = true,
+
+        .secondary_button_text = NULL,
+        .secondary_action = NULL,
+        .close_on_secondary_action = false,
+
+        .show_progress_bar = false,
+        .initial_progress = 0U,
+        .progress_text = NULL,
+
+        .animate_open =
+            gui_config_get_animations_enabled(),
+
+        .close_on_overlay_click = true,
+    };
+
+    if (!modal_dialog_create(
+            &s_frame_dialog,
+            s_context.root,
+            &config
+        )) {
+
+        ESP_LOGW(
+            TAG,
+            "Failed to open CAN frame details"
+        );
+
+        return;
+    }
+
+    /*
+     * Full CAN FD payload may not fit into the modal height.
+     */
+    lv_obj_add_flag(
+        s_frame_dialog.content_container,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    lv_obj_set_scroll_dir(
+        s_frame_dialog.content_container,
+        LV_DIR_VER
+    );
+
+    lv_obj_set_scrollbar_mode(
+        s_frame_dialog.content_container,
+        LV_SCROLLBAR_MODE_AUTO
+    );
+
+    lv_obj_set_flex_align(
+        s_frame_dialog.content_container,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_START
+    );
+
+    lv_obj_set_style_text_align(
+        s_frame_dialog.message_label,
+        LV_TEXT_ALIGN_LEFT,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_font(
+        s_frame_dialog.message_label,
+        &lv_font_unscii_8,
+        LV_PART_MAIN
+    );
 }
 
 static bool can_monitor_screen_identifier_visible(
@@ -364,6 +708,8 @@ static void can_monitor_screen_update_table(void)
         return;
     }
 
+    s_context.displayed_identifier_count = 0U;
+
     size_t identifier_count = 0U;
 
     const esp_err_t result =
@@ -458,6 +804,18 @@ static void can_monitor_screen_update_table(void)
 
             continue;
         }
+
+        if (s_context.displayed_identifier_count >=
+            CAN_MONITOR_IDENTIFIER_SNAPSHOT_CAPACITY) {
+
+            break;
+        }
+
+        s_context.row_identifier_index[
+            s_context.displayed_identifier_count
+        ] = index;
+
+        s_context.displayed_identifier_count++;
 
         char identifier_text[12] = {0};
         char rx_text[24] = {0};
@@ -678,6 +1036,14 @@ static void can_monitor_screen_clear_event_cb(
         return;
     }
 
+    s_context.displayed_identifier_count = 0U;
+
+    memset(
+        s_context.row_identifier_index,
+        0,
+        sizeof(s_context.row_identifier_index)
+    );
+
     lv_label_set_text(
         s_context.statistics_label,
         "RX 0  TX 0  Dropped 0\n"
@@ -878,6 +1244,12 @@ static void can_monitor_screen_delete_event_cb(
 {
     (void)event;
 
+    if (modal_dialog_is_open(&s_frame_dialog)) {
+        modal_dialog_close(&s_frame_dialog);
+    }
+
+    s_frame_dialog = (modal_dialog_t){0};
+
     if (s_context.update_timer != NULL) {
         lv_timer_delete(
             s_context.update_timer
@@ -1077,6 +1449,13 @@ lv_obj_t *can_monitor_screen_create(void)
         lv_obj_delete(screen);
         return NULL;
     }
+
+    lv_obj_add_event_cb(
+        s_context.table,
+        can_monitor_screen_table_event_cb,
+        LV_EVENT_VALUE_CHANGED,
+        NULL
+    );
 
     lv_obj_add_style(
         s_context.table,
