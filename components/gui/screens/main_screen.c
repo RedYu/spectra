@@ -19,6 +19,8 @@
 #include "usb_network_service.h"
 #include "wifi_service.h"
 #include "can_service.h"
+#include "can_fd_service.h"
+#include "can_monitor_service.h"
 
 #define MAIN_TOOLBAR_HEIGHT \
     GUI_THEME_TOOLBAR_HEIGHT
@@ -28,6 +30,11 @@
 #define MAIN_CAN_ROW_HEIGHT     (132)
 #define MAIN_RECORDING_ROW_HEIGHT  (44)
 #define MAIN_ACTION_ROW_HEIGHT  (44)
+
+_Static_assert(
+    MAIN_CAN_CHANNEL_COUNT == CAN_BUS_COUNT,
+    "Main screen CAN channel count must match shared CAN bus count"
+);
 
 typedef struct
 {
@@ -53,7 +60,7 @@ typedef struct
         MAIN_CAN_CHANNEL_COUNT
     ];
 
-    lv_obj_t *can_load_label[
+    lv_obj_t *can_mode_label[
         MAIN_CAN_CHANNEL_COUNT
     ];
 
@@ -69,8 +76,21 @@ typedef struct
     lv_obj_t *capture_button_label;
     lv_obj_t *monitor_button;
 
-    uint32_t can_previous_frame_count;
-    bool can_frame_counter_initialized;
+    lv_obj_t *can_state_indicator[
+        MAIN_CAN_CHANNEL_COUNT
+    ];
+
+    uint64_t can_previous_rx_count[
+        MAIN_CAN_CHANNEL_COUNT
+    ];
+
+    uint64_t can_previous_tx_count[
+        MAIN_CAN_CHANNEL_COUNT
+    ];
+
+    bool can_frame_counter_initialized[
+        MAIN_CAN_CHANNEL_COUNT
+    ];
 
     lv_timer_t *update_timer;
 
@@ -81,6 +101,199 @@ static const char *TAG = "main_screen";
 static main_screen_context_t s_context = {0};
 
 static modal_dialog_t s_update_dialog = {0};
+
+static const char *main_screen_can_fd_state_to_string(
+    can_fd_mcp2518fd_state_t state
+)
+{
+    switch (state) {
+        case CAN_FD_MCP2518FD_STATE_STOPPED:
+            return "Stopped";
+
+        case CAN_FD_MCP2518FD_STATE_ERROR_ACTIVE:
+            return "Active";
+
+        case CAN_FD_MCP2518FD_STATE_ERROR_WARNING:
+            return "Warning";
+
+        case CAN_FD_MCP2518FD_STATE_ERROR_PASSIVE:
+            return "Error passive";
+
+        case CAN_FD_MCP2518FD_STATE_BUS_OFF:
+            return "Bus off";
+
+        case CAN_FD_MCP2518FD_STATE_UNKNOWN:
+        default:
+            return "Unknown";
+    }
+}
+
+static const char *main_screen_can_fd_mode_to_string(
+    can_fd_mcp2518fd_mode_t mode
+)
+{
+    switch (mode) {
+        case CAN_FD_MCP2518FD_MODE_NORMAL:
+            return "Normal";
+
+        case CAN_FD_MCP2518FD_MODE_LISTEN_ONLY:
+            return "Listen only";
+
+        case CAN_FD_MCP2518FD_MODE_INTERNAL_LOOPBACK:
+            return "Internal loopback";
+
+        case CAN_FD_MCP2518FD_MODE_EXTERNAL_LOOPBACK:
+            return "External loopback";
+
+        case CAN_FD_MCP2518FD_MODE_RESTRICTED:
+            return "Restricted";
+
+        default:
+            return "Unknown";
+    }
+}
+
+typedef struct
+{
+    uint32_t rx;
+    uint32_t tx;
+
+} main_screen_can_rate_t;
+
+static uint32_t main_screen_counter_difference(
+    uint64_t current,
+    uint64_t previous
+)
+{
+    const uint64_t difference =
+        current >= previous
+            ? current - previous
+            : current;
+
+    return difference > UINT32_MAX
+        ? UINT32_MAX
+        : (uint32_t)difference;
+}
+
+static main_screen_can_rate_t main_screen_update_frame_rate(
+    size_t channel,
+    uint64_t received_frames,
+    uint64_t transmitted_frames
+)
+{
+    main_screen_can_rate_t rate = {0};
+
+    if (channel >= MAIN_CAN_CHANNEL_COUNT) {
+        return rate;
+    }
+
+    if (s_context.can_frame_counter_initialized[channel]) {
+        rate.rx =
+            main_screen_counter_difference(
+                received_frames,
+                s_context.can_previous_rx_count[channel]
+            );
+
+        rate.tx =
+            main_screen_counter_difference(
+                transmitted_frames,
+                s_context.can_previous_tx_count[channel]
+            );
+    }
+
+    s_context.can_previous_rx_count[channel] =
+        received_frames;
+
+    s_context.can_previous_tx_count[channel] =
+        transmitted_frames;
+
+    s_context.can_frame_counter_initialized[channel] =
+        true;
+
+    return rate;
+}
+
+static void main_screen_reset_frame_rate(
+    size_t channel
+)
+{
+    if (channel >= MAIN_CAN_CHANNEL_COUNT) {
+        return;
+    }
+
+    s_context.can_previous_rx_count[channel] = 0U;
+    s_context.can_previous_tx_count[channel] = 0U;
+    s_context.can_frame_counter_initialized[channel] = false;
+}
+
+static void main_screen_set_can_state_indicator(
+    size_t channel,
+    lv_color_t color
+)
+{
+    if ((channel >= MAIN_CAN_CHANNEL_COUNT) ||
+        (s_context.can_state_indicator[channel] == NULL)) {
+
+        return;
+    }
+
+    lv_obj_set_style_bg_color(
+        s_context.can_state_indicator[channel],
+        color,
+        LV_PART_MAIN
+    );
+}
+
+static lv_color_t main_screen_twai_state_color(
+    can_twai_state_t state
+)
+{
+    switch (state) {
+        case CAN_TWAI_STATE_ERROR_ACTIVE:
+            return lv_palette_main(LV_PALETTE_GREEN);
+
+        case CAN_TWAI_STATE_ERROR_WARNING:
+            return lv_palette_main(LV_PALETTE_AMBER);
+
+        case CAN_TWAI_STATE_ERROR_PASSIVE:
+            return lv_palette_main(LV_PALETTE_ORANGE);
+
+        case CAN_TWAI_STATE_BUS_OFF:
+            return lv_palette_main(LV_PALETTE_RED);
+
+        case CAN_TWAI_STATE_RECOVERING:
+            return lv_palette_main(LV_PALETTE_BLUE);
+
+        case CAN_TWAI_STATE_STOPPED:
+        case CAN_TWAI_STATE_UNKNOWN:
+        default:
+            return lv_palette_main(LV_PALETTE_GREY);
+    }
+}
+
+static lv_color_t main_screen_can_fd_state_color(
+    can_fd_mcp2518fd_state_t state
+)
+{
+    switch (state) {
+        case CAN_FD_MCP2518FD_STATE_ERROR_ACTIVE:
+            return lv_palette_main(LV_PALETTE_GREEN);
+
+        case CAN_FD_MCP2518FD_STATE_ERROR_WARNING:
+            return lv_palette_main(LV_PALETTE_AMBER);
+
+        case CAN_FD_MCP2518FD_STATE_ERROR_PASSIVE:
+            return lv_palette_main(LV_PALETTE_ORANGE);
+
+        case CAN_FD_MCP2518FD_STATE_BUS_OFF:
+            return lv_palette_main(LV_PALETTE_RED);
+
+        case CAN_FD_MCP2518FD_STATE_STOPPED:
+        case CAN_FD_MCP2518FD_STATE_UNKNOWN:
+        default:
+            return lv_palette_main(LV_PALETTE_GREY);
+    }
+}
 
 static void main_screen_capture_button_event_cb(
     lv_event_t *event
@@ -396,13 +609,16 @@ static const char *main_screen_can_mode_to_string(
     }
 }
 
-static void main_screen_update_primary_can(void)
+static void main_screen_update_primary_can(
+    const can_monitor_service_statistics_t *statistics
+)
 {
-    const size_t channel = 0U;
+    const size_t channel = (size_t)CAN_BUS_PRIMARY;
 
-    if ((s_context.can_state_label[channel] == NULL) ||
+    if ((channel >= MAIN_CAN_CHANNEL_COUNT) ||
+        (s_context.can_state_label[channel] == NULL) ||
         (s_context.can_bitrate_label[channel] == NULL) ||
-        (s_context.can_load_label[channel] == NULL) ||
+        (s_context.can_mode_label[channel] == NULL) ||
         (s_context.can_frames_label[channel] == NULL) ||
         (s_context.can_errors_label[channel] == NULL)) {
 
@@ -416,39 +632,48 @@ static void main_screen_update_primary_can(void)
 
         lv_label_set_text(
             s_context.can_state_label[channel],
-            "State: Disabled"
+            "Disabled"
         );
 
         lv_label_set_text(
             s_context.can_bitrate_label[channel],
-            "Bitrate: N/A"
+            "N/A"
         );
 
         lv_label_set_text(
-            s_context.can_load_label[channel],
-            "Mode: N/A"
+            s_context.can_mode_label[channel],
+            "Not configured"
         );
 
         lv_label_set_text(
             s_context.can_frames_label[channel],
-            "Frames/s: 0"
+            "RX 0/s   TX 0/s"
         );
 
         lv_label_set_text(
             s_context.can_errors_label[channel],
-            "Errors: 0"
+            "Errors 0"
         );
 
-        s_context.can_previous_frame_count = 0U;
-        s_context.can_frame_counter_initialized = false;
+        main_screen_set_can_state_indicator(
+            channel,
+            lv_palette_main(LV_PALETTE_GREY)
+        );
 
+        main_screen_reset_frame_rate(channel);
         return;
     }
 
-    lv_label_set_text_fmt(
+    lv_label_set_text(
         s_context.can_state_label[channel],
-        "State: %s",
         main_screen_can_state_to_string(
+            info.state
+        )
+    );
+
+    main_screen_set_can_state_indicator(
+        channel,
+        main_screen_twai_state_color(
             info.state
         )
     );
@@ -456,51 +681,36 @@ static void main_screen_update_primary_can(void)
     lv_label_set_text_fmt(
         s_context.can_bitrate_label[channel],
         "Bitrate: %lu kbit/s",
-        (unsigned long)(
-            info.bitrate / 1000U
-        )
+        (unsigned long)(info.bitrate / 1000U)
     );
 
     lv_label_set_text_fmt(
-        s_context.can_load_label[channel],
+        s_context.can_mode_label[channel],
         "Mode: %s",
-        main_screen_can_mode_to_string(
-            info.mode
-        )
+        main_screen_can_mode_to_string(info.mode)
     );
 
-    const uint32_t total_frames =
-        info.received_frames +
-        info.transmitted_frames;
+    main_screen_can_rate_t rate = {0};
 
-    uint32_t frames_per_second = 0U;
+    if (statistics != NULL) {
+        const can_monitor_bus_statistics_t *bus_statistics =
+            &statistics->buses[CAN_BUS_PRIMARY];
 
-    if (s_context.can_frame_counter_initialized) {
-        if (total_frames >=
-            s_context.can_previous_frame_count) {
-
-            frames_per_second =
-                total_frames -
-                s_context.can_previous_frame_count;
-        } else {
-            /*
-             * Counters were reset during CAN reconfiguration.
-             */
-            frames_per_second =
-                total_frames;
-        }
+        rate =
+            main_screen_update_frame_rate(
+                channel,
+                bus_statistics->received_frames,
+                bus_statistics->completed_transmissions
+            );
+    } else {
+        main_screen_reset_frame_rate(channel);
     }
-
-    s_context.can_previous_frame_count =
-        total_frames;
-
-    s_context.can_frame_counter_initialized =
-        true;
 
     lv_label_set_text_fmt(
         s_context.can_frames_label[channel],
-        "Frames/s: %lu",
-        (unsigned long)frames_per_second
+        "RX %lu/s   TX %lu/s",
+        (unsigned long)rate.rx,
+        (unsigned long)rate.tx
     );
 
     const uint32_t error_count =
@@ -519,37 +729,136 @@ static void main_screen_update_primary_can(void)
     );
 }
 
-static void main_screen_update_secondary_can(void)
+static void main_screen_update_secondary_can(
+    const can_monitor_service_statistics_t *statistics
+)
 {
-    const size_t channel = 1U;
+    const size_t channel = (size_t)CAN_BUS_SECONDARY;
 
-    if (s_context.can_state_label[channel] == NULL) {
+    if ((channel >= MAIN_CAN_CHANNEL_COUNT) ||
+        (s_context.can_state_label[channel] == NULL) ||
+        (s_context.can_bitrate_label[channel] == NULL) ||
+        (s_context.can_mode_label[channel] == NULL) ||
+        (s_context.can_frames_label[channel] == NULL) ||
+        (s_context.can_errors_label[channel] == NULL)) {
+
+        return;
+    }
+
+    can_fd_mcp2518fd_info_t info = {0};
+
+    if (!can_fd_service_is_running() ||
+        (can_fd_service_get_info(&info) != ESP_OK)) {
+
+        lv_label_set_text(
+            s_context.can_state_label[channel],
+            "Disabled"
+        );
+
+        lv_label_set_text(
+            s_context.can_bitrate_label[channel],
+            "N/A"
+        );
+
+        lv_label_set_text(
+            s_context.can_mode_label[channel],
+            "Not configured"
+        );
+
+        lv_label_set_text(
+            s_context.can_frames_label[channel],
+            "RX 0/s   TX 0/s"
+        );
+
+        lv_label_set_text(
+            s_context.can_errors_label[channel],
+            "Errors 0"
+        );
+
+        main_screen_set_can_state_indicator(
+            channel,
+            lv_palette_main(LV_PALETTE_GREY)
+        );
+
+        main_screen_reset_frame_rate(channel);
         return;
     }
 
     lv_label_set_text(
         s_context.can_state_label[channel],
-        "State: Not available"
+        main_screen_can_fd_state_to_string(
+            info.state
+        )
     );
 
-    lv_label_set_text(
-        s_context.can_bitrate_label[channel],
-        "Bitrate: CAN FD"
+    main_screen_set_can_state_indicator(
+        channel,
+        main_screen_can_fd_state_color(
+            info.state
+        )
     );
 
-    lv_label_set_text(
-        s_context.can_load_label[channel],
-        "Mode: MCP2518FD"
+    if (info.fd_enabled && info.brs_enabled) {
+        lv_label_set_text_fmt(
+            s_context.can_bitrate_label[channel],
+            "Bitrate: %lu / %lu kbit/s",
+            (unsigned long)(info.nominal_bitrate / 1000U),
+            (unsigned long)(info.data_bitrate / 1000U)
+        );
+    } else if (info.fd_enabled) {
+        lv_label_set_text_fmt(
+            s_context.can_bitrate_label[channel],
+            "Bitrate: %lu kbit/s (FD)",
+            (unsigned long)(info.nominal_bitrate / 1000U)
+        );
+    } else {
+        lv_label_set_text_fmt(
+            s_context.can_bitrate_label[channel],
+            "Bitrate: %lu kbit/s",
+            (unsigned long)(info.nominal_bitrate / 1000U)
+        );
+    }
+
+    lv_label_set_text_fmt(
+        s_context.can_mode_label[channel],
+        "Mode: %s",
+        main_screen_can_fd_mode_to_string(info.mode)
     );
 
-    lv_label_set_text(
+    main_screen_can_rate_t rate = {0};
+
+    if (statistics != NULL) {
+        const can_monitor_bus_statistics_t *bus_statistics =
+            &statistics->buses[CAN_BUS_SECONDARY];
+
+        rate =
+            main_screen_update_frame_rate(
+                channel,
+                bus_statistics->received_frames,
+                bus_statistics->completed_transmissions
+            );
+    } else {
+        main_screen_reset_frame_rate(channel);
+    }
+
+    lv_label_set_text_fmt(
         s_context.can_frames_label[channel],
-        "Frames/s: 0"
+        "RX %lu/s   TX %lu/s",
+        (unsigned long)rate.rx,
+        (unsigned long)rate.tx
     );
 
-    lv_label_set_text(
+    const uint32_t error_count =
+        info.dropped_rx_frames +
+        info.transmit_failures +
+        info.receive_overflow_count +
+        info.transmit_event_overflow_count +
+        info.bus_error_count;
+
+    lv_label_set_text_fmt(
         s_context.can_errors_label[channel],
-        "Errors: 0"
+        "Errors: %lu",
+        (unsigned long)error_count
     );
 }
 
@@ -633,8 +942,25 @@ static void main_screen_update(void)
         );
     }
 
-    main_screen_update_primary_can();
-    main_screen_update_secondary_can();
+    can_monitor_service_statistics_t can_statistics = {0};
+
+    const bool can_statistics_valid =
+        can_monitor_service_is_running() &&
+        (can_monitor_service_get_statistics(
+            &can_statistics
+        ) == ESP_OK);
+
+    main_screen_update_primary_can(
+        can_statistics_valid
+            ? &can_statistics
+            : NULL
+    );
+
+    main_screen_update_secondary_can(
+        can_statistics_valid
+            ? &can_statistics
+            : NULL
+    );
 }
 
 static void main_screen_update_timer_cb(
@@ -859,14 +1185,132 @@ static esp_err_t main_screen_create_can_card(
         card
     );
 
+    lv_obj_t *header =
+        lv_obj_create(card);
+
+    if (header == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        header,
+        LV_PCT(100),
+        22
+    );
+
+    lv_obj_set_style_bg_opa(
+        header,
+        LV_OPA_TRANSP,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        header,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_all(
+        header,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_column(
+        header,
+        6,
+        LV_PART_MAIN
+    );
+
+    lv_obj_remove_flag(
+        header,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    lv_obj_set_flex_flow(
+        header,
+        LV_FLEX_FLOW_ROW
+    );
+
+    lv_obj_set_flex_align(
+        header,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_CENTER,
+        LV_FLEX_ALIGN_CENTER
+    );
+
     lv_obj_t *title_label =
         main_screen_create_card_label(
-            card,
+            header,
             title,
             gui_styles_text_body()
         );
 
     if (title_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_flex_grow(
+        title_label,
+        1
+    );
+
+    s_context.can_state_indicator[channel_index] =
+        lv_obj_create(header);
+
+    if (s_context.can_state_indicator[channel_index] == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        s_context.can_state_indicator[channel_index],
+        8,
+        8
+    );
+
+    lv_obj_set_style_radius(
+        s_context.can_state_indicator[channel_index],
+        LV_RADIUS_CIRCLE,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        s_context.can_state_indicator[channel_index],
+        lv_palette_main(LV_PALETTE_GREY),
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_context.can_state_indicator[channel_index],
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        s_context.can_state_indicator[channel_index],
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_all(
+        s_context.can_state_indicator[channel_index],
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_remove_flag(
+        s_context.can_state_indicator[channel_index],
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    s_context.can_state_label[channel_index] =
+        main_screen_create_card_label(
+            header,
+            "Disabled",
+            gui_styles_text_muted()
+        );
+
+    if (s_context.can_state_label[channel_index] == NULL) {
         return ESP_ERR_NO_MEM;
     }
 
@@ -883,44 +1327,37 @@ static esp_err_t main_screen_create_can_card(
         LV_PART_MAIN
     );
 
-    s_context.can_state_label[channel_index] =
-        main_screen_create_card_label(
-            card,
-            "State: Not configured",
-            gui_styles_text_muted()
-        );
-
     s_context.can_bitrate_label[channel_index] =
         main_screen_create_card_label(
             card,
-            "Bitrate: N/A",
+            "N/A",
             gui_styles_text_small()
         );
 
-    s_context.can_load_label[channel_index] =
+    s_context.can_mode_label[channel_index] =
         main_screen_create_card_label(
             card,
-            "Load: 0%",
+            "Classical",
             gui_styles_text_small()
         );
 
     s_context.can_frames_label[channel_index] =
         main_screen_create_card_label(
             card,
-            "Frames/s: 0",
+            "RX 0/s   TX 0/s",
             gui_styles_text_small()
         );
 
     s_context.can_errors_label[channel_index] =
         main_screen_create_card_label(
             card,
-            "Errors: 0",
+            "Errors 0",
             gui_styles_text_small()
         );
 
     if ((s_context.can_state_label[channel_index] == NULL) ||
         (s_context.can_bitrate_label[channel_index] == NULL) ||
-        (s_context.can_load_label[channel_index] == NULL) ||
+        (s_context.can_mode_label[channel_index] == NULL) ||
         (s_context.can_frames_label[channel_index] == NULL) ||
         (s_context.can_errors_label[channel_index] == NULL)) {
 
