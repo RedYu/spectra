@@ -15,6 +15,7 @@
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
 
+#include "app_task_priorities.h"
 #include "system_model.h"
 #include "wifi_service.h"
 
@@ -23,7 +24,8 @@
 
 #define INTERNET_SERVICE_TIMEOUT_MS      (20000U)
 #define INTERNET_SERVICE_TASK_STACK_SIZE (6144U)
-#define INTERNET_SERVICE_TASK_PRIORITY   (2U)
+#define INTERNET_SERVICE_TASK_PRIORITY \
+    APP_TASK_PRIORITY_INTERNET
 
 #define INTERNET_SERVICE_NOTIFY_CHECK \
     (1UL << 0U)

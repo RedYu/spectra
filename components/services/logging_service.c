@@ -15,6 +15,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "app_task_priorities.h"
 #include "storage_sd_service.h"
 
 #define LOGGING_FILE_PATH                  ("spectra.log")
@@ -24,7 +25,8 @@
 
 #define LOGGING_TASK_NAME                  ("logging_task")
 #define LOGGING_TASK_STACK_SIZE            (4096U)
-#define LOGGING_TASK_PRIORITY              (4U)
+#define LOGGING_TASK_PRIORITY \
+    APP_TASK_PRIORITY_STORAGE
 
 #define LOGGING_FLUSH_INTERVAL_MS          (5000U)
 

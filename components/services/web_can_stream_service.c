@@ -21,11 +21,13 @@
 #include "can_frame.h"
 #include "can_router.h"
 #include "web_can_protocol.h"
+#include "app_task_priorities.h"
 
 #define WEB_CAN_STREAM_URI                 "/ws/can"
 
 #define WEB_CAN_STREAM_TASK_STACK_SIZE     (4096U)
-#define WEB_CAN_STREAM_TASK_PRIORITY       (4U)
+#define WEB_CAN_STREAM_TASK_PRIORITY \
+    APP_TASK_PRIORITY_WEB_CAN
 
 #define WEB_CAN_STREAM_BATCH_MAX_EVENTS    (64U)
 #define WEB_CAN_STREAM_BATCH_MAX_SIZE      (4096U)

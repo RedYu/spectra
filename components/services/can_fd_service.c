@@ -11,11 +11,13 @@
 
 #include "esp_log.h"
 
+#include "app_task_priorities.h"
 #include "board_config.h"
 #include "can_mcp2518fd_frame_adapter.h"
 
 #define CAN_FD_SERVICE_TASK_STACK_SIZE       (4096U)
-#define CAN_FD_SERVICE_TASK_PRIORITY         (5U)
+#define CAN_FD_SERVICE_TASK_PRIORITY \
+    APP_TASK_PRIORITY_CAN_FD
 
 #define CAN_FD_SERVICE_RECEIVE_TIMEOUT_MS    (10U)
 #define CAN_FD_SERVICE_STOP_TIMEOUT_MS       (2000U)

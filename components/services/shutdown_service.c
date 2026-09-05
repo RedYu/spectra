@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 
+#include "app_task_priorities.h"
 #include "internet_service.h"
 #include "logging_service.h"
 #include "mdns_service.h"
@@ -28,7 +29,8 @@
 #include "network_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
-#define SHUTDOWN_SERVICE_TASK_PRIORITY    (5U)
+#define SHUTDOWN_SERVICE_TASK_PRIORITY \
+    APP_TASK_PRIORITY_SHUTDOWN
 
 #define SHUTDOWN_SERVICE_BUZZER_WAIT_MS   (700U)
 

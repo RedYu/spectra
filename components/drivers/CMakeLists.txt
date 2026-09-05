@@ -23,6 +23,7 @@ idf_component_register(
         esp_driver_sdspi
 
     PRIV_REQUIRES
+        app_task_config
         esp_driver_gpio
         esp_driver_spi
         esp_driver_i2c

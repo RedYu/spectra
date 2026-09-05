@@ -8,6 +8,9 @@ idf_component_register(
 
     REQUIRES
         esp_common
+
+    PRIV_REQUIRES
+        app_task_config
         drivers
         services
 )

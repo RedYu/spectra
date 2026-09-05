@@ -13,11 +13,13 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 
+#include "app_task_priorities.h"
 #include "buzzer_driver.h"
 
 #define BUZZER_SERVICE_QUEUE_LENGTH         (8U)
 #define BUZZER_SERVICE_TASK_STACK_SIZE      (3072U)
-#define BUZZER_SERVICE_TASK_PRIORITY        (4U)
+#define BUZZER_SERVICE_TASK_PRIORITY \
+    APP_TASK_PRIORITY_BUZZER
 
 #define BUZZER_SERVICE_QUEUE_POLL_MS        (50U)
 #define BUZZER_SERVICE_STOP_TIMEOUT_MS      (2000U)

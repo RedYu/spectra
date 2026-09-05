@@ -15,8 +15,11 @@
 
 #include "can_router.h"
 
+#include "app_task_priorities.h"
+
 #define CAN_MONITOR_TASK_STACK_SIZE       (4096U)
-#define CAN_MONITOR_TASK_PRIORITY         (4U)
+#define CAN_MONITOR_TASK_PRIORITY \
+    APP_TASK_PRIORITY_CAN_MONITOR
 
 #define CAN_MONITOR_TASK_WAIT_MS          (50U)
 #define CAN_MONITOR_STOP_TIMEOUT_MS       (1000U)

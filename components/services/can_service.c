@@ -12,9 +12,11 @@
 #include "esp_log.h"
 
 #include "can_twai_frame_adapter.h"
+#include "app_task_priorities.h"
 
 #define CAN_SERVICE_TASK_STACK_SIZE          (4096U)
-#define CAN_SERVICE_TASK_PRIORITY            (5U)
+#define CAN_SERVICE_TASK_PRIORITY \
+    APP_TASK_PRIORITY_CAN_TWAI
 
 #define CAN_SERVICE_RECEIVE_TIMEOUT_MS       (20U)
 #define CAN_SERVICE_STOP_TIMEOUT_MS          (2000U)

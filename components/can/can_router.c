@@ -12,12 +12,14 @@
 
 #include "esp_log.h"
 
+#include "app_task_priorities.h"
 #include "can_service.h"
 #include "can_fd_service.h"
 #include "can_router_service_adapter.h"
 
 #define CAN_ROUTER_TASK_STACK_SIZE       (4096U)
-#define CAN_ROUTER_TASK_PRIORITY         (6U)
+#define CAN_ROUTER_TASK_PRIORITY \
+    APP_TASK_PRIORITY_CAN_ROUTER
 #define CAN_ROUTER_STOP_TIMEOUT_MS       (2000U)
 #define CAN_ROUTER_LOCK_TIMEOUT_MS       (100U)
 

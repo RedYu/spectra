@@ -20,6 +20,7 @@
 
 #include "board.h"
 #include "board_config.h"
+#include "app_task_priorities.h"
 
 #define MCP2518FD_SPI_INSTRUCTION_RESET       (0x0U)
 #define MCP2518FD_SPI_INSTRUCTION_WRITE       (0x2U)
@@ -259,7 +260,8 @@
 #define MCP2518FD_TREC_TXBO                   (1UL << 21U)
 
 #define MCP2518FD_INTERRUPT_TASK_STACK_SIZE   (3072U)
-#define MCP2518FD_INTERRUPT_TASK_PRIORITY     (6U)
+#define MCP2518FD_INTERRUPT_TASK_PRIORITY \
+    APP_TASK_PRIORITY_CAN_FD_IRQ
 #define MCP2518FD_INTERRUPT_STOP_TIMEOUT_MS   (500U)
 
 #define MCP2518FD_REGISTER_OSC                (0x0E00U)

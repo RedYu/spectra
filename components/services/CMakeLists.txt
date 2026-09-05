@@ -44,6 +44,7 @@ idf_component_register(
         can_monitor
 
     PRIV_REQUIRES
+        app_task_config
         app
         gui
         drivers

@@ -1,0 +1,20 @@
+#pragma once
+
+#define APP_TASK_PRIORITY_SHUTDOWN       (14U)
+
+#define APP_TASK_PRIORITY_CAN_FD_IRQ     (13U)
+#define APP_TASK_PRIORITY_CAN_FD         (12U)
+#define APP_TASK_PRIORITY_CAN_TWAI       (11U)
+#define APP_TASK_PRIORITY_CAN_ROUTER     (10U)
+#define APP_TASK_PRIORITY_CAN_MONITOR     (9U)
+#define APP_TASK_PRIORITY_CAN_LOGGER      (7U)
+
+#define APP_TASK_PRIORITY_WEB_CAN         (6U)
+#define APP_TASK_PRIORITY_GUI             (5U)
+#define APP_TASK_PRIORITY_STORAGE         (5U)
+#define APP_TASK_PRIORITY_NETWORK_WORKER  (4U)
+
+#define APP_TASK_PRIORITY_BUZZER          (3U)
+#define APP_TASK_PRIORITY_INTERNET        (3U)
+#define APP_TASK_PRIORITY_BATTERY         (2U)
+#define APP_TASK_PRIORITY_SYSTEM          (2U)

@@ -24,6 +24,7 @@
 #include "driver/temperature_sensor.h"
 
 #include "app_config.h"
+#include "app_task_priorities.h"
 #include "board_config.h"
 #include "system_model.h"
 #include "shutdown_service.h"
@@ -38,7 +39,8 @@
 #define SYSTEM_CAN_FD_PROFILE_INTERVAL  (10U)
 
 #define SYSTEM_TASK_STACK_SIZE          (3072U)
-#define SYSTEM_TASK_PRIORITY            (2U)
+#define SYSTEM_TASK_PRIORITY \
+    APP_TASK_PRIORITY_SYSTEM
 #define SYSTEM_UPDATE_INTERVAL_MS       (1000U)
 #define SYSTEM_TASK_STATUS_EXTRA_COUNT  (4U)
 

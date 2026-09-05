@@ -17,6 +17,7 @@
 
 #include "lvgl.h"
 #include "lvgl_port.h"
+#include "app_task_priorities.h"
 #include "gui_theme.h"
 #include "gui_styles.h"
 #include "screen_manager.h"
@@ -24,7 +25,8 @@
 #include "settings_service.h"
 
 #define GUI_TASK_STACK_SIZE       (8192U)
-#define GUI_TASK_PRIORITY         (5U)
+#define GUI_TASK_PRIORITY \
+    APP_TASK_PRIORITY_GUI
 #define GUI_BOOT_STATUS_LENGTH    (48U)
 #define GUI_BOOT_QUEUE_LENGTH     (1U)
 

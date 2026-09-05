@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 
+#include "app_task_priorities.h"
 #include "dns_server.h"
 #include "mdns_service.h"
 
@@ -20,7 +21,8 @@
 #define NETWORK_SERVICE_COMMAND_QUEUE_LENGTH  (1U)
 
 #define NETWORK_SERVICE_TASK_STACK_SIZE       (3072U)
-#define NETWORK_SERVICE_TASK_PRIORITY         (4U)
+#define NETWORK_SERVICE_TASK_PRIORITY \
+    APP_TASK_PRIORITY_NETWORK_WORKER
 
 #define NETWORK_SERVICE_MDNS_REFRESH_DELAY_MS (250U)
 

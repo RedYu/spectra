@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "app_task_priorities.h"
 #include "battery_adc_driver.h"
 
 #define BATTERY_SERVICE_UPDATE_INTERVAL_MS  (5000U)
@@ -21,7 +22,8 @@
 #define BATTERY_SERVICE_STOP_TIMEOUT_MS     (2000U)
 
 #define BATTERY_SERVICE_TASK_STACK_SIZE     (2304U)
-#define BATTERY_SERVICE_TASK_PRIORITY       (3U)
+#define BATTERY_SERVICE_TASK_PRIORITY \
+    APP_TASK_PRIORITY_BATTERY
 
 #define BATTERY_SERVICE_PRESENT_MIN_MV      (2500U)
 
