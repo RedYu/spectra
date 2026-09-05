@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Yurii Ridkovets
+ */
+
 #include "web_network_api.h"
 
 #include <stdbool.h>

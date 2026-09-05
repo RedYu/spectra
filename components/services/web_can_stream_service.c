@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Yurii Ridkovets
+ */
+
 #include "web_can_stream_service.h"
 
 #include <inttypes.h>

@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Yurii Ridkovets
+ */
+
 #include "screens/can_monitor_screen.h"
 
 #include <stdbool.h>

@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Yurii Ridkovets
+ */
+
 #include "web_service.h"
 
 #include "esp_http_server.h"

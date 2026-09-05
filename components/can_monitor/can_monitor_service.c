@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Yurii Ridkovets
+ */
+
 #include "can_monitor_service.h"
 
 #include <stdatomic.h>

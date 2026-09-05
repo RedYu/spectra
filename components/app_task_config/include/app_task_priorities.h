@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Yurii Ridkovets
+ */
+
 #pragma once
 
 #define APP_TASK_PRIORITY_SHUTDOWN       (14U)
