@@ -1,0 +1,14 @@
+menu "Spectra drivers"
+
+    config CAN_FD_MCP2518FD_ENABLE_PROFILING
+        bool "Enable MCP2518FD performance profiling"
+        default n
+        help
+            Collect MCP2518FD interrupt, SPI, FIFO update and frame
+            decoding timing statistics.
+
+            Profiling adds timestamp reads and atomic counter updates
+            to the receive path. Enable it only for performance
+            diagnostics.
+
+endmenu
