@@ -125,6 +125,8 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 
 The detailed firmware architecture is documented in
 [docs/architecture.md](docs/architecture.md).
+The shared CAN types and validation rules are documented in
+[docs/can-frame-model.md](docs/can-frame-model.md).
 
 ```text
 CAN bus                     CAN FD bus

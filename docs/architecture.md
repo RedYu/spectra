@@ -153,6 +153,9 @@ models or monitoring APIs. It must not call hardware drivers directly.
 - up to 64 payload bytes;
 - timestamp and timestamp source.
 
+The complete type contract and validation rules are documented in
+[can-frame-model.md](can-frame-model.md).
+
 `can_event_t` wraps a frame with lifecycle information:
 
 - RX or TX direction;
