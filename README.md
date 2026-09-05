@@ -180,7 +180,11 @@ The primary interface uses the ESP32-S3 TWAI controller and supports Classical C
 
 Supported nominal bitrates:
 
+- 10 kbit/s
+- 20 kbit/s
+- 33.333 kbit/s
 - 50 kbit/s
+- 83.333 kbit/s
 - 100 kbit/s
 - 125 kbit/s
 - 250 kbit/s
@@ -192,6 +196,28 @@ Supported nominal bitrates:
 
 The secondary interface uses the MCP2518FD controller over a dedicated SPI bus. It can receive and transmit Classical CAN and CAN FD frames.
 
+Supported nominal arbitration bitrates:
+
+- 10 kbit/s
+- 20 kbit/s
+- 33.333 kbit/s
+- 50 kbit/s
+- 83.333 kbit/s
+- 100 kbit/s
+- 125 kbit/s
+- 250 kbit/s
+- 500 kbit/s
+- 800 kbit/s
+- 1 Mbit/s
+
+Supported CAN FD data-phase bitrates when BRS is enabled:
+
+- 1 Mbit/s
+- 2 Mbit/s
+- 4 Mbit/s
+- 5 Mbit/s
+- 8 Mbit/s when enabled by the build-time maximum data-bitrate configuration
+
 Configuration includes:
 
 - nominal arbitration bitrate;
@@ -202,7 +228,7 @@ Configuration includes:
 - transmission retry policy;
 - RX and TX FIFO sizing.
 
-Actual achievable bitrates depend on the MCP2518FD system clock and bit-timing solution. Every selected configuration must be validated by the driver rather than inferred only from the settings list.
+Without BRS, the configured data bitrate must equal the nominal bitrate. With BRS, the data bitrate must be higher than the nominal bitrate. Actual achievable bitrates depend on the MCP2518FD system clock and bit-timing solution. Every selected configuration is therefore validated by the driver rather than inferred only from the settings list.
 
 ## CAN Monitor
 
@@ -250,10 +276,13 @@ The CAN WebSocket endpoint is:
 ws://spectra.device/ws/can
 ```
 
+The complete wire format is described in
+[docs/websocket-can-protocol.md](docs/websocket-can-protocol.md).
+
 The development CAN stream page is available at:
 
 ```text
-http://spectra.device/can_test.html
+http://spectra.device/can_test
 ```
 
 CAN events are sent in a compact versioned binary protocol using little-endian multibyte fields. JSON control commands configure subscriptions and pause or resume streaming without reconnecting.
