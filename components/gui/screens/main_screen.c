@@ -317,10 +317,27 @@ static void main_screen_monitor_button_event_cb(
         return;
     }
 
-    ESP_LOGI(
-        TAG,
-        "CAN monitor screen is not implemented yet"
-    );
+    const bool animations_enabled =
+        gui_config_get_animations_enabled();
+
+    const esp_err_t result =
+        screen_manager_show(
+            SCREEN_ID_CAN_MONITOR,
+            animations_enabled
+                ? LV_SCR_LOAD_ANIM_MOVE_LEFT
+                : LV_SCR_LOAD_ANIM_NONE,
+            animations_enabled
+                ? 200U
+                : 0U
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to show CAN monitor screen: %s",
+            esp_err_to_name(result)
+        );
+    }
 }
 
 static void main_screen_settings_action(void)
@@ -550,11 +567,6 @@ static esp_err_t main_screen_create_action_row(
      */
     lv_obj_add_state(
         s_context.capture_button,
-        LV_STATE_DISABLED
-    );
-
-    lv_obj_add_state(
-        s_context.monitor_button,
         LV_STATE_DISABLED
     );
 

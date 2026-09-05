@@ -6,6 +6,7 @@
 #include "screens/splash_screen.h"
 #include "screens/main_screen.h"
 #include "screens/settings_screen.h"
+#include "screens/can_monitor_screen.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -125,6 +126,16 @@ static esp_err_t gui_register_screens(void)
         .destroy = settings_screen_destroy,
     };
 
+    static const screen_desc_t can_monitor_descriptor = {
+        .id = SCREEN_ID_CAN_MONITOR,
+        .name = "CAN Monitor",
+
+        .create = can_monitor_screen_create,
+        .on_show = can_monitor_screen_on_show,
+        .on_hide = can_monitor_screen_on_hide,
+        .destroy = can_monitor_screen_destroy,
+    };
+
     ESP_RETURN_ON_ERROR(
         screen_manager_register(
             &splash_descriptor
@@ -147,6 +158,14 @@ static esp_err_t gui_register_screens(void)
         ),
         TAG,
         "Failed to register settings screen"
+    );
+
+    ESP_RETURN_ON_ERROR(
+        screen_manager_register(
+            &can_monitor_descriptor
+        ),
+        TAG,
+        "Failed to register CAN monitor screen"
     );
 
     return ESP_OK;

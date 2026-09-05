@@ -9,6 +9,7 @@ idf_component_register(
         "screens/splash_screen.c"
         "screens/main_screen.c"
         "screens/settings_screen.c"
+        "screens/can_monitor_screen.c"
 
         "widgets/toolbar.c"
         "widgets/modal_dialog.c"
@@ -31,5 +32,6 @@ idf_component_register(
         models
         services
         drivers
+        can_monitor
 )
 
