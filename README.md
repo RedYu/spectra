@@ -294,12 +294,13 @@ CAN events are sent in a compact versioned binary protocol using little-endian m
 
 ### REST API
 
+Detailed request and response documentation is available in
+[docs/web-api.md](docs/web-api.md).
+
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/api/system` | Read system, CPU, memory, storage, and reset information |
-| `POST` | `/api/system/restart` | Request a graceful device restart |
 | `GET` | `/api/network` | Read Wi-Fi, USB RNDIS, DNS, and mDNS information |
-| `POST` | `/api/network/wifi/scan` | Start a Wi-Fi network scan |
 | `GET` | `/api/power` | Read PMIC and battery information |
 | `GET` | `/api/settings` | Read current settings |
 | `PUT` | `/api/settings` | Apply device and CAN settings |

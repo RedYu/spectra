@@ -313,6 +313,9 @@ batch sizes, and send failures are observable through stream statistics.
 The wire format is defined in
 [websocket-can-protocol.md](websocket-can-protocol.md).
 
+The HTTP resources exposed by the firmware are described in
+[web-api.md](web-api.md).
+
 ## Settings and runtime configuration
 
 The settings model contains persistent user configuration. The settings service
