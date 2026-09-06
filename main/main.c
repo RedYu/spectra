@@ -41,6 +41,7 @@
 #include "can_fd_service.h"
 #include "can_router.h"
 #include "can_monitor_service.h"
+#include "can_logger_service.h"
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
@@ -861,6 +862,31 @@ static void startup_task(
                 );
             }
         }
+    }
+
+    (void)gui_service_set_boot_progress(
+        48U,
+        "Starting CAN logger"
+    );
+
+    result = start_service(
+        "CAN logger",
+        can_logger_service_start,
+        SERVICE_OPTIONAL
+    );
+
+    if (result != ESP_OK) {
+        startup_warning = true;
+
+        (void)gui_service_set_boot_progress(
+            48U,
+            "CAN logger unavailable"
+        );
+    } else {
+        (void)gui_service_set_boot_progress(
+            48U,
+            "CAN logger ready"
+        );
     }
 
     (void)gui_service_set_boot_progress(

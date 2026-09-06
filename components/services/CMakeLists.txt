@@ -24,6 +24,7 @@ idf_component_register(
         "can_twai_frame_adapter.c"
         "can_mcp2518fd_frame_adapter.c"
         "web_can_stream_service.c"
+        "can_logger_service.c"
 
         "web_api/web_api_common.c"
         "web_api/web_system_api.c"

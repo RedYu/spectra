@@ -31,6 +31,7 @@
 #include "can_fd_service.h"
 #include "can_router.h"
 #include "can_monitor_service.h"
+#include "can_logger_service.h"
 #include "network_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
@@ -160,10 +161,40 @@ static void shutdown_service_task(
     }
 
     /*
-     * Stop CAN consumers before stopping CAN sources. This prevents the
-     * monitor from receiving events while its resources are released.
+     * Stop CAN consumers while SD-card operations and the CAN router are
+     * still available. The logger must flush and close its file before
+     * storage shutdown begins.
      */
     bool can_consumers_stopped = true;
+
+    if (can_logger_service_is_running()) {
+        const esp_err_t logger_result =
+            can_logger_service_stop();
+
+        if ((logger_result != ESP_OK) &&
+            (logger_result != ESP_ERR_INVALID_STATE)) {
+
+            ESP_LOGW(
+                TAG,
+                "CAN logger stopped with an error: %s",
+                esp_err_to_name(logger_result)
+            );
+        }
+
+        /*
+         * A filesystem error may be returned after the logger task and
+         * subscription have already been stopped. Check the actual service
+         * state before deciding whether the router can be released.
+         */
+        if (can_logger_service_is_running()) {
+            can_consumers_stopped = false;
+
+            ESP_LOGW(
+                TAG,
+                "CAN logger service is still running"
+            );
+        }
+    }
 
     if (can_monitor_service_is_running()) {
         const esp_err_t monitor_result =
@@ -172,12 +203,19 @@ static void shutdown_service_task(
         if ((monitor_result != ESP_OK) &&
             (monitor_result != ESP_ERR_INVALID_STATE)) {
 
-            can_consumers_stopped = false;
-
             ESP_LOGW(
                 TAG,
                 "Failed to stop CAN monitor service: %s",
                 esp_err_to_name(monitor_result)
+            );
+        }
+
+        if (can_monitor_service_is_running()) {
+            can_consumers_stopped = false;
+
+            ESP_LOGW(
+                TAG,
+                "CAN monitor service is still running"
             );
         }
     }
