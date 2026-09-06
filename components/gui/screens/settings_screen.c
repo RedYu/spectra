@@ -235,6 +235,11 @@ static void settings_screen_format_size(
     size_t buffer_size
 );
 
+static void settings_screen_set_disabled_state(
+    lv_obj_t *object,
+    bool disabled
+);
+
 static void settings_screen_refresh_storage_info(void);
 
 static void settings_screen_refresh_system_info(void);
@@ -831,54 +836,25 @@ static void settings_screen_refresh_can_secondary_info(
     };
 
     for (size_t index = 0U;
-         index < sizeof(enabled_controls) /
-                 sizeof(enabled_controls[0]);
-         ++index) {
+        index < sizeof(enabled_controls) /
+                sizeof(enabled_controls[0]);
+        ++index) {
 
-        if (enabled_controls[index] == NULL) {
-            continue;
-        }
-
-        if (enabled) {
-            lv_obj_remove_state(
-                enabled_controls[index],
-                LV_STATE_DISABLED
-            );
-        } else {
-            lv_obj_add_state(
-                enabled_controls[index],
-                LV_STATE_DISABLED
-            );
-        }
+        settings_screen_set_disabled_state(
+            enabled_controls[index],
+            !enabled
+        );
     }
 
-    if (s_can_secondary_brs_switch != NULL) {
-        if (enabled && fd_enabled) {
-            lv_obj_remove_state(
-                s_can_secondary_brs_switch,
-                LV_STATE_DISABLED
-            );
-        } else {
-            lv_obj_add_state(
-                s_can_secondary_brs_switch,
-                LV_STATE_DISABLED
-            );
-        }
-    }
+    settings_screen_set_disabled_state(
+        s_can_secondary_brs_switch,
+        !(enabled && fd_enabled)
+    );
 
-    if (s_can_secondary_data_dropdown != NULL) {
-        if (enabled && fd_enabled && brs_enabled) {
-            lv_obj_remove_state(
-                s_can_secondary_data_dropdown,
-                LV_STATE_DISABLED
-            );
-        } else {
-            lv_obj_add_state(
-                s_can_secondary_data_dropdown,
-                LV_STATE_DISABLED
-            );
-        }
-    }
+    settings_screen_set_disabled_state(
+        s_can_secondary_data_dropdown,
+        !(enabled && fd_enabled && brs_enabled)
+    );
 
     if (s_can_secondary_info_label == NULL) {
         return;
@@ -4663,6 +4639,38 @@ static esp_err_t settings_screen_create_wifi_tab(
     return ESP_OK;
 }
 
+static void settings_screen_set_disabled_state(
+    lv_obj_t *object,
+    bool disabled
+)
+{
+    if (object == NULL) {
+        return;
+    }
+
+    const bool currently_disabled =
+        lv_obj_has_state(
+            object,
+            LV_STATE_DISABLED
+        );
+
+    if (currently_disabled == disabled) {
+        return;
+    }
+
+    if (disabled) {
+        lv_obj_add_state(
+            object,
+            LV_STATE_DISABLED
+        );
+    } else {
+        lv_obj_remove_state(
+            object,
+            LV_STATE_DISABLED
+        );
+    }
+}
+
 static lv_obj_t *settings_screen_create_dropdown_card(
     lv_obj_t *parent,
     const char *title,
@@ -4727,6 +4735,17 @@ static lv_obj_t *settings_screen_create_dropdown_card(
         lv_obj_delete(card);
         return NULL;
     }
+
+    /*
+     * Dropdown availability is controlled programmatically during periodic
+     * settings refreshes. Disable theme transitions to avoid creating
+     * unnecessary animations when the disabled state changes.
+     */
+    lv_obj_set_style_transition(
+        dropdown,
+        NULL,
+        LV_PART_MAIN
+    );
 
     lv_dropdown_set_options(
         dropdown,
