@@ -140,6 +140,23 @@ esp_err_t storage_sd_service_flush(
 );
 
 /**
+ * @brief Flush buffered data and synchronize it with the SD card.
+ *
+ * Unlike storage_sd_service_flush(), this function also calls fsync()
+ * and may block while the card completes its internal write.
+ * It should normally be used when completing an important file or
+ * before shutdown, rather than in a frequent periodic loop.
+ *
+ * @param[in] file Open file handle.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if file is NULL,
+ * otherwise an ESP-IDF error code.
+ */
+esp_err_t storage_sd_service_sync(
+    FILE *file
+);
+
+/**
  * @brief Close an opened file.
  *
  * The FILE pointer is set to NULL after fclose().
@@ -204,6 +221,24 @@ esp_err_t storage_sd_service_list(
     size_t capacity,
     size_t *out_count,
     bool *out_has_more
+);
+
+/**
+ * @brief Ensure that a directory exists on the SD card.
+ *
+ * Missing path components are created recursively. Existing
+ * directories are accepted. The operation fails if any component
+ * exists as a regular file.
+ *
+ * @param[in] path Directory path inside the SD filesystem.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for an invalid path,
+ * ESP_ERR_INVALID_STATE if the card is unavailable or a component is
+ * not a directory, ESP_ERR_TIMEOUT if a lock cannot be acquired,
+ * otherwise an ESP-IDF error code.
+ */
+esp_err_t storage_sd_service_ensure_directory(
+    const char *path
 );
 
 /**

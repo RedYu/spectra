@@ -356,6 +356,163 @@ static esp_err_t storage_sd_service_build_path(
     return ESP_OK;
 }
 
+static esp_err_t storage_sd_service_ensure_directory_path(
+    const char *path
+)
+{
+    if (path == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (mkdir(path, 0775) == 0) {
+        return ESP_OK;
+    }
+
+    const int mkdir_errno = errno;
+
+    if (mkdir_errno != EEXIST) {
+        return storage_sd_service_errno_to_error(
+            mkdir_errno
+        );
+    }
+
+    struct stat status;
+
+    errno = 0;
+
+    if (stat(path, &status) != 0) {
+        return storage_sd_service_errno_to_error(
+            errno
+        );
+    }
+
+    if (!S_ISDIR(status.st_mode)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t storage_sd_service_ensure_directory(
+    const char *path
+)
+{
+    if (path == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t result =
+        storage_sd_service_mutex_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        storage_sd_service_validate_state_locked();
+
+    if (result != ESP_OK) {
+        storage_sd_service_mutex_unlock();
+        return result;
+    }
+
+    char full_path[
+        STORAGE_SD_MAX_PATH_LENGTH
+    ];
+
+    result =
+        storage_sd_service_build_path(
+            path,
+            full_path,
+            sizeof(full_path)
+        );
+
+    if (result != ESP_OK) {
+        storage_sd_service_mutex_unlock();
+        return result;
+    }
+
+    result =
+        storage_sd_service_spi_lock();
+
+    if (result != ESP_OK) {
+        storage_sd_service_mutex_unlock();
+        return result;
+    }
+
+    const size_t mount_length =
+        strlen(STORAGE_SD_MOUNT_POINT);
+
+    /*
+     * Create every component following the existing mount point.
+     */
+    for (size_t index = mount_length + 1U;
+         full_path[index] != '\0';
+         ++index) {
+
+        if (full_path[index] != '/') {
+            continue;
+        }
+
+        full_path[index] = '\0';
+
+        result =
+            storage_sd_service_ensure_directory_path(
+                full_path
+            );
+
+        full_path[index] = '/';
+
+        if (result != ESP_OK) {
+            break;
+        }
+    }
+
+    if (result == ESP_OK) {
+        /*
+         * Ignore trailing separators before creating the final
+         * component.
+         */
+        size_t length = strlen(full_path);
+
+        while ((length > mount_length) &&
+               (full_path[length - 1U] == '/')) {
+
+            full_path[length - 1U] = '\0';
+            --length;
+        }
+
+        if (length > mount_length) {
+            result =
+                storage_sd_service_ensure_directory_path(
+                    full_path
+                );
+        }
+    }
+
+    board_spi_unlock();
+    storage_sd_service_mutex_unlock();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to create directory '%s': %s",
+            path,
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    ESP_LOGD(
+        TAG,
+        "SD directory is ready: %s",
+        path
+    );
+
+    return ESP_OK;
+}
+
 /**
  * @brief Lock the shared LCD/SD SPI bus.
  */
@@ -705,6 +862,64 @@ esp_err_t storage_sd_service_seek(
 }
 
 esp_err_t storage_sd_service_flush(
+    FILE *file
+)
+{
+    if (file == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t result =
+        storage_sd_service_mutex_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        storage_sd_service_validate_state_locked();
+
+    if (result != ESP_OK) {
+        storage_sd_service_mutex_unlock();
+        return result;
+    }
+
+    result =
+        storage_sd_service_spi_lock();
+
+    if (result != ESP_OK) {
+        storage_sd_service_mutex_unlock();
+        return result;
+    }
+
+    errno = 0;
+
+    const int operation_result =
+        fflush(file);
+
+    const int saved_errno =
+        errno;
+
+    board_spi_unlock();
+    storage_sd_service_mutex_unlock();
+
+    if (operation_result != 0) {
+        ESP_LOGE(
+            TAG,
+            "Failed to flush file: errno=%d (%s)",
+            saved_errno,
+            strerror(saved_errno)
+        );
+
+        return storage_sd_service_errno_to_error(
+            saved_errno
+        );
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t storage_sd_service_sync(
     FILE *file
 )
 {
