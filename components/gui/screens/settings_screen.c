@@ -4736,17 +4736,6 @@ static lv_obj_t *settings_screen_create_dropdown_card(
         return NULL;
     }
 
-    /*
-     * Dropdown availability is controlled programmatically during periodic
-     * settings refreshes. Disable theme transitions to avoid creating
-     * unnecessary animations when the disabled state changes.
-     */
-    lv_obj_set_style_transition(
-        dropdown,
-        NULL,
-        LV_PART_MAIN
-    );
-
     lv_dropdown_set_options(
         dropdown,
         options
