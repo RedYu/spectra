@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stddef.h>
+#include <time.h>
 
 #include "esp_err.h"
 #include "esp_log.h"
@@ -32,6 +33,7 @@
 #include "system_service.h"
 #include "can_service.h"
 #include "can_fd_service.h"
+#include "time_service.h"
 
 #include "widgets/toolbar.h"
 #include "widgets/wifi_credentials_dialog.h"
@@ -1342,6 +1344,53 @@ static void settings_screen_refresh_system_info(void)
     const uint32_t chip_revision_minor =
         model.chip_revision % 100U;
 
+    char current_time[48];
+
+    struct tm local_time = {0};
+
+    const esp_err_t time_result =
+        time_service_get_local_time(
+            &local_time
+        );
+
+    if ((time_result == ESP_OK) &&
+        (strftime(
+            current_time,
+            sizeof(current_time),
+            "%Y-%m-%d %H:%M:%S %Z",
+            &local_time
+        ) > 0U)) {
+
+        /* The formatted local time is ready. */
+    } else {
+        (void)strlcpy(
+            current_time,
+            "Waiting for synchronization",
+            sizeof(current_time)
+        );
+    }
+
+    time_service_info_t time_info;
+
+    const esp_err_t time_info_result =
+        time_service_get_info(
+            &time_info
+        );
+
+    const char *time_sync_state = "Unavailable";
+
+    if (time_info_result == ESP_OK) {
+        if (time_info.synchronized) {
+            time_sync_state = "Synchronized";
+        } else if (time_info.running) {
+            time_sync_state = "Waiting for SNTP";
+        } else if (time_info.time_valid) {
+            time_sync_state = "Clock valid";
+        } else {
+            time_sync_state = "Stopped";
+        }
+    }
+
     lv_label_set_text_fmt(
         s_system_info_label,
 
@@ -1368,6 +1417,8 @@ static void settings_screen_refresh_system_info(void)
         "  Internal heap minimum: %u KB\n"
         "\n"
         "Runtime\n"
+        "  Local time: %s\n"
+        "  Time sync: %s\n"
         "  Uptime: %u d %02u:%02u:%02u\n"
         "  Last reset: %s",
 
@@ -1404,6 +1455,9 @@ static void settings_screen_refresh_system_info(void)
         (unsigned int)(
             model.minimum_free_heap / 1024U
         ),
+
+        current_time,
+        time_sync_state,
 
         (unsigned int)days,
         (unsigned int)hours,

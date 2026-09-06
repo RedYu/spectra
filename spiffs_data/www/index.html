@@ -431,6 +431,29 @@
                 grid-column: auto;
             }
         }
+
+        .time-value {
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .time-sync-dot {
+            width: 8px;
+            height: 8px;
+            flex: 0 0 8px;
+            border-radius: 50%;
+            background: var(--muted);
+        }
+
+        .time-sync-dot.waiting {
+            background: var(--warning);
+        }
+
+        .time-sync-dot.synchronized {
+            background: var(--success);
+        }
     </style>
 </head>
 
@@ -647,6 +670,21 @@
                     <div class="information-row">
                         <dt>SD capacity</dt>
                         <dd id="system-sd-capacity">-</dd>
+                    </div>
+
+                    <div class="information-row">
+                        <dt>Local time</dt>
+
+                        <dd class="time-value">
+                            <span id="system-local-time">-</span>
+
+                            <span
+                                id="system-time-sync"
+                                class="time-sync-dot"
+                                title="Time synchronization unavailable"
+                                aria-label="Time synchronization unavailable"
+                            ></span>
+                        </dd>
                     </div>
                 </dl>
             </article>
@@ -1020,6 +1058,67 @@
             return result;
         }
 
+        function updateDeviceTime(time) {
+            const value =
+                document.getElementById(
+                    "system-local-time"
+                );
+
+            const indicator =
+                document.getElementById(
+                    "system-time-sync"
+                );
+
+            if (!value || !indicator) {
+                return;
+            }
+
+            const valid =
+                time &&
+                time.valid === true &&
+                typeof time.local === "string" &&
+                time.local.length >= 19;
+
+            value.textContent =
+                valid
+                    ? time.local
+                        .slice(0, 19)
+                        .replace("T", " ")
+                    : "Unavailable";
+
+            indicator.classList.remove(
+                "waiting",
+                "synchronized"
+            );
+
+            let stateText =
+                "Time synchronization unavailable";
+
+            if (time?.synchronized === true) {
+                indicator.classList.add(
+                    "synchronized"
+                );
+
+                stateText =
+                    "Time synchronized via SNTP";
+
+            } else if (time?.service_running === true) {
+                indicator.classList.add(
+                    "waiting"
+                );
+
+                stateText =
+                    "Waiting for SNTP synchronization";
+            }
+
+            indicator.title = stateText;
+
+            indicator.setAttribute(
+                "aria-label",
+                stateText
+            );
+        }
+
         function updateSystem(system) {
             const title =
                 system.device_name
@@ -1177,6 +1276,10 @@
 
             updateConnectionStatus(
                 system.internet_available
+            );
+
+            updateDeviceTime(
+                system.time
             );
         }
 

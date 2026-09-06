@@ -42,6 +42,7 @@
 #include "can_router.h"
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
+#include "time_service.h"
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
@@ -570,6 +571,16 @@ static void startup_task(
 
         vTaskDelete(NULL);
         return;
+    }
+
+    result = start_service(
+        "Time",
+        time_service_start,
+        SERVICE_OPTIONAL
+    );
+
+    if (result != ESP_OK) {
+        startup_warning = true;
     }
 
     result =

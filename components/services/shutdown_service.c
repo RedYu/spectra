@@ -33,6 +33,7 @@
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
 #include "network_service.h"
+#include "time_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
 #define SHUTDOWN_SERVICE_TASK_PRIORITY \
@@ -111,6 +112,12 @@ static void shutdown_service_task(
      * releasing mDNS and network-interface resources.
      */
     internet_service_stop();
+
+    /*
+     * Stop SNTP synchronization before releasing network resources.
+     * The system clock continues running after the service is stopped.
+     */
+    time_service_stop();
 
     /*
      * Reject new asynchronous mDNS refresh requests and wait until any
