@@ -384,10 +384,21 @@ static void gui_task(
             delay_ms = 20U;
         }
 
-        vTaskDelay(
+        TickType_t delay_ticks =
             pdMS_TO_TICKS(
                 delay_ms
-            )
+            );
+
+        /*
+         * CONFIG_FREERTOS_HZ=100 gives a 10 ms tick. Delays below one
+         * tick would otherwise become zero and prevent IDLE from running.
+         */
+        if (delay_ticks == 0U) {
+            delay_ticks = 1U;
+        }
+
+        vTaskDelay(
+            delay_ticks
         );
     }
 }
