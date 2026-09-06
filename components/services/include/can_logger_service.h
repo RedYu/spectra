@@ -38,6 +38,11 @@ typedef enum
      */
     CAN_LOGGER_FORMAT_ASC = 0,
 
+    /**
+     * Native binary Spectra CAN Log format.
+     */
+    CAN_LOGGER_FORMAT_SCL,
+
     CAN_LOGGER_FORMAT_COUNT,
 
 } can_logger_format_t;

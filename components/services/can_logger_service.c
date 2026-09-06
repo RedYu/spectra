@@ -26,17 +26,21 @@
 #include "app_task_priorities.h"
 #include "can_router.h"
 #include "storage_sd_service.h"
+#include "can_logger_binary_format.h"
+#include "time_service.h"
 
 #define CAN_LOGGER_EVENT_QUEUE_LENGTH       (2048U)
 #define CAN_LOGGER_COMMAND_QUEUE_LENGTH     (4U)
 #define CAN_LOGGER_WRITE_BUFFER_SIZE        (16U * 1024U)
+#define CAN_LOGGER_SD_WRITE_CHUNK_SIZE      (4U * 1024U)
 #define CAN_LOGGER_TASK_STACK_SIZE          (6144U)
 #define CAN_LOGGER_TASK_PRIORITY            APP_TASK_PRIORITY_CAN_LOGGER
 #define CAN_LOGGER_SYNC_INTERVAL_MS         (5000U)
 #define CAN_LOGGER_COMMAND_TIMEOUT_MS       (100U)
 #define CAN_LOGGER_STOP_TIMEOUT_MS          (10000U)
-#define CAN_LOGGER_TASK_POLL_MS              (20U)
-#define CAN_LOGGER_LINE_MAX_LENGTH           (512U)
+#define CAN_LOGGER_TASK_POLL_MS             (20U)
+#define CAN_LOGGER_LINE_MAX_LENGTH          (512U)
+#define CAN_LOGGER_PROCESS_BATCH_MAX        (32U)
 
 #define CAN_LOGGER_EVENT_RECORDING_STOPPED  BIT0
 #define CAN_LOGGER_EVENT_TASK_STOPPED       BIT1
@@ -68,6 +72,9 @@ typedef struct
     FILE *file;
     char *buffer;
     size_t buffer_used;
+
+    can_logger_format_t format;
+
     uint64_t session_started_us;
     TickType_t last_sync_tick;
 
@@ -105,6 +112,12 @@ static atomic_uint_fast64_t s_serialization_failures = ATOMIC_VAR_INIT(0U);
 static atomic_uint_fast64_t s_write_failures = ATOMIC_VAR_INIT(0U);
 static atomic_uint_fast64_t s_sync_failures = ATOMIC_VAR_INIT(0U);
 static atomic_uint_fast32_t s_queue_peak = ATOMIC_VAR_INIT(0U);
+
+static esp_err_t can_logger_writer_append(
+    can_logger_writer_t *writer,
+    const void *data,
+    size_t size
+);
 
 static esp_err_t can_logger_lock(void)
 {
@@ -320,13 +333,18 @@ static void can_logger_router_callback(
             memory_order_relaxed
         );
     } else {
-        (void)atomic_fetch_add_explicit(
-            &s_queued_events,
-            1U,
-            memory_order_relaxed
-        );
+        const uint_fast64_t queued =
+            atomic_fetch_add_explicit(
+                &s_queued_events,
+                1U,
+                memory_order_relaxed
+            ) + 1U;
 
-        can_logger_update_queue_peak();
+        if ((queued == 1U) ||
+            ((queued % CAN_LOGGER_PROCESS_BATCH_MAX) == 0U)) {
+
+            can_logger_update_queue_peak();
+        }
     }
 
     (void)atomic_fetch_sub_explicit(
@@ -340,7 +358,9 @@ static esp_err_t can_logger_writer_flush_buffer(
     can_logger_writer_t *writer
 )
 {
-    if ((writer == NULL) || (writer->file == NULL)) {
+    if ((writer == NULL) ||
+        (writer->file == NULL)) {
+
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -348,32 +368,156 @@ static esp_err_t can_logger_writer_flush_buffer(
         return ESP_OK;
     }
 
-    size_t written = 0U;
+    size_t offset = 0U;
 
-    const esp_err_t result = storage_sd_service_write(
-        writer->file,
-        writer->buffer,
-        writer->buffer_used,
-        &written
-    );
+    while (offset < writer->buffer_used) {
+        const size_t remaining =
+            writer->buffer_used - offset;
 
-    if (result != ESP_OK) {
-        (void)atomic_fetch_add(&s_write_failures, 1U);
-        return result;
+        const size_t chunk_size =
+            remaining >
+            CAN_LOGGER_SD_WRITE_CHUNK_SIZE
+                ? CAN_LOGGER_SD_WRITE_CHUNK_SIZE
+                : remaining;
+
+        size_t written = 0U;
+
+        const esp_err_t result =
+            storage_sd_service_write(
+                writer->file,
+                writer->buffer + offset,
+                chunk_size,
+                &written
+            );
+
+        if (result != ESP_OK) {
+            (void)atomic_fetch_add_explicit(
+                &s_write_failures,
+                1U,
+                memory_order_relaxed
+            );
+
+            return result;
+        }
+
+        if (written != chunk_size) {
+            (void)atomic_fetch_add_explicit(
+                &s_write_failures,
+                1U,
+                memory_order_relaxed
+            );
+
+            return ESP_FAIL;
+        }
+
+        offset += written;
+
+        if (offset < writer->buffer_used) {
+            /*
+             * Temporarily block the logger so lower-priority LCD work can
+             * acquire the shared SPI bus between SD write blocks.
+             */
+            vTaskDelay(1U);
+        }
     }
 
-    (void)atomic_fetch_add(
+    (void)atomic_fetch_add_explicit(
         &s_written_bytes,
-        (uint_fast64_t)written
+        (uint_fast64_t)writer->buffer_used,
+        memory_order_relaxed
     );
 
     writer->buffer_used = 0U;
+
     return ESP_OK;
+}
+
+static esp_err_t can_logger_write_scl_header(
+    can_logger_writer_t *writer
+)
+{
+    if (writer == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint64_t start_unix_us = 0U;
+
+    if (time_service_time_valid()) {
+        const time_t now = time(NULL);
+
+        if (now > 0) {
+            start_unix_us =
+                (uint64_t)now * UINT64_C(1000000);
+        }
+    }
+
+    uint8_t header[
+        CAN_LOGGER_SCL_FILE_HEADER_SIZE
+    ];
+
+    size_t encoded_size = 0U;
+
+    esp_err_t result =
+        can_logger_scl_encode_file_header(
+            header,
+            sizeof(header),
+            start_unix_us,
+            writer->session_started_us,
+            &encoded_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return can_logger_writer_append(
+        writer,
+        header,
+        encoded_size
+    );
+}
+
+static esp_err_t can_logger_serialize_scl_event(
+    can_logger_writer_t *writer,
+    const can_logger_queue_item_t *item
+)
+{
+    if ((writer == NULL) ||
+        (item == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t record[
+        CAN_LOGGER_SCL_EVENT_MAX_SIZE
+    ];
+
+    size_t encoded_size = 0U;
+
+    esp_err_t result =
+        can_logger_scl_encode_event(
+            &item->event,
+            item->captured_at_us,
+            writer->session_started_us,
+            record,
+            sizeof(record),
+            &encoded_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return can_logger_writer_append(
+        writer,
+        record,
+        encoded_size
+    );
 }
 
 static esp_err_t can_logger_writer_append(
     can_logger_writer_t *writer,
-    const char *data,
+    const void *data,
     size_t size
 )
 {
@@ -401,13 +545,19 @@ static esp_err_t can_logger_writer_append(
         );
 
         if (result != ESP_OK) {
-            (void)atomic_fetch_add(&s_write_failures, 1U);
+            (void)atomic_fetch_add_explicit(
+                &s_write_failures, 
+                1U, 
+                memory_order_relaxed
+            );
+
             return result;
         }
 
-        (void)atomic_fetch_add(
+        (void)atomic_fetch_add_explicit(
             &s_written_bytes,
-            (uint_fast64_t)written
+            (uint_fast64_t)written,
+            memory_order_relaxed
         );
         return ESP_OK;
     }
@@ -626,21 +776,31 @@ static esp_err_t can_logger_write_asc_header(
     );
 }
 
-static esp_err_t can_logger_writer_sync(
+static esp_err_t can_logger_writer_flush(
     can_logger_writer_t *writer
 )
 {
     esp_err_t result =
-        can_logger_writer_flush_buffer(writer);
+        can_logger_writer_flush_buffer(
+            writer
+        );
 
     if (result == ESP_OK) {
-        result = storage_sd_service_flush(writer->file);
+        result =
+            storage_sd_service_flush(
+                writer->file
+            );
     }
 
     if (result != ESP_OK) {
-        (void)atomic_fetch_add(&s_sync_failures, 1U);
+        (void)atomic_fetch_add_explicit(
+            &s_sync_failures,
+            1U,
+            memory_order_relaxed
+        );
     } else {
-        writer->last_sync_tick = xTaskGetTickCount();
+        writer->last_sync_tick =
+            xTaskGetTickCount();
     }
 
     return result;
@@ -677,34 +837,88 @@ static esp_err_t can_logger_writer_open(
     const can_logger_recording_config_t *config
 )
 {
-    esp_err_t result = storage_sd_service_open(
-        config->file_path,
-        "wx",
-        &writer->file
-    );
+    esp_err_t result =
+        storage_sd_service_ensure_directory(
+            "/logs/can"
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        storage_sd_service_open(
+            config->file_path,
+            "wx",
+            &writer->file
+        );
 
     if (result != ESP_OK) {
         return result;
     }
 
     writer->buffer_used = 0U;
+    writer->format = config->format;
     writer->session_started_us =
         (uint64_t)esp_timer_get_time();
-    writer->last_sync_tick = xTaskGetTickCount();
+    writer->last_sync_tick =
+        xTaskGetTickCount();
 
-    result = can_logger_write_asc_header(writer);
+    switch (writer->format) {
+        case CAN_LOGGER_FORMAT_ASC:
+            result =
+                can_logger_write_asc_header(
+                    writer
+                );
+            break;
+
+        case CAN_LOGGER_FORMAT_SCL:
+            result =
+                can_logger_write_scl_header(
+                    writer
+                );
+            break;
+
+        default:
+            result = ESP_ERR_NOT_SUPPORTED;
+            break;
+    }
 
     if (result != ESP_OK) {
-        (void)storage_sd_service_close(&writer->file);
+        (void)storage_sd_service_close(
+            &writer->file
+        );
+
+        (void)storage_sd_service_remove(
+            config->file_path
+        );
+
         return result;
     }
 
-    if (can_logger_lock() == ESP_OK) {
-        s_info.state = CAN_LOGGER_STATE_RECORDING;
-        s_info.started_at_us = writer->session_started_us;
-        s_info.last_error = ESP_OK;
-        can_logger_unlock();
+    result = can_logger_lock();
+
+    if (result != ESP_OK) {
+        (void)storage_sd_service_close(
+            &writer->file
+        );
+
+        (void)storage_sd_service_remove(
+            config->file_path
+        );
+
+        return result;
     }
+
+    s_info.state =
+        CAN_LOGGER_STATE_RECORDING;
+
+    s_info.started_at_us =
+        writer->session_started_us;
+
+    s_info.last_error = ESP_OK;
+
+    can_logger_unlock();
 
     atomic_store(
         &s_bus_mask,
@@ -720,7 +934,15 @@ static esp_err_t can_logger_writer_open(
         memory_order_release
     );
 
-    ESP_LOGI(TAG, "CAN recording started: %s", config->file_path);
+    ESP_LOGI(
+        TAG,
+        "CAN recording started: path=%s, format=%s",
+        config->file_path,
+        config->format == CAN_LOGGER_FORMAT_SCL
+            ? "SCL"
+            : "ASC"
+    );
+
     return ESP_OK;
 }
 
@@ -729,18 +951,52 @@ static esp_err_t can_logger_writer_process_item(
     const can_logger_queue_item_t *item
 )
 {
-    const esp_err_t result =
-        can_logger_serialize_asc_event(writer, item);
+    if ((writer == NULL) ||
+        (item == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t result;
+
+    switch (writer->format) {
+        case CAN_LOGGER_FORMAT_ASC:
+            result =
+                can_logger_serialize_asc_event(
+                    writer,
+                    item
+                );
+            break;
+
+        case CAN_LOGGER_FORMAT_SCL:
+            result =
+                can_logger_serialize_scl_event(
+                    writer,
+                    item
+                );
+            break;
+
+        default:
+            result = ESP_ERR_NOT_SUPPORTED;
+            break;
+    }
 
     if (result != ESP_OK) {
-        (void)atomic_fetch_add(
+        (void)atomic_fetch_add_explicit(
             &s_serialization_failures,
-            1U
+            1U,
+            memory_order_relaxed
         );
+
         return result;
     }
 
-    (void)atomic_fetch_add(&s_written_events, 1U);
+    (void)atomic_fetch_add_explicit(
+        &s_written_events,
+        1U,
+        memory_order_relaxed
+    );
+
     return ESP_OK;
 }
 
@@ -748,29 +1004,54 @@ static esp_err_t can_logger_writer_close(
     can_logger_writer_t *writer
 )
 {
-    if ((writer == NULL) || (writer->file == NULL)) {
+    if ((writer == NULL) ||
+        (writer->file == NULL)) {
+
         return ESP_OK;
     }
 
-    const char trailer[] = "End TriggerBlock\n";
-    esp_err_t result = can_logger_writer_append(
-        writer,
-        trailer,
-        sizeof(trailer) - 1U
-    );
+    esp_err_t result = ESP_OK;
+
+    if (writer->format ==
+        CAN_LOGGER_FORMAT_ASC) {
+
+        static const char trailer[] =
+            "End TriggerBlock\n";
+
+        result =
+            can_logger_writer_append(
+                writer,
+                trailer,
+                sizeof(trailer) - 1U
+            );
+    }
 
     if (result == ESP_OK) {
-        result = can_logger_writer_sync(writer);
+        result =
+            can_logger_writer_flush_buffer(
+                writer
+            );
+    }
+
+    if (result == ESP_OK) {
+        result =
+            storage_sd_service_sync(
+                writer->file
+            );
     }
 
     const esp_err_t close_result =
-        storage_sd_service_close(&writer->file);
+        storage_sd_service_close(
+            &writer->file
+        );
 
     if (result == ESP_OK) {
         result = close_result;
     }
 
     writer->buffer_used = 0U;
+    writer->format = CAN_LOGGER_FORMAT_ASC;
+
     return result;
 }
 
@@ -934,21 +1215,49 @@ static void can_logger_task(void *argument)
             continue;
         }
 
-        can_logger_queue_item_t item;
+        bool recording_failed = false;
 
-        if (xQueueReceive(
-                s_event_queue,
-                &item,
-                pdMS_TO_TICKS(CAN_LOGGER_TASK_POLL_MS)
-            ) == pdTRUE) {
+        for (size_t index = 0U;
+            index < CAN_LOGGER_PROCESS_BATCH_MAX;
+            ++index) {
+
+            can_logger_queue_item_t item;
+
+            const TickType_t wait_ticks =
+                index == 0U
+                    ? pdMS_TO_TICKS(
+                        CAN_LOGGER_TASK_POLL_MS
+                    )
+                    : 0U;
+
+            if (xQueueReceive(
+                    s_event_queue,
+                    &item,
+                    wait_ticks
+                ) != pdTRUE) {
+
+                break;
+            }
 
             const esp_err_t result =
-                can_logger_writer_process_item(&writer, &item);
+                can_logger_writer_process_item(
+                    &writer,
+                    &item
+                );
 
             if (result != ESP_OK) {
-                can_logger_fail_recording(&writer, result);
-                continue;
+                can_logger_fail_recording(
+                    &writer,
+                    result
+                );
+
+                recording_failed = true;
+                break;
             }
+        }
+
+        if (recording_failed) {
+            continue;
         }
 
         const TickType_t now = xTaskGetTickCount();
@@ -957,7 +1266,9 @@ static void can_logger_task(void *argument)
             pdMS_TO_TICKS(CAN_LOGGER_SYNC_INTERVAL_MS)) {
 
             const esp_err_t result =
-                can_logger_writer_sync(&writer);
+                can_logger_writer_flush(
+                    &writer
+                );
 
             if (result != ESP_OK) {
                 can_logger_fail_recording(&writer, result);

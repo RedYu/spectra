@@ -6,8 +6,10 @@
 #include "screens/main_screen.h"
 
 #include <string.h>
+#include <stdio.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "system_model.h"
 #include "widgets/toolbar.h"
@@ -26,7 +28,10 @@
 #include "can_service.h"
 #include "can_fd_service.h"
 #include "can_monitor_service.h"
+#include "can_logger_service.h"
+#include "time_service.h"
 #include "battery_service.h"
+#include "storage_sd_service.h"
 
 #define MAIN_TOOLBAR_HEIGHT \
     GUI_THEME_TOOLBAR_HEIGHT
@@ -101,6 +106,10 @@ typedef struct
         MAIN_CAN_CHANNEL_COUNT
     ];
 
+    uint64_t can_previous_rate_timestamp_us[
+        MAIN_CAN_CHANNEL_COUNT
+    ];
+
     lv_timer_t *update_timer;
 
 } main_screen_context_t;
@@ -169,19 +178,28 @@ typedef struct
 
 } main_screen_can_rate_t;
 
-static uint32_t main_screen_counter_difference(
+static uint32_t main_screen_calculate_rate(
     uint64_t current,
-    uint64_t previous
+    uint64_t previous,
+    uint64_t elapsed_us
 )
 {
+    if (elapsed_us == 0U) {
+        return 0U;
+    }
+
     const uint64_t difference =
         current >= previous
             ? current - previous
             : current;
 
-    return difference > UINT32_MAX
+    const uint64_t rate =
+        (difference * UINT64_C(1000000)) /
+        elapsed_us;
+
+    return rate > UINT32_MAX
         ? UINT32_MAX
-        : (uint32_t)difference;
+        : (uint32_t)rate;
 }
 
 static main_screen_can_rate_t main_screen_update_frame_rate(
@@ -196,17 +214,36 @@ static main_screen_can_rate_t main_screen_update_frame_rate(
         return rate;
     }
 
+    const uint64_t now_us =
+        (uint64_t)esp_timer_get_time();
+
     if (s_context.can_frame_counter_initialized[channel]) {
+        const uint64_t previous_time_us =
+            s_context.can_previous_rate_timestamp_us[
+                channel
+            ];
+
+        const uint64_t elapsed_us =
+            now_us >= previous_time_us
+                ? now_us - previous_time_us
+                : 0U;
+
         rate.rx =
-            main_screen_counter_difference(
+            main_screen_calculate_rate(
                 received_frames,
-                s_context.can_previous_rx_count[channel]
+                s_context.can_previous_rx_count[
+                    channel
+                ],
+                elapsed_us
             );
 
         rate.tx =
-            main_screen_counter_difference(
+            main_screen_calculate_rate(
                 transmitted_frames,
-                s_context.can_previous_tx_count[channel]
+                s_context.can_previous_tx_count[
+                    channel
+                ],
+                elapsed_us
             );
     }
 
@@ -215,6 +252,9 @@ static main_screen_can_rate_t main_screen_update_frame_rate(
 
     s_context.can_previous_tx_count[channel] =
         transmitted_frames;
+
+    s_context.can_previous_rate_timestamp_us[channel] =
+        now_us;
 
     s_context.can_frame_counter_initialized[channel] =
         true;
@@ -232,6 +272,7 @@ static void main_screen_reset_frame_rate(
 
     s_context.can_previous_rx_count[channel] = 0U;
     s_context.can_previous_tx_count[channel] = 0U;
+    s_context.can_previous_rate_timestamp_us[channel] = 0U;
     s_context.can_frame_counter_initialized[channel] = false;
 }
 
@@ -304,17 +345,368 @@ static lv_color_t main_screen_can_fd_state_color(
     }
 }
 
+static esp_err_t main_screen_create_log_path(
+    char *path,
+    size_t path_size
+)
+{
+    if ((path == NULL) ||
+        (path_size == 0U)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char filename[96];
+
+    esp_err_t result =
+        time_service_format_filename(
+            "can",
+            "scl",
+            filename,
+            sizeof(filename)
+        );
+
+    if (result == ESP_OK) {
+        const int written =
+            snprintf(
+                path,
+                path_size,
+                "/logs/can/%s",
+                filename
+            );
+
+        if ((written < 0) ||
+            ((size_t)written >= path_size)) {
+
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        return ESP_OK;
+    }
+
+    /*
+     * Permit recording before SNTP synchronization. This fallback
+     * may collide after another reboot, in which case exclusive file
+     * creation safely rejects the recording.
+     */
+    const uint64_t uptime_ms =
+        (uint64_t)esp_timer_get_time() /
+        UINT64_C(1000);
+
+    const int written =
+        snprintf(
+            path,
+            path_size,
+            "/logs/can/can-unsynced-%llu.scl",
+            (unsigned long long)uptime_ms
+        );
+
+    if ((written < 0) ||
+        ((size_t)written >= path_size)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    return ESP_OK;
+}
+
 static void main_screen_capture_button_event_cb(
     lv_event_t *event
 )
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+    if (lv_event_get_code(event) !=
+        LV_EVENT_CLICKED) {
+
+        return;
+    }
+
+    if (!can_logger_service_is_running()) {
+        ESP_LOGW(
+            TAG,
+            "CAN logger service is not running"
+        );
+
+        return;
+    }
+
+    can_logger_info_t info = {0};
+
+    esp_err_t result =
+        can_logger_service_get_info(
+            &info
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to read CAN logger state: %s",
+            esp_err_to_name(result)
+        );
+
+        return;
+    }
+
+    if (info.state ==
+        CAN_LOGGER_STATE_RECORDING) {
+
+        result =
+            can_logger_service_stop_recording();
+
+        if (result != ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "Failed to stop CAN recording: %s",
+                esp_err_to_name(result)
+            );
+        }
+
+        return;
+    }
+
+    if ((info.state == CAN_LOGGER_STATE_STARTING) ||
+        (info.state == CAN_LOGGER_STATE_STOPPING)) {
+
+        return;
+    }
+
+    storage_sd_state_t sd_state =
+        STORAGE_SD_STATE_UNAVAILABLE;
+
+    result =
+        storage_sd_service_get_state(
+            &sd_state
+        );
+
+    if ((result != ESP_OK) ||
+        (sd_state != STORAGE_SD_STATE_MOUNTED)) {
+
+        ESP_LOGW(
+            TAG,
+            "Cannot start CAN recording: SD card is not mounted"
+        );
+
+        return;
+    }
+
+    can_logger_recording_config_t config = {
+        .format = CAN_LOGGER_FORMAT_SCL,
+
+        .filter = {
+            .primary = true,
+            .secondary = true,
+            .rx = true,
+            .tx = true,
+        },
+    };
+
+    result =
+        main_screen_create_log_path(
+            config.file_path,
+            sizeof(config.file_path)
+        );
+
+    if (result == ESP_OK) {
+        result =
+            can_logger_service_start_recording(
+                &config
+            );
+    }
+
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to start CAN recording: %s",
+            esp_err_to_name(result)
+        );
+
         return;
     }
 
     ESP_LOGI(
         TAG,
-        "Capture control is not implemented yet"
+        "CAN recording requested: %s",
+        config.file_path
+    );
+}
+
+static void main_screen_set_disabled(
+    lv_obj_t *object,
+    bool disabled
+)
+{
+    if (object == NULL) {
+        return;
+    }
+
+    const bool currently_disabled =
+        lv_obj_has_state(
+            object,
+            LV_STATE_DISABLED
+        );
+
+    if (currently_disabled == disabled) {
+        return;
+    }
+
+    if (disabled) {
+        lv_obj_add_state(
+            object,
+            LV_STATE_DISABLED
+        );
+    } else {
+        lv_obj_remove_state(
+            object,
+            LV_STATE_DISABLED
+        );
+    }
+}
+
+static void main_screen_update_recording(void)
+{
+    if ((s_context.recording_indicator == NULL) ||
+        (s_context.recording_status_label == NULL) ||
+        (s_context.recording_details_label == NULL) ||
+        (s_context.capture_button == NULL) ||
+        (s_context.capture_button_label == NULL)) {
+
+        return;
+    }
+
+    can_logger_info_t info = {0};
+
+    if (!can_logger_service_is_running() ||
+        (can_logger_service_get_info(
+            &info
+        ) != ESP_OK)) {
+
+        lv_label_set_text(
+            s_context.recording_status_label,
+            "Unavailable"
+        );
+
+        lv_label_set_text(
+            s_context.recording_details_label,
+            ""
+        );
+
+        lv_label_set_text(
+            s_context.capture_button_label,
+            "Start capture"
+        );
+
+        main_screen_set_disabled(
+            s_context.capture_button,
+            true
+        );
+
+        lv_obj_set_style_bg_color(
+            s_context.recording_indicator,
+            lv_palette_main(LV_PALETTE_GREY),
+            LV_PART_MAIN
+        );
+
+        return;
+    }
+
+    const uint64_t total_seconds =
+        info.duration_ms / UINT64_C(1000);
+
+    const unsigned int hours =
+        (unsigned int)(total_seconds / UINT64_C(3600));
+
+    const unsigned int minutes =
+        (unsigned int)(
+            (total_seconds / UINT64_C(60)) %
+            UINT64_C(60)
+        );
+
+    const unsigned int seconds =
+        (unsigned int)(
+            total_seconds % UINT64_C(60)
+        );
+
+    lv_label_set_text_fmt(
+        s_context.recording_details_label,
+        "%02u:%02u:%02u | %llu KB | Drop %llu",
+        hours,
+        minutes,
+        seconds,
+        (unsigned long long)(
+            info.statistics.written_bytes /
+            UINT64_C(1024)
+        ),
+        (unsigned long long)
+            info.statistics.dropped_events
+    );
+
+    lv_color_t color =
+        lv_palette_main(LV_PALETTE_GREY);
+
+    bool button_enabled = true;
+    const char *button_text = "Start capture";
+    const char *status_text = "Idle";
+
+    switch (info.state) {
+        case CAN_LOGGER_STATE_STARTING:
+            status_text = "Starting";
+            button_enabled = false;
+            color =
+                lv_palette_main(
+                    LV_PALETTE_BLUE
+                );
+            break;
+
+        case CAN_LOGGER_STATE_RECORDING:
+            status_text = "Recording";
+            button_text = "Stop capture";
+            color =
+                lv_palette_main(
+                    LV_PALETTE_RED
+                );
+            break;
+
+        case CAN_LOGGER_STATE_STOPPING:
+            status_text = "Stopping";
+            button_text = "Stop capture";
+            button_enabled = false;
+            color =
+                lv_palette_main(
+                    LV_PALETTE_AMBER
+                );
+            break;
+
+        case CAN_LOGGER_STATE_ERROR:
+            status_text = "Error";
+            color =
+                lv_palette_main(
+                    LV_PALETTE_RED
+                );
+            break;
+
+        case CAN_LOGGER_STATE_IDLE:
+        default:
+            break;
+    }
+
+    lv_label_set_text(
+        s_context.recording_status_label,
+        status_text
+    );
+
+    lv_label_set_text(
+        s_context.capture_button_label,
+        button_text
+    );
+
+    lv_obj_set_style_bg_color(
+        s_context.recording_indicator,
+        color,
+        LV_PART_MAIN
+    );
+
+    main_screen_set_disabled(
+        s_context.capture_button,
+        !button_enabled
     );
 }
 
@@ -570,14 +962,6 @@ static esp_err_t main_screen_create_action_row(
     if (s_context.monitor_button == NULL) {
         return ESP_ERR_NO_MEM;
     }
-
-    /*
-     * Enable these controls after their services are implemented.
-     */
-    lv_obj_add_state(
-        s_context.capture_button,
-        LV_STATE_DISABLED
-    );
 
     return ESP_OK;
 }
@@ -1054,6 +1438,7 @@ static void main_screen_update(void)
             : NULL
     );
 
+    main_screen_update_recording();
     main_screen_update_battery();
 }
 
