@@ -26,6 +26,7 @@
 #include "can_service.h"
 #include "can_fd_service.h"
 #include "can_monitor_service.h"
+#include "battery_service.h"
 
 #define MAIN_TOOLBAR_HEIGHT \
     GUI_THEME_TOOLBAR_HEIGHT
@@ -53,6 +54,9 @@ typedef struct
     lv_obj_t *recording_indicator;
     lv_obj_t *recording_status_label;
     lv_obj_t *recording_details_label;
+
+    lv_obj_t *battery_indicator;
+    lv_obj_t *battery_label;
 
     /*
      * CAN channel cards.
@@ -879,6 +883,77 @@ static void main_screen_update_secondary_can(
     );
 }
 
+static void main_screen_update_battery(void)
+{
+    if ((s_context.battery_indicator == NULL) ||
+        (s_context.battery_label == NULL)) {
+
+        return;
+    }
+
+    battery_service_info_t info = {0};
+
+    if (!battery_service_is_running() ||
+        (battery_service_get_info(&info) != ESP_OK) ||
+        !info.measurement_valid) {
+
+        lv_label_set_text(
+            s_context.battery_label,
+            "Battery --"
+        );
+
+        lv_obj_set_style_bg_color(
+            s_context.battery_indicator,
+            lv_palette_main(LV_PALETTE_GREY),
+            LV_PART_MAIN
+        );
+
+        return;
+    }
+
+    if (!info.battery_present) {
+        lv_label_set_text(
+            s_context.battery_label,
+            "No battery"
+        );
+
+        lv_obj_set_style_bg_color(
+            s_context.battery_indicator,
+            lv_palette_main(LV_PALETTE_GREY),
+            LV_PART_MAIN
+        );
+
+        return;
+    }
+
+    lv_color_t color;
+
+    if (info.level_percent <= 10U) {
+        color =
+            lv_palette_main(LV_PALETTE_RED);
+    } else if (info.level_percent <= 30U) {
+        color =
+            lv_palette_main(LV_PALETTE_AMBER);
+    } else {
+        color =
+            lv_palette_main(LV_PALETTE_GREEN);
+    }
+
+    lv_obj_set_style_bg_color(
+        s_context.battery_indicator,
+        color,
+        LV_PART_MAIN
+    );
+
+    lv_label_set_text_fmt(
+        s_context.battery_label,
+        "%u%% %u.%02u V",
+        (unsigned int)info.level_percent,
+        (unsigned int)(info.voltage_mv / 1000U),
+        (unsigned int)((info.voltage_mv % 1000U) / 10U)
+    );
+}
+
 static void main_screen_update(void)
 {
     if (s_context.root == NULL) {
@@ -978,6 +1053,8 @@ static void main_screen_update(void)
             ? &can_statistics
             : NULL
     );
+
+    main_screen_update_battery();
 }
 
 static void main_screen_update_timer_cb(
@@ -1520,6 +1597,65 @@ static esp_err_t main_screen_create_recording_row(
         LV_TEXT_ALIGN_RIGHT,
         LV_PART_MAIN
     );
+
+    s_context.battery_indicator =
+        lv_obj_create(row);
+
+    if (s_context.battery_indicator == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    lv_obj_set_size(
+        s_context.battery_indicator,
+        10,
+        10
+    );
+
+    lv_obj_set_style_radius(
+        s_context.battery_indicator,
+        LV_RADIUS_CIRCLE,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_color(
+        s_context.battery_indicator,
+        theme->colors.text_disabled,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_bg_opa(
+        s_context.battery_indicator,
+        LV_OPA_COVER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_border_width(
+        s_context.battery_indicator,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_pad_all(
+        s_context.battery_indicator,
+        0,
+        LV_PART_MAIN
+    );
+
+    lv_obj_remove_flag(
+        s_context.battery_indicator,
+        LV_OBJ_FLAG_SCROLLABLE
+    );
+
+    s_context.battery_label =
+        main_screen_create_card_label(
+            row,
+            "Battery --",
+            gui_styles_text_small()
+        );
+
+    if (s_context.battery_label == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
 
     return ESP_OK;
 }
