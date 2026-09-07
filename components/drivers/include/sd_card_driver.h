@@ -86,6 +86,31 @@ esp_err_t sd_card_driver_get_info_text(
     size_t buffer_size
 );
 
+/**
+ * @brief Read physical sectors directly from the SD card.
+ *
+ * This function bypasses FATFS and reads sectors through the SDMMC/SDSPI
+ * driver. It is intended for diagnostics and benchmarking.
+ *
+ * The card must be mounted. The destination buffer should reside in
+ * DMA-capable internal memory. This function must not be called
+ * concurrently with filesystem operations.
+ *
+ * @param[out] buffer DMA-capable destination buffer.
+ * @param[in] start_sector First physical sector to read.
+ * @param[in] sector_count Number of sectors to read.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for invalid arguments
+ * or an out-of-range sector request, ESP_ERR_INVALID_STATE if the card
+ * is not mounted, ESP_ERR_TIMEOUT if a required lock cannot be acquired,
+ * otherwise an SDMMC/SDSPI error code.
+ */
+esp_err_t sd_card_driver_read_sectors(
+    void *buffer,
+    size_t start_sector,
+    size_t sector_count
+);
+
 #ifdef __cplusplus
 }
 #endif

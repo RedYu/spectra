@@ -43,6 +43,7 @@
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
 #include "time_service.h"
+#include "storage_sd_benchmark.h"
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
@@ -872,6 +873,36 @@ static void startup_task(
                     "SD card ready"
                 );
             }
+#if CONFIG_SPECTRA_SD_BENCHMARK_ON_STARTUP
+            const storage_sd_benchmark_config_t benchmark_config = {
+                .file_path = "/sd-benchmark.bin",
+                .file_size =
+                    STORAGE_SD_BENCHMARK_DEFAULT_FILE_SIZE,
+                .block_size =
+                    STORAGE_SD_BENCHMARK_DEFAULT_BLOCK_SIZE,
+                .remove_file_after_test = true,
+            };
+
+            storage_sd_benchmark_result_t benchmark_result;
+
+            ESP_LOGI(TAG, "Starting SD-card benchmark");
+
+            const esp_err_t benchmark_status =
+                storage_sd_benchmark_run(
+                    &benchmark_config,
+                    &benchmark_result
+                );
+
+            if (benchmark_status != ESP_OK) {
+                ESP_LOGE(
+                    TAG,
+                    "SD-card benchmark failed: %s",
+                    esp_err_to_name(benchmark_status)
+                );
+
+                startup_warning = true;
+            }
+#endif
         }
     }
 

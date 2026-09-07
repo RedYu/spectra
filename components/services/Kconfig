@@ -1,0 +1,10 @@
+menu "Spectra diagnostics"
+
+config SPECTRA_SD_BENCHMARK_ON_STARTUP
+    bool "Run SD-card benchmark during startup"
+    default n
+    help
+        Run a destructive sequential write/read test after mounting
+        the SD card. Intended only for development diagnostics.
+
+endmenu

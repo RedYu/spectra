@@ -328,3 +328,68 @@ esp_err_t sd_card_driver_get_info_text(
 
     return result;
 }
+
+esp_err_t sd_card_driver_read_sectors(
+    void *buffer,
+    size_t start_sector,
+    size_t sector_count
+)
+{
+    if ((buffer == NULL) ||
+        (sector_count == 0U)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(
+            s_mutex,
+            pdMS_TO_TICKS(1000U)
+        ) != pdTRUE) {
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (!s_mounted ||
+        (s_card == NULL)) {
+
+        (void)xSemaphoreGive(s_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const size_t card_sector_count =
+        (size_t)s_card->csd.capacity;
+
+    if ((start_sector >= card_sector_count) ||
+        (sector_count >
+         (card_sector_count - start_sector))) {
+
+        (void)xSemaphoreGive(s_mutex);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!board_spi_lock(
+            pdMS_TO_TICKS(3000U)
+        )) {
+
+        (void)xSemaphoreGive(s_mutex);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    const esp_err_t result =
+        sdmmc_read_sectors(
+            s_card,
+            buffer,
+            start_sector,
+            sector_count
+        );
+
+    board_spi_unlock();
+
+    (void)xSemaphoreGive(s_mutex);
+
+    return result;
+}

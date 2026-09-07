@@ -5,6 +5,7 @@ idf_component_register(
         "gui_service.c"
         "storage_service.c"
         "storage_sd_service.c"
+        "storage_sd_benchmark.c"
         "settings_service.c"
         "system_service.c"
         "usb_network_service.c"
