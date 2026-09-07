@@ -85,6 +85,13 @@ esp_err_t sd_card_driver_mount(void)
     slot_config.gpio_cd = SDSPI_SLOT_NO_CD;
     slot_config.gpio_wp = SDSPI_SLOT_NO_WP;
 
+    /*
+     * Disable the default 40 ms MISO-idle wait before SD commands.
+     * Access to the shared SPI bus is serialized by board_spi_lock(),
+     * and inactive devices must release MISO while their CS is high.
+     */
+    slot_config.wait_for_miso = -1;
+
     const esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
         .max_files = 8U,
