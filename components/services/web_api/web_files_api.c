@@ -20,7 +20,6 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -51,7 +50,7 @@
 #define WEB_FILE_DOWNLOAD_STOP_TIMEOUT_MS (5000U)
 
 #define WEB_FILE_DOWNLOAD_HEADER_MAX_LENGTH \
-    (WEB_FILE_DISPOSITION_MAX_LENGTH + 256U)
+    (WEB_FILE_DISPOSITION_MAX_LENGTH + 384U)
 
 #define WEB_FILE_ENCODED_NAME_MAX_LENGTH \
     (WEB_FILE_PATH_MAX_LENGTH * 3U)
@@ -95,7 +94,6 @@ typedef struct
     atomic_bool stop_requested;
 
     uint64_t remaining_bytes;
-    uint64_t read_time_us;
     esp_err_t close_result;
 
 } web_files_api_download_reader_t;
@@ -838,10 +836,144 @@ static esp_err_t web_files_api_send_all(
     return ESP_OK;
 }
 
+/*
+ * Overflow-safe decimal parsing; signs and whitespace are not numbers.
+ */
+static bool web_files_api_range_number(
+    const char **cursor,
+    uint64_t *value
+)
+{
+    const char *p = *cursor;
+
+    *value = 0U;
+
+    if ((*p < '0') ||
+        (*p > '9')) {
+
+        return false;
+    }
+
+    while ((*p >= '0') &&
+           (*p <= '9')) {
+
+        const unsigned digit =
+            (unsigned)(*p - '0');
+
+        if (*value > (UINT64_MAX - digit) / 10U) {
+            return false;
+        }
+
+        *value = *value * 10U + digit;
+        ++p;
+    }
+
+    *cursor = p;
+
+    return true;
+}
+
+/*
+ * Invalid/unsupported syntax is ignored (200); unsatisfiable ranges
+ * get 416.
+ */
+static int web_files_api_parse_range(
+    const char *text,
+    uint64_t size,
+    uint64_t *start,
+    uint64_t *length
+)
+{
+    if (strncmp(
+            text,
+            "bytes=",
+            6U
+        ) != 0) {
+
+        return 0;
+    }
+
+    const char *p = text + 6U;
+
+    uint64_t first = 0U;
+    uint64_t last = 0U;
+
+    const bool suffix = (*p == '-');
+
+    if (suffix) {
+        ++p;
+
+        if (!web_files_api_range_number(
+                &p,
+                &last
+            ) ||
+            (*p != '\0')) {
+
+            return 0;
+        }
+
+        if ((last == 0U) ||
+            (size == 0U)) {
+
+            return -1;
+        }
+
+        *length =
+            last < size
+                ? last
+                : size;
+
+        *start = size - *length;
+
+        return 1;
+    }
+
+    if (!web_files_api_range_number(
+            &p,
+            &first
+        ) ||
+        (*p++ != '-')) {
+
+        return 0;
+    }
+
+    if (*p == '\0') {
+        last =
+            size == 0U
+                ? 0U
+                : size - 1U;
+
+    } else if (!web_files_api_range_number(
+                   &p,
+                   &last
+               ) ||
+               (*p != '\0') ||
+               (last < first)) {
+
+        return 0;
+    }
+
+    if (first >= size) {
+        return -1;
+    }
+
+    if (last >= size) {
+        last = size - 1U;
+    }
+
+    *start = first;
+    *length = last - first + 1U;
+
+    return 1;
+}
+
 static esp_err_t web_files_api_send_sd_download_header(
     httpd_req_t *request,
     const char *disposition,
-    uint64_t content_length
+    uint64_t content_length,
+    uint64_t file_size,
+    uint64_t range_start,
+    bool partial
 )
 {
     if ((request == NULL) ||
@@ -859,18 +991,39 @@ static esp_err_t web_files_api_send_sd_download_header(
         return ESP_ERR_NO_MEM;
     }
 
+    char content_range[112] = {0};
+
+    if (partial) {
+        snprintf(
+            content_range,
+            sizeof(content_range),
+            "Content-Range: bytes %llu-%llu/%llu\r\n",
+            (unsigned long long)range_start,
+            (unsigned long long)(
+                range_start + content_length - 1U
+            ),
+            (unsigned long long)file_size
+        );
+    }
+
     const int written = snprintf(
         header,
         WEB_FILE_DOWNLOAD_HEADER_MAX_LENGTH,
-        "HTTP/1.1 200 OK\r\n"
+        "HTTP/1.1 %s\r\n"
         "Content-Type: application/octet-stream\r\n"
         "Content-Length: %llu\r\n"
         "Content-Disposition: %s\r\n"
+        "Accept-Ranges: bytes\r\n"
+        "%s"
         "Cache-Control: no-store\r\n"
         "X-Content-Type-Options: nosniff\r\n"
         "\r\n",
+        partial
+            ? "206 Partial Content"
+            : "200 OK",
         (unsigned long long)content_length,
-        disposition
+        disposition,
+        content_range
     );
 
     esp_err_t result;
@@ -1084,21 +1237,12 @@ static void web_files_api_download_reader_task(
                 ? (size_t)reader->remaining_bytes
                 : WEB_FILE_DOWNLOAD_BUFFER_SIZE;
 
-        const int64_t read_started_us =
-            esp_timer_get_time();
-
         const esp_err_t read_result =
             storage_sd_service_read(
                 reader->file,
                 buffer,
                 read_size,
                 &bytes_read
-            );
-
-        reader->read_time_us +=
-            (uint64_t)(
-                esp_timer_get_time() -
-                read_started_us
             );
 
         if ((read_result != ESP_OK) ||
@@ -1339,8 +1483,80 @@ static esp_err_t web_files_api_download_sd_file(
         );
     }
 
-    const uint64_t content_length =
+    const uint64_t file_size =
         (uint64_t)file_status.st_size;
+
+    uint64_t content_length = file_size;
+    uint64_t range_start = 0U;
+
+    int range_result = 0;
+
+    char range[128];
+
+    const size_t range_size =
+        httpd_req_get_hdr_value_len(
+            request,
+            "Range"
+        );
+
+    /*
+     * Without a strong validator, If-Range must fall back to a full
+     * response.
+     */
+    if ((range_size > 0U) &&
+        (range_size < sizeof(range)) &&
+        (httpd_req_get_hdr_value_len(
+            request,
+            "If-Range"
+        ) == 0U) &&
+        (httpd_req_get_hdr_value_str(
+            request,
+            "Range",
+            range,
+            sizeof(range)
+        ) == ESP_OK)) {
+
+        range_result = web_files_api_parse_range(
+            range,
+            file_size,
+            &range_start,
+            &content_length
+        );
+    }
+
+    if (range_result < 0) {
+        char value[48];
+
+        snprintf(
+            value,
+            sizeof(value),
+            "bytes */%llu",
+            (unsigned long long)file_size
+        );
+
+        httpd_resp_set_status(
+            request,
+            "416 Range Not Satisfiable"
+        );
+
+        httpd_resp_set_hdr(
+            request,
+            "Content-Range",
+            value
+        );
+
+        httpd_resp_set_hdr(
+            request,
+            "Accept-Ranges",
+            "bytes"
+        );
+
+        return httpd_resp_send(
+            request,
+            "",
+            0
+        );
+    }
 
     FILE *file = NULL;
 
@@ -1356,6 +1572,38 @@ static esp_err_t web_files_api_download_sd_file(
             request,
             result
         );
+    }
+
+    /*
+     * The storage seek API uses long; advance in bounded steps for
+     * large files.
+     */
+    uint64_t seek_remaining = range_start;
+
+    while (seek_remaining > 0U) {
+        const long step =
+            seek_remaining > LONG_MAX
+                ? LONG_MAX
+                : (long)seek_remaining;
+
+        result = storage_sd_service_seek(
+            file,
+            step,
+            SEEK_CUR
+        );
+
+        if (result != ESP_OK) {
+            (void)storage_sd_service_close(
+                &file
+            );
+
+            return web_files_api_send_download_error(
+                request,
+                result
+            );
+        }
+
+        seek_remaining -= (uint64_t)step;
     }
 
     char *disposition =
@@ -1415,7 +1663,10 @@ static esp_err_t web_files_api_download_sd_file(
     result = web_files_api_send_sd_download_header(
         request,
         disposition,
-        content_length
+        content_length,
+        file_size,
+        range_start,
+        range_result > 0
     );
 
     if (result != ESP_OK) {
@@ -1448,12 +1699,6 @@ static esp_err_t web_files_api_download_sd_file(
         return result;
     }
 
-    uint64_t send_time_us = 0U;
-    uint64_t total_bytes = 0U;
-
-    const int64_t download_started_us =
-        esp_timer_get_time();
-
     while (result == ESP_OK) {
         web_files_api_download_block_t block;
 
@@ -1483,24 +1728,11 @@ static esp_err_t web_files_api_download_sd_file(
             break;
         }
 
-        const int64_t send_started_us =
-            esp_timer_get_time();
-
         result = web_files_api_send_all(
             request,
             block.data,
             block.size
         );
-
-        send_time_us +=
-            (uint64_t)(
-                esp_timer_get_time() -
-                send_started_us
-            );
-
-        if (result == ESP_OK) {
-            total_bytes += block.size;
-        }
 
         if (xQueueSend(
                 reader->free_buffers,
@@ -1543,9 +1775,6 @@ static esp_err_t web_files_api_download_sd_file(
         return ESP_ERR_TIMEOUT;
     }
 
-    const uint64_t read_time_us =
-        reader->read_time_us;
-
     const esp_err_t close_result =
         reader->close_result;
 
@@ -1554,30 +1783,6 @@ static esp_err_t web_files_api_download_sd_file(
 
         result = close_result;
     }
-
-    const uint64_t total_time_us =
-        (uint64_t)(
-            esp_timer_get_time() -
-            download_started_us
-        );
-
-    ESP_LOGI(
-        TAG,
-        "SD download finished: bytes=%llu, "
-        "total=%llu ms, read=%llu ms, send=%llu ms, "
-        "speed=%llu B/s",
-        (unsigned long long)total_bytes,
-        (unsigned long long)(total_time_us / 1000U),
-        (unsigned long long)(read_time_us / 1000U),
-        (unsigned long long)(send_time_us / 1000U),
-        (unsigned long long)(
-            total_time_us > 0U
-                ? (total_bytes *
-                   UINT64_C(1000000)) /
-                  total_time_us
-                : 0U
-        )
-    );
 
     web_files_api_download_reader_destroy(reader);
     free(disposition);
