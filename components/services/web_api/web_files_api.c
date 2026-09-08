@@ -9,16 +9,25 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "cJSON.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
+
+#include "app_task_priorities.h"
 #include "storage_service.h"
 #include "storage_sd_service.h"
 #include "storage_types.h"
@@ -36,6 +45,13 @@
     ((WEB_FILE_PATH_MAX_LENGTH * 4U) + 64U)
 
 #define WEB_FILE_DOWNLOAD_BUFFER_SIZE (16U * 1024U)
+#define WEB_FILE_DOWNLOAD_BUFFER_COUNT (2U)
+#define WEB_FILE_DOWNLOAD_READER_STACK_SIZE (4096U)
+#define WEB_FILE_DOWNLOAD_QUEUE_WAIT_MS (50U)
+#define WEB_FILE_DOWNLOAD_STOP_TIMEOUT_MS (5000U)
+
+#define WEB_FILE_DOWNLOAD_HEADER_MAX_LENGTH \
+    (WEB_FILE_DISPOSITION_MAX_LENGTH + 256U)
 
 #define WEB_FILE_ENCODED_NAME_MAX_LENGTH \
     (WEB_FILE_PATH_MAX_LENGTH * 3U)
@@ -54,6 +70,35 @@ typedef struct
     bool transfer_started;
 
 } web_files_api_stream_context_t;
+
+typedef struct
+{
+    uint8_t *data;
+    size_t size;
+    esp_err_t result;
+    bool end_of_file;
+
+} web_files_api_download_block_t;
+
+typedef struct
+{
+    FILE *file;
+
+    QueueHandle_t free_buffers;
+    QueueHandle_t ready_blocks;
+    SemaphoreHandle_t stopped;
+
+    uint8_t *buffers[
+        WEB_FILE_DOWNLOAD_BUFFER_COUNT
+    ];
+
+    atomic_bool stop_requested;
+
+    uint64_t remaining_bytes;
+    uint64_t read_time_us;
+    esp_err_t close_result;
+
+} web_files_api_download_reader_t;
 
 static void *web_files_api_alloc_psram(
     size_t size
@@ -753,6 +798,101 @@ static esp_err_t web_files_api_set_download_headers(
     );
 }
 
+static esp_err_t web_files_api_send_all(
+    httpd_req_t *request,
+    const void *data,
+    size_t size
+)
+{
+    if ((request == NULL) ||
+        ((data == NULL) && (size > 0U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint8_t *cursor = data;
+    size_t remaining = size;
+
+    while (remaining > 0U) {
+        const int sent = httpd_send(
+            request,
+            (const char *)cursor,
+            remaining
+        );
+
+        if (sent <= 0) {
+            return ESP_ERR_HTTPD_RESP_SEND;
+        }
+
+        const size_t sent_size =
+            (size_t)sent;
+
+        if (sent_size > remaining) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+
+        cursor += sent_size;
+        remaining -= sent_size;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t web_files_api_send_sd_download_header(
+    httpd_req_t *request,
+    const char *disposition,
+    uint64_t content_length
+)
+{
+    if ((request == NULL) ||
+        (disposition == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char *header =
+        web_files_api_alloc_psram(
+            WEB_FILE_DOWNLOAD_HEADER_MAX_LENGTH
+        );
+
+    if (header == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    const int written = snprintf(
+        header,
+        WEB_FILE_DOWNLOAD_HEADER_MAX_LENGTH,
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/octet-stream\r\n"
+        "Content-Length: %llu\r\n"
+        "Content-Disposition: %s\r\n"
+        "Cache-Control: no-store\r\n"
+        "X-Content-Type-Options: nosniff\r\n"
+        "\r\n",
+        (unsigned long long)content_length,
+        disposition
+    );
+
+    esp_err_t result;
+
+    if ((written < 0) ||
+        ((size_t)written >=
+         WEB_FILE_DOWNLOAD_HEADER_MAX_LENGTH)) {
+
+        result = ESP_ERR_INVALID_SIZE;
+    } else {
+        result = web_files_api_send_all(
+            request,
+            header,
+            (size_t)written
+        );
+    }
+
+    free(header);
+
+    return result;
+}
+
 static esp_err_t web_files_api_download_internal_file(
     httpd_req_t *request,
     const char *path
@@ -855,6 +995,315 @@ static esp_err_t web_files_api_download_internal_file(
     return result;
 }
 
+static bool web_files_api_download_stop_requested(
+    const web_files_api_download_reader_t *reader
+)
+{
+    return atomic_load_explicit(
+        &reader->stop_requested,
+        memory_order_acquire
+    );
+}
+
+static bool web_files_api_download_queue_block(
+    web_files_api_download_reader_t *reader,
+    const web_files_api_download_block_t *block
+)
+{
+    while (!web_files_api_download_stop_requested(
+               reader
+           )) {
+
+        if (xQueueSend(
+                reader->ready_blocks,
+                block,
+                pdMS_TO_TICKS(
+                    WEB_FILE_DOWNLOAD_QUEUE_WAIT_MS
+                )
+            ) == pdTRUE) {
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void web_files_api_download_reader_task(
+    void *argument
+)
+{
+    web_files_api_download_reader_t *reader =
+        argument;
+
+    while (!web_files_api_download_stop_requested(
+               reader
+           )) {
+
+        if (reader->remaining_bytes == 0U) {
+            const web_files_api_download_block_t block = {
+                .data = NULL,
+                .size = 0U,
+                .result = ESP_OK,
+                .end_of_file = true,
+            };
+
+            (void)web_files_api_download_queue_block(
+                reader,
+                &block
+            );
+
+            break;
+        }
+
+        uint8_t *buffer = NULL;
+
+        if (xQueueReceive(
+                reader->free_buffers,
+                &buffer,
+                pdMS_TO_TICKS(
+                    WEB_FILE_DOWNLOAD_QUEUE_WAIT_MS
+                )
+            ) != pdTRUE) {
+
+            continue;
+        }
+
+        if (web_files_api_download_stop_requested(
+                reader
+            )) {
+
+            break;
+        }
+
+        size_t bytes_read = 0U;
+
+        const size_t read_size =
+            reader->remaining_bytes <
+            WEB_FILE_DOWNLOAD_BUFFER_SIZE
+                ? (size_t)reader->remaining_bytes
+                : WEB_FILE_DOWNLOAD_BUFFER_SIZE;
+
+        const int64_t read_started_us =
+            esp_timer_get_time();
+
+        const esp_err_t read_result =
+            storage_sd_service_read(
+                reader->file,
+                buffer,
+                read_size,
+                &bytes_read
+            );
+
+        reader->read_time_us +=
+            (uint64_t)(
+                esp_timer_get_time() -
+                read_started_us
+            );
+
+        if ((read_result != ESP_OK) ||
+            (bytes_read == 0U) ||
+            (bytes_read > read_size)) {
+
+            esp_err_t block_result =
+                read_result;
+
+            if ((block_result == ESP_OK) &&
+                ((bytes_read == 0U) ||
+                 (bytes_read > read_size))) {
+
+                block_result =
+                    ESP_ERR_INVALID_SIZE;
+            }
+
+            const web_files_api_download_block_t block = {
+                .data = NULL,
+                .size = 0U,
+                .result = block_result,
+                .end_of_file = false,
+            };
+
+            (void)web_files_api_download_queue_block(
+                reader,
+                &block
+            );
+
+            break;
+        }
+
+        reader->remaining_bytes -=
+            bytes_read;
+
+        const web_files_api_download_block_t block = {
+            .data = buffer,
+            .size = bytes_read,
+            .result = ESP_OK,
+            .end_of_file = false,
+        };
+
+        if (!web_files_api_download_queue_block(
+                reader,
+                &block
+            )) {
+
+            break;
+        }
+    }
+
+    reader->close_result =
+        storage_sd_service_close(
+            &reader->file
+        );
+
+    (void)xSemaphoreGive(
+        reader->stopped
+    );
+
+    vTaskDelete(NULL);
+}
+
+static void web_files_api_download_reader_destroy(
+    web_files_api_download_reader_t *reader
+)
+{
+    if (reader == NULL) {
+        return;
+    }
+
+    if (reader->free_buffers != NULL) {
+        vQueueDelete(reader->free_buffers);
+    }
+
+    if (reader->ready_blocks != NULL) {
+        vQueueDelete(reader->ready_blocks);
+    }
+
+    if (reader->stopped != NULL) {
+        vSemaphoreDelete(reader->stopped);
+    }
+
+    for (size_t index = 0U;
+         index < WEB_FILE_DOWNLOAD_BUFFER_COUNT;
+         ++index) {
+
+        free(reader->buffers[index]);
+    }
+
+    free(reader);
+}
+
+static esp_err_t web_files_api_download_reader_create(
+    FILE *file,
+    uint64_t content_length,
+    web_files_api_download_reader_t **out_reader
+)
+{
+    if ((file == NULL) ||
+        (out_reader == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *out_reader = NULL;
+
+    web_files_api_download_reader_t *reader =
+        web_files_api_calloc_psram(
+            1U,
+            sizeof(*reader)
+        );
+
+    if (reader == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    reader->file = file;
+    reader->remaining_bytes =
+        content_length;
+    reader->close_result = ESP_OK;
+
+    atomic_init(
+        &reader->stop_requested,
+        false
+    );
+
+    reader->free_buffers = xQueueCreate(
+        WEB_FILE_DOWNLOAD_BUFFER_COUNT,
+        sizeof(uint8_t *)
+    );
+
+    reader->ready_blocks = xQueueCreate(
+        WEB_FILE_DOWNLOAD_BUFFER_COUNT,
+        sizeof(web_files_api_download_block_t)
+    );
+
+    reader->stopped =
+        xSemaphoreCreateBinary();
+
+    if ((reader->free_buffers == NULL) ||
+        (reader->ready_blocks == NULL) ||
+        (reader->stopped == NULL)) {
+
+        web_files_api_download_reader_destroy(
+            reader
+        );
+
+        return ESP_ERR_NO_MEM;
+    }
+
+    for (size_t index = 0U;
+         index < WEB_FILE_DOWNLOAD_BUFFER_COUNT;
+         ++index) {
+
+        reader->buffers[index] =
+            web_files_api_alloc_psram(
+                WEB_FILE_DOWNLOAD_BUFFER_SIZE
+            );
+
+        if (reader->buffers[index] == NULL) {
+            web_files_api_download_reader_destroy(
+                reader
+            );
+
+            return ESP_ERR_NO_MEM;
+        }
+
+        if (xQueueSend(
+                reader->free_buffers,
+                &reader->buffers[index],
+                0U
+            ) != pdTRUE) {
+
+            web_files_api_download_reader_destroy(
+                reader
+            );
+
+            return ESP_FAIL;
+        }
+    }
+
+    const BaseType_t task_result =
+        xTaskCreate(
+            web_files_api_download_reader_task,
+            "web_file_reader",
+            WEB_FILE_DOWNLOAD_READER_STACK_SIZE,
+            reader,
+            APP_TASK_PRIORITY_NETWORK_WORKER,
+            NULL
+        );
+
+    if (task_result != pdPASS) {
+        web_files_api_download_reader_destroy(
+            reader
+        );
+
+        return ESP_ERR_NO_MEM;
+    }
+
+    *out_reader = reader;
+
+    return ESP_OK;
+}
+
 static esp_err_t web_files_api_download_sd_file(
     httpd_req_t *request,
     const char *path
@@ -866,9 +1315,36 @@ static esp_err_t web_files_api_download_sd_file(
         return ESP_ERR_INVALID_ARG;
     }
 
-    FILE *file = NULL;
+    struct stat file_status;
 
     esp_err_t result =
+        storage_sd_service_stat(
+            path,
+            &file_status
+        );
+
+    if (result != ESP_OK) {
+        return web_files_api_send_download_error(
+            request,
+            result
+        );
+    }
+
+    if (!S_ISREG(file_status.st_mode) ||
+        (file_status.st_size < 0)) {
+
+        return web_files_api_send_download_error(
+            request,
+            ESP_ERR_INVALID_ARG
+        );
+    }
+
+    const uint64_t content_length =
+        (uint64_t)file_status.st_size;
+
+    FILE *file = NULL;
+
+    result =
         storage_sd_service_open(
             path,
             "rb",
@@ -882,33 +1358,13 @@ static esp_err_t web_files_api_download_sd_file(
         );
     }
 
-    uint8_t *buffer =
-        web_files_api_alloc_psram(
-            WEB_FILE_DOWNLOAD_BUFFER_SIZE
-        );
-
-    if (buffer == NULL) {
-        (void)storage_sd_service_close(
-            &file
-        );
-
-        return web_files_api_send_download_error(
-            request,
-            ESP_ERR_NO_MEM
-        );
-    }
-
     char *disposition =
         web_files_api_alloc_psram(
             WEB_FILE_DISPOSITION_MAX_LENGTH
         );
 
     if (disposition == NULL) {
-        free(buffer);
-
-        (void)storage_sd_service_close(
-            &file
-        );
+        (void)storage_sd_service_close(&file);
 
         return web_files_api_send_download_error(
             request,
@@ -916,8 +1372,7 @@ static esp_err_t web_files_api_download_sd_file(
         );
     }
 
-    result = web_files_api_set_download_headers(
-        request,
+    result = web_files_api_build_content_disposition(
         path,
         disposition,
         WEB_FILE_DISPOSITION_MAX_LENGTH
@@ -925,11 +1380,7 @@ static esp_err_t web_files_api_download_sd_file(
 
     if (result != ESP_OK) {
         free(disposition);
-        free(buffer);
-
-        (void)storage_sd_service_close(
-            &file
-        );
+        (void)storage_sd_service_close(&file);
 
         return web_files_api_send_download_error(
             request,
@@ -937,48 +1388,199 @@ static esp_err_t web_files_api_download_sd_file(
         );
     }
 
-    while (result == ESP_OK) {
-        size_t bytes_read = 0U;
+    web_files_api_download_reader_t *reader = NULL;
 
-        result = storage_sd_service_read(
-            file,
-            buffer,
-            WEB_FILE_DOWNLOAD_BUFFER_SIZE,
-            &bytes_read
-        );
+    result = web_files_api_download_reader_create(
+        file,
+        content_length,
+        &reader
+    );
 
-        if ((result != ESP_OK) ||
-            (bytes_read == 0U)) {
+    if (result != ESP_OK) {
+        free(disposition);
+        (void)storage_sd_service_close(&file);
 
-            break;
-        }
-
-        result = httpd_resp_send_chunk(
+        return web_files_api_send_download_error(
             request,
-            (const char *)buffer,
-            bytes_read
+            result
         );
     }
 
     /*
-     * Finish the chunked response only when all file data was sent
-     * successfully.
+     * The reader task now owns the file. The HTTP task remains the
+     * sole owner of the request and sends every response chunk.
      */
-    if (result == ESP_OK) {
-        result = httpd_resp_send_chunk(
-            request,
-            NULL,
-            0U
+    file = NULL;
+
+    result = web_files_api_send_sd_download_header(
+        request,
+        disposition,
+        content_length
+    );
+
+    if (result != ESP_OK) {
+        atomic_store_explicit(
+            &reader->stop_requested,
+            true,
+            memory_order_release
         );
+
+        if (xSemaphoreTake(
+                reader->stopped,
+                pdMS_TO_TICKS(
+                    WEB_FILE_DOWNLOAD_STOP_TIMEOUT_MS
+                )
+            ) == pdTRUE) {
+
+            web_files_api_download_reader_destroy(
+                reader
+            );
+        } else {
+            ESP_LOGE(
+                TAG,
+                "SD download reader did not stop "
+                "after header send failure"
+            );
+        }
+
+        free(disposition);
+
+        return result;
     }
 
-    const esp_err_t close_result =
-        storage_sd_service_close(
-            &file
+    uint64_t send_time_us = 0U;
+    uint64_t total_bytes = 0U;
+
+    const int64_t download_started_us =
+        esp_timer_get_time();
+
+    while (result == ESP_OK) {
+        web_files_api_download_block_t block;
+
+        if (xQueueReceive(
+                reader->ready_blocks,
+                &block,
+                portMAX_DELAY
+            ) != pdTRUE) {
+
+            result = ESP_FAIL;
+            break;
+        }
+
+        if (block.end_of_file) {
+            break;
+        }
+
+        if (block.result != ESP_OK) {
+            result = block.result;
+            break;
+        }
+
+        if ((block.data == NULL) ||
+            (block.size == 0U)) {
+
+            result = ESP_ERR_INVALID_RESPONSE;
+            break;
+        }
+
+        const int64_t send_started_us =
+            esp_timer_get_time();
+
+        result = web_files_api_send_all(
+            request,
+            block.data,
+            block.size
         );
 
+        send_time_us +=
+            (uint64_t)(
+                esp_timer_get_time() -
+                send_started_us
+            );
+
+        if (result == ESP_OK) {
+            total_bytes += block.size;
+        }
+
+        if (xQueueSend(
+                reader->free_buffers,
+                &block.data,
+                0U
+            ) != pdTRUE) {
+
+            if (result == ESP_OK) {
+                result = ESP_FAIL;
+            }
+        }
+    }
+
+    atomic_store_explicit(
+        &reader->stop_requested,
+        true,
+        memory_order_release
+    );
+
+    const BaseType_t reader_stopped =
+        xSemaphoreTake(
+            reader->stopped,
+            pdMS_TO_TICKS(
+                WEB_FILE_DOWNLOAD_STOP_TIMEOUT_MS
+            )
+        );
+
+    if (reader_stopped != pdTRUE) {
+        ESP_LOGE(
+            TAG,
+            "SD download reader did not stop in time"
+        );
+
+        free(disposition);
+
+        /*
+         * The running reader still owns its context, queues, buffers
+         * and file, so none of those resources may be released here.
+         */
+        return ESP_ERR_TIMEOUT;
+    }
+
+    const uint64_t read_time_us =
+        reader->read_time_us;
+
+    const esp_err_t close_result =
+        reader->close_result;
+
+    if ((result == ESP_OK) &&
+        (close_result != ESP_OK)) {
+
+        result = close_result;
+    }
+
+    const uint64_t total_time_us =
+        (uint64_t)(
+            esp_timer_get_time() -
+            download_started_us
+        );
+
+    ESP_LOGI(
+        TAG,
+        "SD download finished: bytes=%llu, "
+        "total=%llu ms, read=%llu ms, send=%llu ms, "
+        "speed=%llu B/s",
+        (unsigned long long)total_bytes,
+        (unsigned long long)(total_time_us / 1000U),
+        (unsigned long long)(read_time_us / 1000U),
+        (unsigned long long)(send_time_us / 1000U),
+        (unsigned long long)(
+            total_time_us > 0U
+                ? (total_bytes *
+                   UINT64_C(1000000)) /
+                  total_time_us
+                : 0U
+        )
+    );
+
+    web_files_api_download_reader_destroy(reader);
     free(disposition);
-    free(buffer);
 
     if (result != ESP_OK) {
         ESP_LOGE(
@@ -987,22 +1589,9 @@ static esp_err_t web_files_api_download_sd_file(
             path,
             esp_err_to_name(result)
         );
-
-        return result;
     }
 
-    if (close_result != ESP_OK) {
-        ESP_LOGE(
-            TAG,
-            "Failed to close SD-card file '%s': %s",
-            path,
-            esp_err_to_name(close_result)
-        );
-
-        return close_result;
-    }
-
-    return ESP_OK;
+    return result;
 }
 
 static esp_err_t web_files_api_download_handler(
