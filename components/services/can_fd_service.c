@@ -40,6 +40,8 @@
 #define CAN_FD_SERVICE_RX_BATCH_SIZE         (8U)
 
 #define CAN_FD_SERVICE_RX_DRAIN_LIMIT        (64U)
+#define CAN_FD_SERVICE_TX_DRAIN_LIMIT        (32U)
+#define CAN_FD_SERVICE_WORK_BUDGET_MS        (100U)
 
 static const char *TAG =
     "can_fd_service";
@@ -289,9 +291,12 @@ static void can_fd_service_deliver_tx_event(
 
 static void can_fd_service_drain_tx_events(void)
 {
-    while (!atomic_load(
+    for (size_t processed = 0U;
+         (processed < CAN_FD_SERVICE_TX_DRAIN_LIMIT) &&
+         !atomic_load(
                &s_stop_requested
-           )) {
+         );
+         ++processed) {
 
         can_fd_mcp2518fd_tx_event_t event;
 
@@ -406,6 +411,18 @@ static void can_fd_service_task(
         CAN_FD_SERVICE_RX_BATCH_SIZE
     ];
 
+    TickType_t work_started_at =
+        xTaskGetTickCount();
+
+    TickType_t work_budget_ticks =
+        pdMS_TO_TICKS(
+            CAN_FD_SERVICE_WORK_BUDGET_MS
+        );
+
+    if (work_budget_ticks == 0U) {
+        work_budget_ticks = 1U;
+    }
+
     while (!atomic_load(
                &s_stop_requested
            )) {
@@ -494,6 +511,13 @@ static void can_fd_service_task(
              * continuous RX traffic.
              */
             can_fd_service_drain_tx_events();
+
+            if ((TickType_t)(
+                    xTaskGetTickCount() - work_started_at
+                ) >= work_budget_ticks) {
+
+                break;
+            }
         }
 
         /*
@@ -501,6 +525,26 @@ static void can_fd_service_task(
          * TX event or when no RX frame arrived during the timeout.
          */
         can_fd_service_drain_tx_events();
+
+        /*
+         * Keep the time budget across drain passes. A frame-count
+         * limit alone does not block this high-priority task.
+         * No driver mutex is held here.
+         */
+        if ((TickType_t)(
+                xTaskGetTickCount() - work_started_at
+            ) >= work_budget_ticks) {
+
+            if (!atomic_load(
+                    &s_stop_requested
+                )) {
+
+                vTaskDelay(1U);
+            }
+
+            work_started_at =
+                xTaskGetTickCount();
+        }
     }
 
     ESP_LOGI(
