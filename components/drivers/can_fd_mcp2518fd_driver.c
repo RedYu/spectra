@@ -6331,6 +6331,21 @@ esp_err_t can_fd_mcp2518fd_driver_receive_batch(
         return ESP_OK;
     }
 
+    /*
+     * INT also represents non-RX sources. An empty FIFO with INT
+     * still asserted must not turn blocking receives into a tight
+     * SPI polling loop. Back off outside the driver mutex.
+     * Zero-timeout drain calls remain nonblocking.
+     */
+    if ((result == ESP_OK) &&
+        (timeout_ms > 0U) &&
+        (gpio_get_level(
+            CAN_FD_PIN_INT
+        ) == 0)) {
+
+        vTaskDelay(1U);
+    }
+
     return
         (result == ESP_OK)
             ? ESP_ERR_TIMEOUT
@@ -6491,7 +6506,7 @@ esp_err_t can_fd_mcp2518fd_driver_get_info(
 
     uint32_t oscillator = 0U;
 
-    const esp_err_t read_result =
+    esp_err_t read_result =
         mcp2518fd_read_register_unlocked(
             MCP2518FD_REGISTER_OSC,
             &oscillator
@@ -6501,6 +6516,15 @@ esp_err_t can_fd_mcp2518fd_driver_get_info(
         s_info.oscillator_register = oscillator;
         s_info.oscillator_ready =
             (oscillator & MCP2518FD_OSC_READY) != 0U;
+    }
+
+    /*
+     * Refresh the error counters and state even when no new error
+     * interrupt has been processed. Preserve the stopped state.
+     */
+    if ((read_result == ESP_OK) && s_started) {
+        read_result =
+            mcp2518fd_update_error_state_unlocked();
     }
 
     *info = s_info;
