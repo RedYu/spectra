@@ -4,6 +4,7 @@
  */
 
 #include "lvgl_port.h"
+#include "lvgl_psram_pool.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -508,6 +509,13 @@ esp_err_t lvgl_port_init(void)
     );
 
     if (!s_lvgl_initialized) {
+        const esp_err_t pool_result =
+            lvgl_psram_pool_prepare();
+
+        if (pool_result != ESP_OK) {
+            return pool_result;
+        }
+
         lv_init();
         s_lvgl_initialized = true;
     }
