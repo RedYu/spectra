@@ -1141,8 +1141,10 @@ static void main_screen_update_primary_can(
 
     gui_label_set_text_fmt_if_changed(
         s_context.can_errors_label[channel],
-        "Errors: %lu",
-        (unsigned long)error_count
+        "E:%lu T:%u R:%u",
+        (unsigned long)error_count,
+        (unsigned int)info.transmit_error_count,
+        (unsigned int)info.receive_error_count
     );
 }
 
@@ -2123,7 +2125,7 @@ static esp_err_t main_screen_create_can_row(
         main_screen_create_can_card(
             row,
             0U,
-            "Primary CAN"
+            "Primary"
         );
 
     if (result != ESP_OK) {
@@ -2133,7 +2135,7 @@ static esp_err_t main_screen_create_can_row(
     return main_screen_create_can_card(
         row,
         1U,
-        "Secondary CAN"
+        "Secondary"
     );
 }
 
