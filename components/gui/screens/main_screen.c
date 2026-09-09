@@ -18,6 +18,7 @@
 #include "assets/gui_images.h"
 #include "gui_feedback.h"
 #include "gui_styles.h"
+#include "gui_label_update.h"
 #include "gui_theme.h"
 
 #include "gui_config.h"
@@ -283,6 +284,17 @@ static void main_screen_set_can_state_indicator(
 {
     if ((channel >= MAIN_CAN_CHANNEL_COUNT) ||
         (s_context.can_state_indicator[channel] == NULL)) {
+
+        return;
+    }
+
+    if (lv_color_eq(
+            lv_obj_get_style_bg_color(
+                s_context.can_state_indicator[channel],
+                LV_PART_MAIN
+            ),
+            color
+        )) {
 
         return;
     }
@@ -579,17 +591,17 @@ static void main_screen_update_recording(void)
             &info
         ) != ESP_OK)) {
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.recording_status_label,
             "Unavailable"
         );
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.recording_details_label,
             ""
         );
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.capture_button_label,
             "Start capture"
         );
@@ -625,7 +637,7 @@ static void main_screen_update_recording(void)
             total_seconds % UINT64_C(60)
         );
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         s_context.recording_details_label,
         "%02u:%02u:%02u | %llu KB | Drop %llu",
         hours,
@@ -688,12 +700,12 @@ static void main_screen_update_recording(void)
             break;
     }
 
-    lv_label_set_text(
+    gui_label_set_text_if_changed(
         s_context.recording_status_label,
         status_text
     );
 
-    lv_label_set_text(
+    gui_label_set_text_if_changed(
         s_context.capture_button_label,
         button_text
     );
@@ -866,7 +878,7 @@ static lv_obj_t *main_screen_create_action_button(
         LV_PART_MAIN
     );
 
-    lv_label_set_text(
+    gui_label_set_text_if_changed(
         label,
         text
     );
@@ -1035,27 +1047,27 @@ static void main_screen_update_primary_can(
     if (!can_service_is_running() ||
         (can_service_get_info(&info) != ESP_OK)) {
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.can_state_label[channel],
             "Disabled"
         );
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.can_bitrate_label[channel],
             "N/A"
         );
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.can_mode_label[channel],
             "Not configured"
         );
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.can_frames_label[channel],
             "RX 0/s   TX 0/s"
         );
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.can_errors_label[channel],
             "Errors 0"
         );
@@ -1069,7 +1081,7 @@ static void main_screen_update_primary_can(
         return;
     }
 
-    lv_label_set_text(
+    gui_label_set_text_if_changed(
         s_context.can_state_label[channel],
         main_screen_can_state_to_string(
             info.state
@@ -1083,13 +1095,13 @@ static void main_screen_update_primary_can(
         )
     );
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         s_context.can_bitrate_label[channel],
         "Bitrate: %lu kbit/s",
         (unsigned long)(info.bitrate / 1000U)
     );
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         s_context.can_mode_label[channel],
         "Mode: %s",
         main_screen_can_mode_to_string(info.mode)
@@ -1111,7 +1123,7 @@ static void main_screen_update_primary_can(
         main_screen_reset_frame_rate(channel);
     }
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         s_context.can_frames_label[channel],
         "RX %lu/s   TX %lu/s",
         (unsigned long)rate.rx,
@@ -1127,7 +1139,7 @@ static void main_screen_update_primary_can(
         info.bus_error_count +
         info.acknowledgement_error_count;
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         s_context.can_errors_label[channel],
         "Errors: %lu",
         (unsigned long)error_count
@@ -1155,27 +1167,27 @@ static void main_screen_update_secondary_can(
     if (!can_fd_service_is_running() ||
         (can_fd_service_get_info(&info) != ESP_OK)) {
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.can_state_label[channel],
             "Disabled"
         );
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.can_bitrate_label[channel],
             "N/A"
         );
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.can_mode_label[channel],
             "Not configured"
         );
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.can_frames_label[channel],
             "RX 0/s   TX 0/s"
         );
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.can_errors_label[channel],
             "Errors 0"
         );
@@ -1189,7 +1201,7 @@ static void main_screen_update_secondary_can(
         return;
     }
 
-    lv_label_set_text(
+    gui_label_set_text_if_changed(
         s_context.can_state_label[channel],
         main_screen_can_fd_state_to_string(
             info.state
@@ -1204,27 +1216,27 @@ static void main_screen_update_secondary_can(
     );
 
     if (info.fd_enabled && info.brs_enabled) {
-        lv_label_set_text_fmt(
+        gui_label_set_text_fmt_if_changed(
             s_context.can_bitrate_label[channel],
             "Bitrate: %lu / %lu kbit/s",
             (unsigned long)(info.nominal_bitrate / 1000U),
             (unsigned long)(info.data_bitrate / 1000U)
         );
     } else if (info.fd_enabled) {
-        lv_label_set_text_fmt(
+        gui_label_set_text_fmt_if_changed(
             s_context.can_bitrate_label[channel],
             "Bitrate: %lu kbit/s (FD)",
             (unsigned long)(info.nominal_bitrate / 1000U)
         );
     } else {
-        lv_label_set_text_fmt(
+        gui_label_set_text_fmt_if_changed(
             s_context.can_bitrate_label[channel],
             "Bitrate: %lu kbit/s",
             (unsigned long)(info.nominal_bitrate / 1000U)
         );
     }
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         s_context.can_mode_label[channel],
         "Mode: %s",
         main_screen_can_fd_mode_to_string(info.mode)
@@ -1246,7 +1258,7 @@ static void main_screen_update_secondary_can(
         main_screen_reset_frame_rate(channel);
     }
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         s_context.can_frames_label[channel],
         "RX %lu/s   TX %lu/s",
         (unsigned long)rate.rx,
@@ -1260,7 +1272,7 @@ static void main_screen_update_secondary_can(
         info.transmit_event_overflow_count +
         info.bus_error_count;
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         s_context.can_errors_label[channel],
         "Errors: %lu",
         (unsigned long)error_count
@@ -1281,7 +1293,7 @@ static void main_screen_update_battery(void)
         (battery_service_get_info(&info) != ESP_OK) ||
         !info.measurement_valid) {
 
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.battery_label,
             "Battery --"
         );
@@ -1296,7 +1308,7 @@ static void main_screen_update_battery(void)
     }
 
     if (!info.battery_present) {
-        lv_label_set_text(
+        gui_label_set_text_if_changed(
             s_context.battery_label,
             "No battery"
         );
@@ -1329,7 +1341,7 @@ static void main_screen_update_battery(void)
         LV_PART_MAIN
     );
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         s_context.battery_label,
         "%u%% %u.%02u V",
         (unsigned int)info.level_percent,
@@ -1616,7 +1628,7 @@ static lv_obj_t *main_screen_create_card_label(
         return NULL;
     }
 
-    lv_label_set_text(
+    gui_label_set_text_if_changed(
         label,
         text
     );

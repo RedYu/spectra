@@ -47,7 +47,6 @@
 #define SYSTEM_TASK_PRIORITY \
     APP_TASK_PRIORITY_SYSTEM
 #define SYSTEM_UPDATE_INTERVAL_MS       (1000U)
-#define SYSTEM_TASK_STATUS_EXTRA_COUNT  (4U)
 
 #define SYSTEM_STOP_TIMEOUT_MS          (2000U)
 
@@ -443,135 +442,51 @@ static uint8_t system_service_get_cpu_usage(void)
 {
 #if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
 
-    const UBaseType_t task_count =
-        uxTaskGetNumberOfTasks();
-
-    if (task_count == 0U) {
-        return 0U;
-    }
-
-    if (task_count >
-        (UBaseType_t)(
-            SIZE_MAX / sizeof(TaskStatus_t) -
-            SYSTEM_TASK_STATUS_EXTRA_COUNT
-        )) {
-
-        return 0U;
-    }
-
-    const UBaseType_t task_capacity =
-        task_count +
-        SYSTEM_TASK_STATUS_EXTRA_COUNT;
-
-    TaskStatus_t *task_status =
-        heap_caps_calloc(
-            task_capacity,
-            sizeof(*task_status),
-            MALLOC_CAP_SPIRAM |
-            MALLOC_CAP_8BIT
-        );
-
-    if (task_status == NULL) {
-        return 0U;
-    }
-
-    configRUN_TIME_COUNTER_TYPE total_run_time = 0U;
-
-    const UBaseType_t received_task_count =
-        uxTaskGetSystemState(
-            task_status,
-            task_capacity,
-            &total_run_time
-        );
-
-    if ((received_task_count == 0U) ||
-        (total_run_time == 0U)) {
-
-        heap_caps_free(
-            task_status
-        );
-        return 0U;
-    }
-
     configRUN_TIME_COUNTER_TYPE current_idle_run_time[
         CONFIG_FREERTOS_NUMBER_OF_CORES
     ] = {0};
 
-    bool idle_task_found[
-        CONFIG_FREERTOS_NUMBER_OF_CORES
-    ] = {false};
-
-    for (UBaseType_t i = 0U;
-         i < received_task_count;
-         ++i) {
-
-        const char *task_name =
-            task_status[i].pcTaskName;
-
-        if ((task_name == NULL) ||
-            (strncmp(task_name, "IDLE", 4U) != 0)) {
-
-            continue;
-        }
-
-        UBaseType_t core_index = 0U;
-
-#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
-
-        /*
-         * ESP-IDF normally names the idle tasks IDLE0 and IDLE1.
-         */
-        const char core_character =
-            task_name[4];
-
-        if ((core_character >= '0') &&
-            (core_character <= '9')) {
-
-            core_index =
-                (UBaseType_t)(
-                    core_character - '0'
-                );
-        } else {
-            /*
-             * Fall back to the first available core slot.
-             */
-            while ((core_index <
-                    CONFIG_FREERTOS_NUMBER_OF_CORES) &&
-                   idle_task_found[core_index]) {
-
-                ++core_index;
-            }
-        }
-
-#endif
-
-        if (core_index <
-            CONFIG_FREERTOS_NUMBER_OF_CORES) {
-
-            current_idle_run_time[core_index] =
-                task_status[i].ulRunTimeCounter;
-
-            idle_task_found[core_index] = true;
-        }
-    }
-
-    heap_caps_free(
-        task_status
-    );
-
+    /*
+     * Only IDLE runtime counters are needed. Do not enumerate tasks or
+     * scan their unused stack space for the periodic CPU measurement.
+     */
     for (UBaseType_t core = 0U;
          core < CONFIG_FREERTOS_NUMBER_OF_CORES;
          ++core) {
 
-        if (!idle_task_found[core]) {
-            /*
-             * The sample is incomplete, so do not publish an
-             * unreliable CPU usage value.
-             */
+        const TaskHandle_t idle_task =
+            xTaskGetIdleTaskHandleForCore(
+                (BaseType_t)core
+            );
+
+        if (idle_task == NULL) {
             s_previous_cpu_sample_valid = false;
             return 0U;
         }
+
+        TaskStatus_t task_status = {0};
+
+        vTaskGetInfo(
+            idle_task,
+            &task_status,
+            pdFALSE,
+            eReady
+        );
+
+        current_idle_run_time[core] =
+            task_status.ulRunTimeCounter;
     }
+
+    configRUN_TIME_COUNTER_TYPE total_run_time = 0U;
+
+#ifdef portALT_GET_RUN_TIME_COUNTER_VALUE
+    portALT_GET_RUN_TIME_COUNTER_VALUE(
+        total_run_time
+    );
+#else
+    total_run_time =
+        portGET_RUN_TIME_COUNTER_VALUE();
+#endif
 
     if (!s_previous_cpu_sample_valid) {
         s_previous_total_run_time =

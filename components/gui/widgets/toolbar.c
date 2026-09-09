@@ -10,6 +10,7 @@
 #include "assets/gui_images.h"
 #include "gui_feedback.h"
 #include "gui_styles.h"
+#include "gui_label_update.h"
 #include "gui_theme.h"
 
 #define TOOLBAR_HEIGHT \
@@ -369,7 +370,7 @@ static lv_obj_t *toolbar_text_button_create(
 
     context->label = label;
 
-    lv_label_set_text(
+    gui_label_set_text_if_changed(
         label,
         text
     );
@@ -389,6 +390,14 @@ static void toolbar_set_text_color(
 )
 {
     if (label == NULL) {
+        return;
+    }
+
+    if (lv_color_eq(
+            lv_obj_get_style_text_color(label, LV_PART_MAIN),
+            color
+        )) {
+
         return;
     }
 
@@ -637,7 +646,7 @@ toolbar_t toolbar_create(
         return empty;
     }
 
-    lv_label_set_text(
+    gui_label_set_text_if_changed(
         title,
         config->title != NULL
             ? config->title
@@ -885,6 +894,21 @@ static void toolbar_set_button_icon_color(
         return;
     }
 
+    if (lv_color_eq(
+            lv_obj_get_style_image_recolor(
+                context->image,
+                LV_PART_MAIN
+            ),
+            color
+        ) &&
+        (lv_obj_get_style_image_recolor_opa(
+            context->image,
+            LV_PART_MAIN
+        ) == LV_OPA_COVER)) {
+
+        return;
+    }
+
     lv_obj_set_style_image_recolor(
         context->image,
         color,
@@ -962,7 +986,7 @@ void toolbar_set_usb_status(
         return;
     }
 
-    lv_label_set_text(
+    gui_label_set_text_if_changed(
         toolbar->usb_label,
         "USB"
     );
@@ -1002,7 +1026,7 @@ void toolbar_set_wifi_status(
         return;
     }
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         toolbar->wifi_label,
         "WiFi %u",
         (unsigned int)client_count
@@ -1046,7 +1070,7 @@ void toolbar_set_cpu_usage(
         cpu_usage = 100U;
     }
 
-    lv_label_set_text_fmt(
+    gui_label_set_text_fmt_if_changed(
         toolbar->cpu_label,
         "CPU %u%%",
         (unsigned int)cpu_usage
