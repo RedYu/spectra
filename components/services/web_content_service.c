@@ -279,6 +279,39 @@ static esp_err_t web_content_files_page_handler(
     );
 }
 
+static esp_err_t web_content_stylesheet_handler(
+    httpd_req_t *request
+)
+{
+    return web_content_send_storage_file(
+        request,
+        "/storage/www/spectra.css",
+        "text/css; charset=utf-8"
+    );
+}
+
+static esp_err_t web_content_can_analyzer_page_handler(
+    httpd_req_t *request
+)
+{
+    return web_content_send_storage_file(
+        request,
+        "/storage/www/can_analyzer.html",
+        "text/html; charset=utf-8"
+    );
+}
+
+static esp_err_t web_content_can_logger_page_handler(
+    httpd_req_t *request
+)
+{
+    return web_content_send_storage_file(
+        request,
+        "/storage/www/can_logger.html",
+        "text/html; charset=utf-8"
+    );
+}
+
 static esp_err_t web_content_can_test_page_handler(
     httpd_req_t *request
 )
@@ -290,13 +323,13 @@ static esp_err_t web_content_can_test_page_handler(
     );
 }
 
-static esp_err_t web_content_files_script_handler(
+static esp_err_t web_content_script_handler(
     httpd_req_t *request
 )
 {
     return web_content_send_storage_file(
         request,
-        "/storage/www/files.js",
+        "/storage/www/spectra.js",
         "application/javascript; charset=utf-8"
     );
 }
@@ -311,6 +344,7 @@ static esp_err_t web_content_favicon_handler(
         "image/x-icon"
     );
 }
+
 
 esp_err_t web_content_service_register(
     httpd_handle_t server
@@ -352,6 +386,28 @@ esp_err_t web_content_service_register(
         .user_ctx = NULL,
     };
 
+    static const httpd_uri_t stylesheet_uri = {
+        .uri = "/spectra.css",
+        .method = HTTP_GET,
+        .handler = web_content_stylesheet_handler,
+        .user_ctx = NULL,
+    };
+
+
+    static const httpd_uri_t can_analyzer_page_uri = {
+        .uri = "/can_analyzer",
+        .method = HTTP_GET,
+        .handler = web_content_can_analyzer_page_handler,
+        .user_ctx = NULL,
+    };
+
+    static const httpd_uri_t can_logger_page_uri = {
+        .uri = "/can_logger",
+        .method = HTTP_GET,
+        .handler = web_content_can_logger_page_handler,
+        .user_ctx = NULL,
+    };
+
     static const httpd_uri_t can_test_page_uri = {
         .uri =
             "/can_test",
@@ -366,11 +422,11 @@ esp_err_t web_content_service_register(
             NULL,
     };
 
-    static const httpd_uri_t files_script_uri = {
-        .uri = "/files.js",
+    static const httpd_uri_t script_uri = {
+        .uri = "/spectra.js",
         .method = HTTP_GET,
         .handler =
-            web_content_files_script_handler,
+            web_content_script_handler,
         .user_ctx = NULL,
     };
 
@@ -441,13 +497,13 @@ esp_err_t web_content_service_register(
     result =
         httpd_register_uri_handler(
             server,
-            &files_script_uri
+            &script_uri
         );
 
     if (result != ESP_OK) {
         ESP_LOGE(
             TAG,
-            "Failed to register GET /files.js: %s",
+            "Failed to register GET /spectra.js: %s",
             esp_err_to_name(result)
         );
 
@@ -470,7 +526,26 @@ esp_err_t web_content_service_register(
         return result;
     }
 
-    return ESP_OK;
+    result = httpd_register_uri_handler(
+        server,
+        &can_logger_page_uri
+    );
 
-    return result;
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result = httpd_register_uri_handler(
+        server,
+        &can_analyzer_page_uri
+    );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return httpd_register_uri_handler(
+        server,
+        &stylesheet_uri
+    );
 }

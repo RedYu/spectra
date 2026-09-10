@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en" class="page-logger">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="/favicon.ico">
+    <title>CAN Logger · Spectra</title>
+    <link rel="stylesheet" href="spectra.css?v=5">
+    <script src="spectra.js?v=5" defer></script>
+</head>
+<body class="page-logger">
+<header class="spectra-header">
+        <a class="spectra-brand" href="/"><span aria-hidden="true">▧</span> Spectra</a>
+        <nav class="spectra-nav" aria-label="Main navigation">
+            <a href="/">Overview</a>
+            <a href="/can_logger" aria-current="page">CAN Logger</a>
+            <a href="/can_analyzer">CAN Analyzer</a>
+            <a href="/files">Files</a>
+            <a href="/settings">Settings</a>
+            <a href="/can_test">Diagnostics</a>
+        </nav>
+        <span id="status" role="status">Disconnected</span>
+    </header>
+    <main>
+        <div class="heading can-config-heading">
+            <div><h1>CAN Logger</h1><p>Live traffic from both CAN channels.</p></div>
+        </div>
+        <div class="layout">
+            <aside>
+                <h2>Connection</h2>
+                <div class="controls"><button id="connect" class="primary">Connect</button><button id="pause" disabled>Pause stream</button></div>
+                <h2>Subscription</h2>
+                <div class="controls">
+                    <label><input id="primary" type="checkbox" checked>Primary · TWAI</label>
+                    <label><input id="secondary" type="checkbox" checked>Secondary · MCP2518FD</label>
+                    <label><input id="rx" type="checkbox" checked>Receive events</label>
+                    <label><input id="tx" type="checkbox" checked>Transmit events</label>
+                    <button id="apply" disabled>Apply filters</button>
+                </div>
+                <h2>Display</h2>
+                <div class="controls">
+                    <input id="search" type="search" placeholder="Filter CAN ID…" aria-label="Filter hexadecimal CAN identifier">
+                    <button id="clear">Clear tables</button>
+                    <button id="export">Export buffered CSV</button>
+                </div>
+                <h2>Stream statistics</h2>
+                <div class="metric">Events received <b id="received">0</b></div>
+                <div class="metric">Server drops <b id="dropped">—</b></div>
+                <div class="metric">Server queue <b id="queue">—</b></div>
+                <p class="note">Pause affects this web stream. SD recording is controlled on the device. CSV contains only the retained browser history.</p>
+            </aside>
+            <div class="workspace">
+                <section id="can-settings" class="can-config" aria-label="Device CAN settings">Loading CAN settings…</section>
+                <div class="channels" id="channels"></div>
+            </div>
+        </div>
+        <div id="message" role="status"></div>
+        <footer><span>Changed bytes are highlighted · timestamps in seconds</span><span>Per channel: 256 IDs · 500 recent events</span></footer>
+    </main>
+    </body>
+</html>

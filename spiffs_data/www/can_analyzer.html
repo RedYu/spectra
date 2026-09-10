@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" class="page-analyzer">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="/favicon.ico">
+    <title>CAN Analyzer · Spectra</title>
+    <link rel="stylesheet" href="spectra.css?v=5">
+    <script src="spectra.js?v=5" defer></script>
+</head>
+<body class="page-analyzer">
+<header class="spectra-header">
+        <a class="spectra-brand" href="/"><span aria-hidden="true">▧</span> Spectra</a>
+        <nav class="spectra-nav" aria-label="Main navigation">
+            <a href="/">Overview</a>
+            <a href="/can_logger">CAN Logger</a>
+            <a href="/can_analyzer" aria-current="page">CAN Analyzer</a>
+            <a href="/files">Files</a>
+            <a href="/settings">Settings</a>
+            <a href="/can_test">Diagnostics</a>
+        </nav>
+        <span id="status" role="status">Disconnected</span>
+    </header>
+    <main>
+        <div class="heading can-config-heading">
+            <div><h1>CAN Analyzer</h1><p>Explore live events or a recorded SCL file locally in your browser.</p></div>
+        </div>
+        <div class="layout">
+            <aside>
+                <h2>Source</h2>
+                <div class="controls">
+                    <button id="connect" class="primary">Connect live</button>
+                    <button id="pause" disabled>Pause stream</button>
+                    <label for="file">Open SCL file</label><input id="file" type="file" accept=".scl">
+                    <p class="note">Changing source clears the previous dataset. Files stay on this computer.</p>
+                </div>
+                <h2>Search & filters</h2>
+                <div class="controls">
+                    <input id="id" type="search" placeholder="CAN ID (hex)" aria-label="CAN ID">
+                    <input id="bytes" type="search" placeholder="Bytes: 02 10 ??" aria-label="Payload byte pattern">
+                    <select id="bus" aria-label="Bus"><option value="">All buses</option><option value="0">Primary</option><option value="1">Secondary</option></select>
+                    <select id="event" aria-label="Direction"><option value="">All events</option><option value="rx">RX</option><option value="tx">TX lifecycle</option></select>
+                    <select id="format" aria-label="Frame format"><option value="">Classical + FD</option><option value="classic">Classical</option><option value="fd">CAN FD</option></select>
+                    <label><input id="only" type="checkbox">Only selected IDs</label>
+                    <button id="reset">Reset filters</button>
+                </div>
+                <h2>Sort</h2>
+                <div class="controls">
+                    <select id="sort" aria-label="Identifier sort"><option value="id">ID ascending</option><option value="count">Count descending</option><option value="last">Latest event first</option><option value="interval">Average interval ascending</option></select>
+                    <select id="order" aria-label="History order"><option value="old">History: oldest first</option><option value="new">History: newest first</option></select>
+                    <button id="all">Select listed IDs</button><button id="none">Deselect all</button>
+                </div>
+                <p class="note">Up to 100,000 events. Live capture pauses at the limit. File import keeps the first 100,000 events and reports truncation. Maximum file size: 64 MiB.</p>
+            </aside>
+            <div class="workspace">
+                <section id="can-settings" class="can-config" aria-label="Device CAN settings">Loading CAN settings…</section>
+                <p id="summary">No data loaded</p>
+                <div class="analysis-tables">
+                    <div class="panel"><div class="panel-title">Identifiers <span>Count · interval min / avg / max</span></div><div class="scroll"><table><thead><tr><th>Select</th><th>Bus / ID / format</th><th>Frames</th><th>Δ ms</th></tr></thead><tbody id="ids"></tbody></table></div></div>
+                    <div class="panel"><div class="panel-title">Matching events <span id="matches">0</span></div><div class="scroll"><table><thead><tr><th>#</th><th>Bus</th><th>Time (s)</th><th>Event</th><th>ID</th><th>Data</th></tr></thead><tbody id="events"></tbody></table></div><div class="pager"><button id="prev">Previous</button><span id="page">0 / 0</span><button id="next">Next</button></div></div>
+                </div>
+                <div class="panel details"><h2>Frame inspector</h2><p id="frame">Select an event row to inspect its bytes.</p><pre id="detail"></pre><p class="note">Byte comparison uses the previous matching bus, ID, frame format and event type. TX lifecycle events do not count as additional transmitted frames.</p></div>
+                <p id="message" role="status"></p>
+            </div>
+        </div>
+    </main>
+    </body>
+</html>
