@@ -89,8 +89,10 @@ idf_component_register(
         mdns
 )
 
-spiffs_create_partition_image(
-    storage
-    ${PROJECT_DIR}/spiffs_data
-    FLASH_IN_PROJECT
-)
+if(NOT SPECTRA_TEST_BUILD)
+    spiffs_create_partition_image(
+        storage
+        ${PROJECT_DIR}/spiffs_data
+        FLASH_IN_PROJECT
+    )
+endif()

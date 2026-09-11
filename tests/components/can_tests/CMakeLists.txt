@@ -11,4 +11,6 @@ idf_component_register(
         services
         can
         drivers
+    
+    WHOLE_ARCHIVE
 )
