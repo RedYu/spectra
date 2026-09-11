@@ -16,6 +16,9 @@
 # Log files
 *.log
 
+# Generated web resources
+spiffs_data/www/dist/
+
 # Build artifacts and directories
 **/build/
 build/
