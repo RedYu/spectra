@@ -24,7 +24,8 @@
 
 #define LVGL_SPI_LOCK_TIMEOUT_MS  (5000U)
 
-static const char *TAG = "lvgl_port";
+static const char *TAG =
+    "lvgl_port";
 
 static lv_display_t *s_display = NULL;
 static lv_indev_t *s_touch_indev = NULL;
@@ -41,7 +42,9 @@ static void lvgl_tick_timer_cb(void *arg)
 {
     (void)arg;
 
-    lv_tick_inc(LVGL_TICK_PERIOD_MS);
+    lv_tick_inc(
+        LVGL_TICK_PERIOD_MS
+    );
 }
 
 static esp_err_t lvgl_tick_init(void)
@@ -54,19 +57,21 @@ static esp_err_t lvgl_tick_init(void)
         .skip_unhandled_events = true,
     };
 
-    esp_err_t result = esp_timer_create(
-        &timer_args,
-        &s_tick_timer
-    );
+    esp_err_t result =
+        esp_timer_create(
+            &timer_args,
+            &s_tick_timer
+        );
 
     if (result != ESP_OK) {
         return result;
     }
 
-    result = esp_timer_start_periodic(
-        s_tick_timer,
-        (uint64_t)LVGL_TICK_PERIOD_MS * 1000ULL
-    );
+    result =
+        esp_timer_start_periodic(
+            s_tick_timer,
+            (uint64_t)LVGL_TICK_PERIOD_MS * 1000ULL
+        );
 
     if (result != ESP_OK) {
         (void)esp_timer_delete(s_tick_timer);
@@ -105,7 +110,11 @@ static void lvgl_display_flush_cb(
 
     if (panel == NULL) {
         board_spi_unlock();
-        lv_display_flush_ready(display);
+
+        lv_display_flush_ready(
+            display
+        );
+
         return;
     }
 
@@ -135,7 +144,10 @@ static void lvgl_display_flush_cb(
          * No transfer-complete callback will be generated
          * if the transfer was not queued successfully.
          */
-        lv_display_flush_ready(display);
+        lv_display_flush_ready(
+            display
+        );
+
         return;
     }
 
@@ -163,7 +175,9 @@ static bool lvgl_color_transfer_done_cb(
     lv_display_t *display = user_ctx;
 
     if (display != NULL) {
-        lv_display_flush_ready(display);
+        lv_display_flush_ready(
+            display
+        );
     }
 
     return higher_priority_task_woken == pdTRUE;
@@ -175,7 +189,11 @@ static esp_err_t lvgl_display_register(void)
         display_driver_get_panel_io();
 
     if (panel_io == NULL) {
-        ESP_LOGE(TAG, "Display panel IO is NULL");
+        ESP_LOGE(
+            TAG,
+            "Display panel IO is NULL"
+        );
+
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -185,7 +203,11 @@ static esp_err_t lvgl_display_register(void)
     );
 
     if (s_display == NULL) {
-        ESP_LOGE(TAG, "Failed to create LVGL display");
+        ESP_LOGE(
+            TAG,
+            "Failed to create LVGL display"
+        );
+
         return ESP_ERR_NO_MEM;
     }
 
@@ -214,17 +236,19 @@ static esp_err_t lvgl_display_register(void)
      * be stored in PSRAM.
      */
 
-    s_draw_buffer_1 = heap_caps_malloc(
-        buffer_size,
-        MALLOC_CAP_SPIRAM |
-        MALLOC_CAP_8BIT
-    );
+    s_draw_buffer_1 =
+        heap_caps_malloc(
+            buffer_size,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
 
-    s_draw_buffer_2 = heap_caps_malloc(
-        buffer_size,
-        MALLOC_CAP_SPIRAM |
-        MALLOC_CAP_8BIT
-    );
+    s_draw_buffer_2 =
+        heap_caps_malloc(
+            buffer_size,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
 
     if ((s_draw_buffer_1 == NULL) ||
         (s_draw_buffer_2 == NULL)) {
@@ -235,16 +259,25 @@ static esp_err_t lvgl_display_register(void)
         );
 
         if (s_draw_buffer_1 != NULL) {
-            heap_caps_free(s_draw_buffer_1);
+            heap_caps_free(
+                s_draw_buffer_1
+            );
+
             s_draw_buffer_1 = NULL;
         }
 
         if (s_draw_buffer_2 != NULL) {
-            heap_caps_free(s_draw_buffer_2);
+            heap_caps_free(
+                s_draw_buffer_2
+            );
+
             s_draw_buffer_2 = NULL;
         }
 
-        lv_display_delete(s_display);
+        lv_display_delete(
+            s_display
+        );
+
         s_display = NULL;
 
         return ESP_ERR_NO_MEM;
@@ -285,7 +318,9 @@ static esp_err_t lvgl_display_register(void)
         "Failed to register LCD transfer callback"
     );
 
-    lv_display_set_default(s_display);
+    lv_display_set_default(
+        s_display
+    );
 
     ESP_LOGI(
         TAG,
@@ -348,10 +383,15 @@ static void lvgl_touch_read_cb(
 
 static esp_err_t lvgl_touch_register(void)
 {
-    s_touch_indev = lv_indev_create();
+    s_touch_indev =
+        lv_indev_create();
 
     if (s_touch_indev == NULL) {
-        ESP_LOGE(TAG, "Failed to create LVGL input device");
+        ESP_LOGE(
+            TAG,
+            "Failed to create LVGL input device"
+        );
+
         return ESP_ERR_NO_MEM;
     }
 
@@ -370,7 +410,10 @@ static esp_err_t lvgl_touch_register(void)
         s_display
     );
 
-    ESP_LOGI(TAG, "LVGL touch registered");
+    ESP_LOGI(
+        TAG,
+        "LVGL touch registered"
+    );
 
     return ESP_OK;
 }
@@ -517,17 +560,21 @@ esp_err_t lvgl_port_init(void)
         }
 
         lv_init();
+
         s_lvgl_initialized = true;
     }
 
-    esp_err_t result = lvgl_display_register();
+    esp_err_t result =
+        lvgl_display_register();
 
     if (result == ESP_OK) {
-        result = lvgl_touch_register();
+        result =
+            lvgl_touch_register();
     }
 
     if (result == ESP_OK) {
-        result = lvgl_tick_init();
+        result =
+            lvgl_tick_init();
     }
 
     if (result != ESP_OK) {
@@ -558,7 +605,8 @@ uint32_t lvgl_port_handler(void)
         return LVGL_HANDLER_MAX_MS;
     }
 
-    uint32_t delay_ms = lv_timer_handler();
+    uint32_t delay_ms =
+        lv_timer_handler();
 
     if (delay_ms < LVGL_HANDLER_MIN_MS) {
         delay_ms = LVGL_HANDLER_MIN_MS;

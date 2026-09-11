@@ -19,7 +19,8 @@
 #error "The PSRAM pool requires LV_MEM_ADR to be zero"
 #endif
 
-static const char *TAG = "lvgl_psram_pool";
+static const char *TAG =
+    "lvgl_psram_pool";
 
 static void *s_pool = NULL;
 
@@ -29,11 +30,12 @@ esp_err_t lvgl_psram_pool_prepare(void)
         return ESP_OK;
     }
 
-    s_pool = heap_caps_malloc(
-        LV_MEM_SIZE,
-        MALLOC_CAP_SPIRAM |
-        MALLOC_CAP_8BIT
-    );
+    s_pool =
+        heap_caps_malloc(
+            LV_MEM_SIZE,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
+        );
 
     if (s_pool == NULL) {
         ESP_LOGE(

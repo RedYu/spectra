@@ -17,19 +17,20 @@
     GUI_THEME_TOOLBAR_HEIGHT
 #define TOOLBAR_BUTTON_SIZE \
     GUI_THEME_TOOLBAR_BUTTON_SIZE
-#define TOOLBAR_STATUS_BUTTON_HEIGHT TOOLBAR_BUTTON_SIZE
+#define TOOLBAR_STATUS_BUTTON_HEIGHT \
+    TOOLBAR_BUTTON_SIZE
 #define TOOLBAR_STATUS_CONTAINER_WIDTH  (340)
 
-#define TOOLBAR_USB_BUTTON_WIDTH   (46)
-#define TOOLBAR_WIFI_BUTTON_WIDTH  (60)
-#define TOOLBAR_CPU_BUTTON_WIDTH   (82)
+#define TOOLBAR_USB_BUTTON_WIDTH          (46)
+#define TOOLBAR_WIFI_BUTTON_WIDTH         (60)
+#define TOOLBAR_CPU_BUTTON_WIDTH          (82)
 
 #define TOOLBAR_STATUS_BUTTON_PADDING_HORIZONTAL \
     GUI_THEME_SPACE_SM
 #define TOOLBAR_STATUS_BUTTON_PADDING_VERTICAL \
     GUI_THEME_SPACE_XS
 
-#define TOOLBAR_INTERNET_INDICATOR_SIZE   (10)
+#define TOOLBAR_INTERNET_INDICATOR_SIZE  (10)
 #define TOOLBAR_INTERNET_INDICATOR_GAP \
     GUI_THEME_SPACE_SM
 
@@ -47,14 +48,18 @@ static void toolbar_button_event_cb(
 )
 {
     lv_obj_t *button =
-        lv_event_get_current_target_obj(event);
+        lv_event_get_current_target_obj(
+            event
+        );
 
     if (button == NULL) {
         return;
     }
 
     toolbar_button_context_t *context =
-        lv_obj_get_user_data(button);
+        lv_obj_get_user_data(
+            button
+        );
 
     if ((context != NULL) &&
         (context->action != NULL)) {
@@ -68,14 +73,18 @@ static void toolbar_button_delete_event_cb(
 )
 {
     lv_obj_t *button =
-        lv_event_get_current_target_obj(event);
+        lv_event_get_current_target_obj(
+            event
+        );
 
     if (button == NULL) {
         return;
     }
 
     toolbar_button_context_t *context =
-        lv_obj_get_user_data(button);
+        lv_obj_get_user_data(
+            button
+        );
 
     lv_obj_set_user_data(
         button,
@@ -886,7 +895,9 @@ static void toolbar_set_button_icon_color(
     }
 
     toolbar_button_context_t *context =
-        lv_obj_get_user_data(button);
+        lv_obj_get_user_data(
+            button
+        );
 
     if ((context == NULL) ||
         (context->image == NULL)) {

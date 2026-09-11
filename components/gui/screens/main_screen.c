@@ -36,12 +36,12 @@
 
 #define MAIN_TOOLBAR_HEIGHT \
     GUI_THEME_TOOLBAR_HEIGHT
-#define MAIN_SCREEN_UPDATE_MS   (1000U)
+#define MAIN_SCREEN_UPDATE_MS      (1000U)
 
-#define MAIN_CAN_CHANNEL_COUNT  (2U)
-#define MAIN_CAN_ROW_HEIGHT     (132)
+#define MAIN_CAN_CHANNEL_COUNT     (2U)
+#define MAIN_CAN_ROW_HEIGHT        (132)
 #define MAIN_RECORDING_ROW_HEIGHT  (44)
-#define MAIN_ACTION_ROW_HEIGHT  (44)
+#define MAIN_ACTION_ROW_HEIGHT     (44)
 
 _Static_assert(
     MAIN_CAN_CHANNEL_COUNT == CAN_BUS_COUNT,
@@ -426,8 +426,9 @@ static void main_screen_capture_button_event_cb(
     lv_event_t *event
 )
 {
-    if (lv_event_get_code(event) !=
-        LV_EVENT_CLICKED) {
+    if (lv_event_get_code(
+            event
+        ) != LV_EVENT_CLICKED) {
 
         return;
     }
@@ -726,7 +727,10 @@ static void main_screen_monitor_button_event_cb(
     lv_event_t *event
 )
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+    if (lv_event_get_code(
+            event
+        ) != LV_EVENT_CLICKED) {
+
         return;
     }
 

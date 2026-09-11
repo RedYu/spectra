@@ -35,24 +35,25 @@
 #include "shutdown_service.h"
 #include "can_fd_service.h"
 
-#define SYSTEM_RESTART_DELAY_MAX_MS     (60000U)
+#define SYSTEM_RESTART_DELAY_MAX_MS            (60000U)
 
-#define SYSTEM_TEMPERATURE_MIN_C             (10)
-#define SYSTEM_TEMPERATURE_MAX_C             (80)
-#define SYSTEM_TEMPERATURE_UPDATE_INTERVAL   (5U)
+#define SYSTEM_TEMPERATURE_MIN_C               (10)
+#define SYSTEM_TEMPERATURE_MAX_C               (80)
+#define SYSTEM_TEMPERATURE_UPDATE_INTERVAL     (5U)
 
-#define SYSTEM_CAN_FD_PROFILE_INTERVAL  (10U)
+#define SYSTEM_CAN_FD_PROFILE_INTERVAL         (10U)
 
-#define SYSTEM_TASK_STACK_SIZE          (3072U)
+#define SYSTEM_TASK_STACK_SIZE                 (3072U)
 #define SYSTEM_TASK_PRIORITY \
     APP_TASK_PRIORITY_SYSTEM
-#define SYSTEM_UPDATE_INTERVAL_MS       (1000U)
+#define SYSTEM_UPDATE_INTERVAL_MS              (1000U)
 
-#define SYSTEM_STOP_TIMEOUT_MS          (2000U)
+#define SYSTEM_STOP_TIMEOUT_MS                 (2000U)
 
-#define SYSTEM_EVENT_STOPPED            BIT0
+#define SYSTEM_EVENT_STOPPED                   BIT0
 
-static const char *TAG = "system_service";
+static const char *TAG =
+    "system_service";
 
 static TaskHandle_t s_task_handle = NULL;
 static EventGroupHandle_t s_events = NULL;
