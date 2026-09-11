@@ -9,6 +9,10 @@ This document describes the HTTP API currently registered by the Spectra
 firmware. It covers system, power, network, settings, and file operations.
 The live CAN WebSocket protocol is documented separately.
 
+CAN transmission jobs use `GET /api/can/transmit` and
+`POST /api/can/transmit`. See [CAN transmission jobs](can-transmit.md) for
+the request schema, timing, increments, counters, and stop semantics.
+
 ## Base address
 
 The API is available over the same HTTP server as the embedded Web UI:
@@ -558,6 +562,7 @@ Future API changes should follow these rules:
 
 ## Related documentation
 
+- [Hardware CAN RX filters](can-hardware-filters.md) — `GET` / `POST /api/can/filters`.
 - [Firmware architecture](architecture.md)
 - [Shared CAN frame and event model](can-frame-model.md)
 - [CAN WebSocket protocol](websocket-can-protocol.md)

@@ -350,6 +350,35 @@ esp_err_t can_service_get_queue_statistics(
  */
 bool can_service_is_running(void);
 
+/**
+ * @brief Replace the single full-width TWAI hardware mask filter.
+ *
+ * Quiesces the receive task and reconfigures the controller. Frames can
+ * be lost during reconfiguration. This does not save settings to flash.
+ *
+ * @param[in] filter New acceptance-filter configuration.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if filter is NULL or
+ * contains invalid fields, ESP_ERR_INVALID_STATE if the service is not
+ * running, otherwise an ESP-IDF error code.
+ */
+esp_err_t can_service_set_acceptance_filter(
+    const can_twai_acceptance_filter_t *filter
+);
+
+/**
+ * @brief Copy the active primary CAN acceptance filter.
+ *
+ * @param[out] filter Destination acceptance-filter configuration.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if filter is NULL,
+ * ESP_ERR_INVALID_STATE if the service is not running, or
+ * ESP_ERR_TIMEOUT if the service lock cannot be acquired.
+ */
+esp_err_t can_service_get_acceptance_filter(
+    can_twai_acceptance_filter_t *filter
+);
+
 #ifdef __cplusplus
 }
 #endif

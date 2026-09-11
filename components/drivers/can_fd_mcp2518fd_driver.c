@@ -4646,6 +4646,250 @@ static bool mcp2518fd_filters_are_available(void)
            s_started;
 }
 
+static uint32_t mcp2518fd_decode_filter_identifier(
+    uint32_t object,
+    bool extended
+)
+{
+    const uint32_t sid =
+        object & MCP2518FD_OBJECT_SID_MASK;
+
+    return extended
+        ? (sid << 18U) |
+          ((object >> MCP2518FD_OBJECT_EID_SHIFT) &
+           MCP2518FD_OBJECT_EID_MASK)
+        : sid;
+}
+
+static esp_err_t mcp2518fd_get_filter_bank_unlocked(
+    can_fd_mcp2518fd_filter_bank_t *bank
+)
+{
+    memset(
+        bank,
+        0,
+        sizeof(*bank)
+    );
+
+    for (uint8_t index = 0U;
+         index < CAN_FD_MCP2518FD_FILTER_COUNT;
+         ++index) {
+
+        uint32_t control = 0U;
+
+        esp_err_t result =
+            mcp2518fd_read_register_unlocked(
+                mcp2518fd_filter_control_address(
+                    index
+                ),
+                &control
+            );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        control >>=
+            (index % MCP2518FD_FILTERS_PER_CONTROL_REGISTER) *
+            8U;
+
+        if ((control & MCP2518FD_FILTER_ENABLE) == 0U) {
+            continue;
+        }
+
+        if ((control & MCP2518FD_FILTER_FIFO_MASK) !=
+            MCP2518FD_RX_FIFO_NUMBER) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+
+        uint32_t object = 0U;
+        uint32_t mask = 0U;
+
+        result =
+            mcp2518fd_read_register_unlocked(
+                mcp2518fd_filter_object_address(
+                    index
+                ),
+                &object
+            );
+
+        if (result == ESP_OK) {
+            result =
+                mcp2518fd_read_register_unlocked(
+                    mcp2518fd_filter_mask_address(
+                        index
+                    ),
+                    &mask
+                );
+        }
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        if ((mask & MCP2518FD_FILTER_MIDE) == 0U) {
+            if (mask != 0U) {
+                return ESP_ERR_NOT_SUPPORTED;
+            }
+
+            bank->accept_all = true;
+            continue;
+        }
+
+        can_fd_mcp2518fd_filter_t *filter =
+            &bank->filters[bank->count++];
+
+        filter->index = index;
+
+        filter->extended =
+            (object & MCP2518FD_FILTER_EXIDE) != 0U;
+
+        filter->identifier =
+            mcp2518fd_decode_filter_identifier(
+                object,
+                filter->extended
+            );
+
+        filter->mask =
+            mcp2518fd_decode_filter_identifier(
+                mask,
+                filter->extended
+            );
+    }
+
+    if (bank->accept_all) {
+        bank->count = 0U;
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t mcp2518fd_apply_filter_bank_unlocked(
+    const can_fd_mcp2518fd_filter_bank_t *bank
+)
+{
+    if (bank->accept_all) {
+        return mcp2518fd_accept_all_unlocked();
+    }
+
+    esp_err_t result =
+        mcp2518fd_disable_all_filters_unlocked();
+
+    for (size_t index = 0U;
+         (result == ESP_OK) && (index < bank->count);
+         ++index) {
+
+        result =
+            mcp2518fd_set_filter_unlocked(
+                &bank->filters[index]
+            );
+    }
+
+    return result;
+}
+
+esp_err_t can_fd_mcp2518fd_driver_get_filter_bank(
+    can_fd_mcp2518fd_filter_bank_t *bank
+)
+{
+    if (bank == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t result =
+        mcp2518fd_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        mcp2518fd_filters_are_available()
+            ? mcp2518fd_get_filter_bank_unlocked(
+                bank
+            )
+            : ESP_ERR_INVALID_STATE;
+
+    mcp2518fd_unlock();
+
+    return result;
+}
+
+esp_err_t can_fd_mcp2518fd_driver_set_filter_bank(
+    const can_fd_mcp2518fd_filter_bank_t *bank
+)
+{
+    if ((bank == NULL) ||
+        (bank->count > CAN_FD_MCP2518FD_FILTER_COUNT) ||
+        (bank->accept_all && (bank->count != 0U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint32_t used = 0U;
+
+    for (size_t index = 0U;
+         index < bank->count;
+         ++index) {
+
+        const can_fd_mcp2518fd_filter_t *filter =
+            &bank->filters[index];
+
+        if (!mcp2518fd_filter_is_valid(filter) ||
+            ((used & (1UL << filter->index)) != 0U)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        used |= 1UL << filter->index;
+    }
+
+    can_fd_mcp2518fd_filter_bank_t previous;
+    esp_err_t result =
+        mcp2518fd_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        mcp2518fd_filters_are_available()
+            ? mcp2518fd_get_filter_bank_unlocked(
+                &previous
+            )
+            : ESP_ERR_INVALID_STATE;
+
+    if (result == ESP_OK) {
+        result =
+            mcp2518fd_apply_filter_bank_unlocked(
+                bank
+            );
+
+        if (result != ESP_OK) {
+            const esp_err_t rollback =
+                mcp2518fd_apply_filter_bank_unlocked(&previous);
+
+            if (rollback != ESP_OK) {
+                /*
+                 * Best effort fail-closed; never report success after
+                 * a bus fault.
+                 */
+                (void)mcp2518fd_disable_all_filters_unlocked();
+
+                ESP_LOGE(
+                    TAG,
+                    "Filter rollback failed: %s",
+                    esp_err_to_name(rollback)
+                );
+            }
+        }
+    }
+
+    mcp2518fd_unlock();
+
+    return result;
+}
+
 esp_err_t can_fd_mcp2518fd_driver_set_filter(
     const can_fd_mcp2518fd_filter_t *filter
 )

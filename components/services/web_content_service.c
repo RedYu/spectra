@@ -345,7 +345,6 @@ static esp_err_t web_content_favicon_handler(
     );
 }
 
-
 esp_err_t web_content_service_register(
     httpd_handle_t server
 )
@@ -355,57 +354,101 @@ esp_err_t web_content_service_register(
     }
 
     static const httpd_uri_t root_uri = {
-        .uri = "/",
-        .method = HTTP_GET,
+        .uri =
+            "/",
+
+        .method =
+            HTTP_GET,
+
         .handler =
             web_content_root_handler,
-        .user_ctx = NULL,
+
+        .user_ctx =
+            NULL,
     };
 
     static const httpd_uri_t settings_page_uri = {
-        .uri = "/settings",
-        .method = HTTP_GET,
+        .uri =
+            "/settings",
+
+        .method =
+            HTTP_GET,
+
         .handler =
             web_content_settings_page_handler,
-        .user_ctx = NULL,
+
+        .user_ctx =
+            NULL,
     };
 
     static const httpd_uri_t favicon_uri = {
-        .uri = "/favicon.ico",
-        .method = HTTP_GET,
+        .uri =
+            "/favicon.ico",
+
+        .method =
+            HTTP_GET,
+
         .handler =
             web_content_favicon_handler,
-        .user_ctx = NULL,
+
+        .user_ctx =
+            NULL,
     };
 
     static const httpd_uri_t files_page_uri = {
-        .uri = "/files",
-        .method = HTTP_GET,
+        .uri =
+            "/files",
+
+        .method =
+            HTTP_GET,
+
         .handler =
             web_content_files_page_handler,
-        .user_ctx = NULL,
+
+        .user_ctx =
+            NULL,
     };
 
     static const httpd_uri_t stylesheet_uri = {
-        .uri = "/spectra.css",
-        .method = HTTP_GET,
-        .handler = web_content_stylesheet_handler,
-        .user_ctx = NULL,
+        .uri =
+            "/spectra.css",
+
+        .method =
+            HTTP_GET,
+
+        .handler =
+            web_content_stylesheet_handler,
+
+        .user_ctx =
+            NULL,
     };
 
-
     static const httpd_uri_t can_analyzer_page_uri = {
-        .uri = "/can_analyzer",
-        .method = HTTP_GET,
-        .handler = web_content_can_analyzer_page_handler,
-        .user_ctx = NULL,
+        .uri =
+            "/can_analyzer",
+
+        .method =
+            HTTP_GET,
+
+        .handler =
+            web_content_can_analyzer_page_handler,
+
+        .user_ctx =
+            NULL,
     };
 
     static const httpd_uri_t can_logger_page_uri = {
-        .uri = "/can_logger",
-        .method = HTTP_GET,
-        .handler = web_content_can_logger_page_handler,
-        .user_ctx = NULL,
+        .uri =
+            "/can_logger",
+
+        .method =
+            HTTP_GET,
+
+        .handler =
+            web_content_can_logger_page_handler,
+
+        .user_ctx =
+            NULL,
     };
 
     static const httpd_uri_t can_test_page_uri = {
@@ -423,11 +466,17 @@ esp_err_t web_content_service_register(
     };
 
     static const httpd_uri_t script_uri = {
-        .uri = "/spectra.js",
-        .method = HTTP_GET,
+        .uri =
+            "/spectra.js",
+
+        .method =
+            HTTP_GET,
+
         .handler =
             web_content_script_handler,
-        .user_ctx = NULL,
+
+        .user_ctx =
+            NULL,
     };
 
     esp_err_t result =
@@ -526,26 +575,31 @@ esp_err_t web_content_service_register(
         return result;
     }
 
-    result = httpd_register_uri_handler(
-        server,
-        &can_logger_page_uri
-    );
+    result =
+        httpd_register_uri_handler(
+            server,
+            &can_logger_page_uri
+        );
 
     if (result != ESP_OK) {
         return result;
     }
 
-    result = httpd_register_uri_handler(
-        server,
-        &can_analyzer_page_uri
-    );
+    result =
+        httpd_register_uri_handler(
+            server,
+            &can_analyzer_page_uri
+        );
 
     if (result != ESP_OK) {
         return result;
     }
 
-    return httpd_register_uri_handler(
-        server,
-        &stylesheet_uri
-    );
+    result =
+        httpd_register_uri_handler(
+            server,
+            &stylesheet_uri
+        );
+
+    return result;
 }

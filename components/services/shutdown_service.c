@@ -30,6 +30,7 @@
 #include "can_service.h"
 #include "can_fd_service.h"
 #include "can_router.h"
+#include "can_transmit_service.h"
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
 #include "network_service.h"
@@ -154,6 +155,21 @@ static void shutdown_service_task(
             "Failed to stop web service: %s",
             esp_err_to_name(web_result)
         );
+    }
+
+    const esp_err_t transmit_result =
+        can_transmit_service_stop();
+
+    if ((transmit_result != ESP_OK) &&
+        (transmit_result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGE(
+            TAG,
+            "CAN transmit shutdown failed: %s",
+            esp_err_to_name(transmit_result)
+        );
+
+        return;
     }
 
     const esp_err_t settings_result =

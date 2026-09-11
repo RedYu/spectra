@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.ico">
     <title>CAN Analyzer · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=5">
-    <script src="spectra.js?v=5" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=7">
+    <script src="spectra.js?v=7" defer></script>
 </head>
 <body class="page-analyzer">
 <header class="spectra-header">
@@ -54,6 +54,7 @@
             </aside>
             <div class="workspace">
                 <section id="can-settings" class="can-config" aria-label="Device CAN settings">Loading CAN settings…</section>
+                <section id="can-transmit" aria-label="CAN transmission"></section>
                 <p id="summary">No data loaded</p>
                 <div class="analysis-tables">
                     <div class="panel"><div class="panel-title">Identifiers <span>Count · interval min / avg / max</span></div><div class="scroll"><table><thead><tr><th>Select</th><th>Bus / ID / format</th><th>Frames</th><th>Δ ms</th></tr></thead><tbody id="ids"></tbody></table></div></div>

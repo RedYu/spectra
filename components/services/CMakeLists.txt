@@ -26,6 +26,7 @@ idf_component_register(
         "can_mcp2518fd_frame_adapter.c"
         "web_can_stream_service.c"
         "can_logger_service.c"
+        "can_transmit_service.c"
         "can_logger_binary_format.c"
         "time_service.c"
 
@@ -36,6 +37,8 @@ idf_component_register(
         "web_api/web_files_api.c"
         "web_api/web_network_api.c"
         "web_api/web_can_protocol.c"
+        "web_api/web_can_transmit_api.c"
+        "web_api/web_can_filters_api.c"
 
     INCLUDE_DIRS
         "include"

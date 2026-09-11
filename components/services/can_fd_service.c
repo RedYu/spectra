@@ -1150,6 +1150,76 @@ esp_err_t can_fd_service_recover(void)
     return result;
 }
 
+esp_err_t can_fd_service_get_filter_bank(
+    can_fd_mcp2518fd_filter_bank_t *bank
+)
+{
+    if (bank == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t result =
+        can_fd_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!atomic_load(
+            &s_running
+        ) ||
+        atomic_load(
+            &s_stop_requested
+        )) {
+
+        result = ESP_ERR_INVALID_STATE;
+    } else {
+        result =
+            can_fd_mcp2518fd_driver_get_filter_bank(
+                bank
+            );
+    }
+
+    can_fd_service_unlock();
+
+    return result;
+}
+
+esp_err_t can_fd_service_set_filter_bank(
+    const can_fd_mcp2518fd_filter_bank_t *bank
+)
+{
+    if (bank == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t result =
+        can_fd_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!atomic_load(
+            &s_running
+        ) ||
+        atomic_load(
+            &s_stop_requested
+        )) {
+
+        result = ESP_ERR_INVALID_STATE;
+    } else {
+        result =
+            can_fd_mcp2518fd_driver_set_filter_bank(
+                bank
+            );
+    }
+
+    can_fd_service_unlock();
+
+    return result;
+}
+
 esp_err_t can_fd_service_set_filter(
     const can_fd_mcp2518fd_filter_t *filter
 )

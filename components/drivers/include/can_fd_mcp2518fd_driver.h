@@ -51,9 +51,9 @@ extern "C" {
 #define CAN_FD_MCP2518FD_FILTER_COUNT              (32U)
 
 #if CONFIG_CAN_FD_MCP2518FD_ENABLE_PROFILING
-#define CAN_FD_MCP2518FD_ENABLE_PROFILING (1)
+#define CAN_FD_MCP2518FD_ENABLE_PROFILING          (1)
 #else
-#define CAN_FD_MCP2518FD_ENABLE_PROFILING (0)
+#define CAN_FD_MCP2518FD_ENABLE_PROFILING          (0)
 #endif
 
 /**
@@ -497,6 +497,60 @@ typedef struct
     bool extended;
 
 } can_fd_mcp2518fd_filter_t;
+
+/**
+ * @brief Complete runtime MCP2518FD acceptance-filter configuration.
+ *
+ * An empty bank with accept_all set to false rejects every received
+ * frame. When accept_all is true, count must be zero.
+ */
+typedef struct
+{
+    /** True to replace the filter bank with one accept-all filter. */
+    bool accept_all;
+
+    /** Number of valid entries stored in filters. */
+    size_t count;
+
+    /** Filter configurations to enable when accept_all is false. */
+    can_fd_mcp2518fd_filter_t filters[
+        CAN_FD_MCP2518FD_FILTER_COUNT
+    ];
+
+} can_fd_mcp2518fd_filter_bank_t;
+
+/**
+ * @brief Read the active hardware acceptance-filter bank.
+ *
+ * The complete operation is serialized using the driver lock.
+ *
+ * @param[out] bank Destination filter-bank configuration.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if bank is NULL,
+ * ESP_ERR_INVALID_STATE if the driver is not initialized or running,
+ * otherwise an ESP-IDF driver error.
+ */
+esp_err_t can_fd_mcp2518fd_driver_get_filter_bank(
+    can_fd_mcp2518fd_filter_bank_t *bank
+);
+
+/**
+ * @brief Replace the complete hardware acceptance-filter bank.
+ *
+ * The configuration is validated before the hardware is changed. The
+ * driver attempts to restore the previous bank if an SPI operation
+ * fails. Frames may be lost while the bank is being replaced. A later
+ * controller reinitialization restores the accept-all configuration.
+ *
+ * @param[in] bank New filter-bank configuration.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if bank is NULL or
+ * contains invalid fields, ESP_ERR_INVALID_STATE if the driver is not
+ * initialized or running, otherwise an ESP-IDF driver error.
+ */
+esp_err_t can_fd_mcp2518fd_driver_set_filter_bank(
+    const can_fd_mcp2518fd_filter_bank_t *bank
+);
 
 /**
  * @brief Accumulated MCP2518FD performance measurements.

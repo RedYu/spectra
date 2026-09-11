@@ -27,9 +27,24 @@
 </head>
 
 <body class="page-settings">
-<header class="spectra-header">
-        <a class="spectra-brand" href="/"><span aria-hidden="true">▧</span> <span id="device-title" class="brand-title">Spectra</span></a>
-        <nav class="spectra-nav" aria-label="Main navigation">
+    <header class="spectra-header">
+        <a
+            class="spectra-brand"
+            href="/"
+        >
+            <span aria-hidden="true">▧</span>
+            <span
+                id="device-title"
+                class="brand-title"
+            >
+                Spectra
+            </span>
+        </a>
+
+        <nav
+            class="spectra-nav"
+            aria-label="Main navigation"
+        >
             <a href="/">Overview</a>
             <a href="/can_logger">CAN Logger</a>
             <a href="/can_analyzer">CAN Analyzer</a>
@@ -37,6 +52,7 @@
             <a href="/settings" aria-current="page">Settings</a>
             <a href="/can_test">Diagnostics</a>
         </nav>
+
         <span id="device-subtitle" hidden>CAN Analyzer</span>
     </header>
 
@@ -72,818 +88,844 @@
                 </nav>
             </aside>
             <div class="settings-content">
-        <section class="card" id="settings-section-0">
-            <header class="card-header">
-                <h2>Device</h2>
+                <section class="card" id="settings-section-0">
+                    <header class="card-header">
+                        <h2>Device</h2>
 
-                <p>
-                    Device identification and configuration format
-                </p>
-            </header>
+                        <p>
+                            Device identification and configuration format
+                        </p>
+                    </header>
 
-            <div class="device-summary">
-                <div class="device-summary-item">
-                    <div class="device-summary-label">
-                        Target
-                    </div>
+                    <div class="device-summary">
+                        <div class="device-summary-item">
+                            <div class="device-summary-label">
+                                Target
+                            </div>
 
-                    <div
-                        id="device-target"
-                        class="device-summary-value"
-                    >
-                        -
-                    </div>
-                </div>
-
-                <div class="device-summary-item">
-                    <div class="device-summary-label">
-                        Device name
-                    </div>
-
-                    <div
-                        id="device-name"
-                        class="device-summary-value"
-                    >
-                        -
-                    </div>
-                </div>
-
-                <div class="device-summary-item">
-                    <div class="device-summary-label">
-                        Schema version
-                    </div>
-
-                    <div
-                        id="schema-version"
-                        class="device-summary-value"
-                    >
-                        -
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="card" id="settings-section-1">
-            <header class="card-header">
-                <h2>Display and interface</h2>
-
-                <p>
-                    Screen brightness and GUI behavior
-                </p>
-            </header>
-
-            <div class="card-content">
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Display brightness
-                        </div>
-
-                        <div class="setting-description">
-                            Backlight brightness from 10 to 100 percent
-                        </div>
-                    </div>
-
-                    <div class="setting-control">
-                        <div class="range-control">
-                            <input
-                                id="brightness"
-                                type="range"
-                                min="10"
-                                max="100"
-                                value="80"
+                            <div
+                                id="device-target"
+                                class="device-summary-value"
                             >
+                                -
+                            </div>
+                        </div>
 
-                            <span
-                                id="brightness-value"
-                                class="range-value"
+                        <div class="device-summary-item">
+                            <div class="device-summary-label">
+                                Device name
+                            </div>
+
+                            <div
+                                id="device-name"
+                                class="device-summary-value"
                             >
-                                80%
-                            </span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            GUI animations
+                                -
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Enable animated screen transitions
-                        </div>
-                    </div>
+                        <div class="device-summary-item">
+                            <div class="device-summary-label">
+                                Schema version
+                            </div>
 
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input
-                                id="animations"
-                                type="checkbox"
+                            <div
+                                id="schema-version"
+                                class="device-summary-value"
                             >
-
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Color theme
-                        </div>
-
-                        <div class="setting-description">
-                            The selected theme is applied after restarting the device
+                                -
+                            </div>
                         </div>
                     </div>
+                </section>
 
-                    <div class="setting-control">
-                        <div class="select-control">
-                            <select
-                                id="theme"
-                                class="theme-select"
-                            >
-                                <option value="light">
-                                    Light
-                                </option>
+                <section class="card" id="settings-section-1">
+                    <header class="card-header">
+                        <h2>Display and interface</h2>
 
-                                <option value="dark">
-                                    Dark
-                                </option>
-                            </select>
+                        <p>
+                            Screen brightness and GUI behavior
+                        </p>
+                    </header>
 
-                            <span class="select-arrow">&#9662;</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
+                    <div class="card-content">
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Display brightness
+                                </div>
 
-        <section class="card" id="settings-section-2">
-            <header class="card-header">
-                <h2>Logging</h2>
+                                <div class="setting-description">
+                                    Backlight brightness from 10 to 100 percent
+                                </div>
+                            </div>
 
-                <p>
-                    Configure persistent application logging
-                </p>
-            </header>
+                            <div class="setting-control">
+                                <div class="range-control">
+                                    <input
+                                        id="brightness"
+                                        type="range"
+                                        min="10"
+                                        max="100"
+                                        value="80"
+                                    >
 
-            <div class="card-content">
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            SD-card logging
-                        </div>
-
-                        <div class="setting-description">
-                            Write application logs to the mounted SD card
-                        </div>
-                    </div>
-
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input
-                                id="sd-logging"
-                                type="checkbox"
-                            >
-
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Warning tags
+                                    <span
+                                        id="brightness-value"
+                                        class="range-value"
+                                    >
+                                        80%
+                                    </span>
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Comma-separated tags logged at warning level
-                        </div>
-                    </div>
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    GUI animations
+                                </div>
 
-                    <div class="setting-control">
-                        <input
-                            id="log-warning-tags"
-                            class="text-input"
-                            type="text"
-                            maxlength="255"
-                            autocomplete="off"
-                            spellcheck="false"
-                            placeholder="wifi,wifi_init,tusb_desc"
-                        >
-                    </div>
-                </div>
+                                <div class="setting-description">
+                                    Enable animated screen transitions
+                                </div>
+                            </div>
 
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Info tags
-                        </div>
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="animations"
+                                        type="checkbox"
+                                    >
 
-                        <div class="setting-description">
-                            Comma-separated tags logged at information level
-                        </div>
-                    </div>
-
-                    <div class="setting-control">
-                        <input
-                            id="log-info-tags"
-                            class="text-input"
-                            type="text"
-                            maxlength="255"
-                            autocomplete="off"
-                            spellcheck="false"
-                            placeholder="settings_service,web_service"
-                        >
-                    </div>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Debug tags
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Comma-separated tags with debug logging enabled
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Color theme
+                                </div>
+
+                                <div class="setting-description">
+                                    The selected theme is applied after
+                                    restarting the device
+                                </div>
+                            </div>
+
+                            <div class="setting-control">
+                                <div class="select-control">
+                                    <select
+                                        id="theme"
+                                        class="theme-select"
+                                    >
+                                        <option value="light">
+                                            Light
+                                        </option>
+
+                                        <option value="dark">
+                                            Dark
+                                        </option>
+                                    </select>
+
+                                    <span class="select-arrow">&#9662;</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
+                </section>
 
-                    <div class="setting-control">
-                        <input
-                            id="log-debug-tags"
-                            class="text-input"
-                            type="text"
-                            maxlength="255"
-                            autocomplete="off"
-                            spellcheck="false"
-                            placeholder="web_settings_api"
-                        >
-                    </div>
-                </div>
+                <section class="card" id="settings-section-2">
+                    <header class="card-header">
+                        <h2>Logging</h2>
 
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Disabled tags
+                        <p>
+                            Configure persistent application logging
+                        </p>
+                    </header>
+
+                    <div class="card-content">
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    SD-card logging
+                                </div>
+
+                                <div class="setting-description">
+                                    Write application logs to the mounted
+                                    SD card
+                                </div>
+                            </div>
+
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="sd-logging"
+                                        type="checkbox"
+                                    >
+
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Warning tags
+                                </div>
+
+                                <div class="setting-description">
+                                    Comma-separated tags logged at warning level
+                                </div>
+                            </div>
+
+                            <div class="setting-control">
+                                <input
+                                    id="log-warning-tags"
+                                    class="text-input"
+                                    type="text"
+                                    maxlength="255"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                    placeholder="wifi,wifi_init,tusb_desc"
+                                >
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Comma-separated tags whose output is disabled
-                        </div>
-                    </div>
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Info tags
+                                </div>
 
-                    <div class="setting-control">
-                        <input
-                            id="log-disabled-tags"
-                            class="text-input"
-                            type="text"
-                            maxlength="255"
-                            autocomplete="off"
-                            spellcheck="false"
-                            placeholder="memory,dns_redirect_server"
-                        >
-                    </div>
-                </div>
-            </div>
-        </section>
+                                <div class="setting-description">
+                                    Comma-separated tags logged at
+                                    information level
+                                </div>
+                            </div>
 
-        <section class="card" id="settings-section-3">
-            <header class="card-header">
-                <h2>Wi-Fi SoftAP</h2>
-
-                <p>
-                    Local wireless network provided by Spectra
-                </p>
-            </header>
-
-            <div class="card-content">
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            SoftAP enabled
+                            <div class="setting-control">
+                                <input
+                                    id="log-info-tags"
+                                    class="text-input"
+                                    type="text"
+                                    maxlength="255"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                    placeholder="settings_service,web_service"
+                                >
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Allow clients to connect directly to Spectra
-                        </div>
-                    </div>
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Debug tags
+                                </div>
 
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input
-                                id="wifi-ap-enabled"
-                                type="checkbox"
-                            >
+                                <div class="setting-description">
+                                    Comma-separated tags with debug logging
+                                    enabled
+                                </div>
+                            </div>
 
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Base SSID
-                        </div>
-
-                        <div class="setting-description">
-                            The final six MAC characters are appended automatically
-                        </div>
-                    </div>
-
-                    <div class="setting-control">
-                        <input
-                            id="wifi-ap-ssid"
-                            class="text-input"
-                            type="text"
-                            maxlength="25"
-                            autocomplete="off"
-                            placeholder="Spectra"
-                        >
-                    </div>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Password
+                            <div class="setting-control">
+                                <input
+                                    id="log-debug-tags"
+                                    class="text-input"
+                                    type="text"
+                                    maxlength="255"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                    placeholder="web_settings_api"
+                                >
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Use 8 to 63 characters or select an open network
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Disabled tags
+                                </div>
+
+                                <div class="setting-description">
+                                    Comma-separated tags whose output is
+                                    disabled
+                                </div>
+                            </div>
+
+                            <div class="setting-control">
+                                <input
+                                    id="log-disabled-tags"
+                                    class="text-input"
+                                    type="text"
+                                    maxlength="255"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                    placeholder="memory,dns_redirect_server"
+                                >
+                            </div>
                         </div>
                     </div>
+                </section>
 
-                    <div class="setting-control">
-                        <div class="password-control">
-                            <input
-                                id="wifi-ap-password"
-                                class="text-input"
-                                type="password"
-                                minlength="8"
-                                maxlength="63"
-                                autocomplete="new-password"
-                            >
+                <section class="card" id="settings-section-3">
+                    <header class="card-header">
+                        <h2>Wi-Fi SoftAP</h2>
 
-                            <button
-                                id="show-ap-password"
-                                class="secondary-button"
-                                type="button"
-                            >
-                                Show
-                            </button>
+                        <p>
+                            Local wireless network provided by Spectra
+                        </p>
+                    </header>
+
+                    <div class="card-content">
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    SoftAP enabled
+                                </div>
+
+                                <div class="setting-description">
+                                    Allow clients to connect directly to Spectra
+                                </div>
+                            </div>
+
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="wifi-ap-enabled"
+                                        type="checkbox"
+                                    >
+
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
                         </div>
 
-                        <label class="inline-option">
-                            <input
-                                id="wifi-ap-open"
-                                type="checkbox"
-                            >
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Base SSID
+                                </div>
 
-                            Open network without a password
-                        </label>
-                    </div>
-                </div>
-            </div>
-        </section>
+                                <div class="setting-description">
+                                    The final six MAC characters are appended
+                                    automatically
+                                </div>
+                            </div>
 
-        <section class="card" id="settings-section-4">
-            <header class="card-header">
-                <h2>Wi-Fi Station</h2>
-
-                <p>
-                    Connect Spectra to an existing wireless network
-                </p>
-            </header>
-
-            <div class="card-content">
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Available networks
+                            <div class="setting-control">
+                                <input
+                                    id="wifi-ap-ssid"
+                                    class="text-input"
+                                    type="text"
+                                    maxlength="25"
+                                    autocomplete="off"
+                                    placeholder="Spectra"
+                                >
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Search for nearby wireless access points
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Password
+                                </div>
+
+                                <div class="setting-description">
+                                    Use 8 to 63 characters or select an open
+                                    network
+                                </div>
+                            </div>
+
+                            <div class="setting-control">
+                                <div class="password-control">
+                                    <input
+                                        id="wifi-ap-password"
+                                        class="text-input"
+                                        type="password"
+                                        minlength="8"
+                                        maxlength="63"
+                                        autocomplete="new-password"
+                                    >
+
+                                    <button
+                                        id="show-ap-password"
+                                        class="secondary-button"
+                                        type="button"
+                                    >
+                                        Show
+                                    </button>
+                                </div>
+
+                                <label class="inline-option">
+                                    <input
+                                        id="wifi-ap-open"
+                                        type="checkbox"
+                                    >
+
+                                    Open network without a password
+                                </label>
+                            </div>
                         </div>
                     </div>
+                </section>
 
-                    <div class="setting-control">
-                        <div class="scan-control">
-                            <button
-                                id="scan-wifi"
-                                class="secondary-button"
-                                type="button"
-                            >
-                                Scan networks
-                            </button>
+                <section class="card" id="settings-section-4">
+                    <header class="card-header">
+                        <h2>Wi-Fi Station</h2>
 
-                            <span
-                                id="wifi-scan-status"
-                                class="scan-status"
-                                role="status"
-                                aria-live="polite"
-                            >
-                                Not scanned
-                            </span>
-                        </div>
-                    </div>
-                </div>
+                        <p>
+                            Connect Spectra to an existing wireless network
+                        </p>
+                    </header>
 
-                <div class="setting-row scan-results-row">
-                    <div>
-                        <div class="setting-label">
-                            Scan results
-                        </div>
+                    <div class="card-content">
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Available networks
+                                </div>
 
-                        <div class="setting-description">
-                            Select a network to fill the Station SSID
-                        </div>
-                    </div>
+                                <div class="setting-description">
+                                    Search for nearby wireless access points
+                                </div>
+                            </div>
 
-                    <div class="setting-control">
-                        <div
-                            id="wifi-network-list"
-                            class="network-list"
-                        ></div>
-                    </div>
-                </div>
+                            <div class="setting-control">
+                                <div class="scan-control">
+                                    <button
+                                        id="scan-wifi"
+                                        class="secondary-button"
+                                        type="button"
+                                    >
+                                        Scan networks
+                                    </button>
 
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Station enabled
+                                    <span
+                                        id="wifi-scan-status"
+                                        class="scan-status"
+                                        role="status"
+                                        aria-live="polite"
+                                    >
+                                        Not scanned
+                                    </span>
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Connect automatically using credentials stored in NVS
-                        </div>
-                    </div>
+                        <div class="setting-row scan-results-row">
+                            <div>
+                                <div class="setting-label">
+                                    Scan results
+                                </div>
 
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input
-                                id="wifi-sta-enabled"
-                                type="checkbox"
-                            >
+                                <div class="setting-description">
+                                    Select a network to fill the Station SSID
+                                </div>
+                            </div>
 
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Network SSID
+                            <div class="setting-control">
+                                <div
+                                    id="wifi-network-list"
+                                    class="network-list"
+                                ></div>
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Name of the external wireless network
-                        </div>
-                    </div>
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Station enabled
+                                </div>
 
-                    <div class="setting-control">
-                        <input
-                            id="wifi-sta-ssid"
-                            class="text-input"
-                            type="text"
-                            maxlength="32"
-                            autocomplete="off"
-                            placeholder="Wi-Fi network"
-                        >
-                    </div>
-                </div>
+                                <div class="setting-description">
+                                    Connect automatically using credentials
+                                    stored in NVS
+                                </div>
+                            </div>
 
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Network password
-                        </div>
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="wifi-sta-enabled"
+                                        type="checkbox"
+                                    >
 
-                        <div class="setting-description">
-                            Leave empty to keep the existing stored password
-                        </div>
-                    </div>
-
-                    <div class="setting-control">
-                        <div class="password-control">
-                            <input
-                                id="wifi-sta-password"
-                                class="text-input"
-                                type="password"
-                                minlength="8"
-                                maxlength="63"
-                                autocomplete="new-password"
-                                placeholder="Keep existing password"
-                            >
-
-                            <button
-                                id="show-sta-password"
-                                class="secondary-button"
-                                type="button"
-                            >
-                                Show
-                            </button>
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
                         </div>
 
-                        <label class="inline-option">
-                            <input
-                                id="wifi-sta-open"
-                                type="checkbox"
-                            >
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Network SSID
+                                </div>
 
-                            Connect to an open network
-                        </label>
+                                <div class="setting-description">
+                                    Name of the external wireless network
+                                </div>
+                            </div>
 
-                        <div
-                            id="wifi-sta-credential-status"
-                            class="credential-status"
-                        >
-                            No stored credentials
-                        </div>
-                    </div>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Stored credentials
-                        </div>
-
-                        <div class="setting-description">
-                            Remove the Station password and identifier from NVS
-                        </div>
-                    </div>
-
-                    <div class="setting-control">
-                        <button
-                            id="clear-sta-credentials"
-                            class="secondary-button danger-button"
-                            type="button"
-                        >
-                            Clear credentials
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="card" id="settings-section-5">
-            <header class="card-header">
-                <h2>USB network</h2>
-
-                <p>
-                    Configure the USB RNDIS network interface
-                </p>
-            </header>
-
-            <div class="card-content">
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            USB RNDIS enabled
+                            <div class="setting-control">
+                                <input
+                                    id="wifi-sta-ssid"
+                                    class="text-input"
+                                    type="text"
+                                    maxlength="32"
+                                    autocomplete="off"
+                                    placeholder="Wi-Fi network"
+                                >
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Changes to the USB interface require a device restart
-                        </div>
-                    </div>
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Network password
+                                </div>
 
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input
-                                id="usb-rndis-enabled"
-                                type="checkbox"
-                            >
+                                <div class="setting-description">
+                                    Leave empty to keep the existing stored
+                                    password
+                                </div>
+                            </div>
 
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <section class="card" id="settings-section-6">
-            <header class="card-header">
-                <h2>Primary CAN</h2>
+                            <div class="setting-control">
+                                <div class="password-control">
+                                    <input
+                                        id="wifi-sta-password"
+                                        class="text-input"
+                                        type="password"
+                                        minlength="8"
+                                        maxlength="63"
+                                        autocomplete="new-password"
+                                        placeholder="Keep existing password"
+                                    >
 
-                <p>
-                    Configure the ESP32-S3 Classical CAN interface
-                </p>
-            </header>
+                                    <button
+                                        id="show-sta-password"
+                                        class="secondary-button"
+                                        type="button"
+                                    >
+                                        Show
+                                    </button>
+                                </div>
 
-            <div class="card-content">
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            CAN enabled
-                        </div>
+                                <label class="inline-option">
+                                    <input
+                                        id="wifi-sta-open"
+                                        type="checkbox"
+                                    >
 
-                        <div class="setting-description">
-                            Start the primary TWAI interface
-                        </div>
-                    </div>
+                                    Connect to an open network
+                                </label>
 
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input
-                                id="can-primary-enabled"
-                                type="checkbox"
-                            >
-
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Bitrate
+                                <div
+                                    id="wifi-sta-credential-status"
+                                    class="credential-status"
+                                >
+                                    No stored credentials
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="setting-description">
-                            Classical CAN bus speed
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Stored credentials
+                                </div>
+
+                                <div class="setting-description">
+                                    Remove the Station password and identifier
+                                    from NVS
+                                </div>
+                            </div>
+
+                            <div class="setting-control">
+                                <button
+                                    id="clear-sta-credentials"
+                                    class="secondary-button danger-button"
+                                    type="button"
+                                >
+                                    Clear credentials
+                                </button>
+                            </div>
                         </div>
                     </div>
+                </section>
 
-                    <div class="setting-control">
-                        <select
-                            id="can-primary-bitrate"
-                            class="theme-select"
-                        >
-                            <option value="10000">10 kbit/s</option>
-                            <option value="20000">20 kbit/s</option>
-                            <option value="33333">33.333 kbit/s</option>
-                            <option value="50000">50 kbit/s</option>
-                            <option value="83333">83.333 kbit/s</option>
-                            <option value="100000">100 kbit/s</option>
-                            <option value="125000">125 kbit/s</option>
-                            <option value="250000">250 kbit/s</option>
-                            <option value="500000">500 kbit/s</option>
-                            <option value="800000">800 kbit/s</option>
-                            <option value="1000000">1 Mbit/s</option>
-                        </select>
+                <section class="card" id="settings-section-5">
+                    <header class="card-header">
+                        <h2>USB network</h2>
 
-                        <span class="select-arrow">&#9662;</span>
-                    </div>
-                </div>
+                        <p>
+                            Configure the USB RNDIS network interface
+                        </p>
+                    </header>
 
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">
-                            Listen only
-                        </div>
+                    <div class="card-content">
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    USB RNDIS enabled
+                                </div>
 
-                        <div class="setting-description">
-                            Receive CAN frames without transmitting acknowledgements
-                        </div>
-                    </div>
+                                <div class="setting-description">
+                                    Changes to the USB interface require a
+                                    device restart
+                                </div>
+                            </div>
 
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input
-                                id="can-primary-listen-only"
-                                type="checkbox"
-                            >
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="usb-rndis-enabled"
+                                        type="checkbox"
+                                    >
 
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <section class="card" id="settings-section-7">
-            <header class="card-header">
-                <h2>Secondary CAN</h2>
-                <p>Configure the MCP2518FD CAN FD interface</p>
-            </header>
-
-            <div class="card-content">
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">CAN enabled</div>
-                        <div class="setting-description">
-                            Start the secondary MCP2518FD interface
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
                         </div>
                     </div>
+                </section>
+                <section class="card" id="settings-section-6">
+                    <header class="card-header">
+                        <h2>Primary CAN</h2>
 
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input id="can-secondary-enabled" type="checkbox">
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
+                        <p>
+                            Configure the ESP32-S3 Classical CAN interface
+                        </p>
+                    </header>
 
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">Nominal bitrate</div>
-                        <div class="setting-description">
-                            Arbitration-phase bus speed
+                    <div class="card-content">
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    CAN enabled
+                                </div>
+
+                                <div class="setting-description">
+                                    Start the primary TWAI interface
+                                </div>
+                            </div>
+
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="can-primary-enabled"
+                                        type="checkbox"
+                                    >
+
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Bitrate
+                                </div>
+
+                                <div class="setting-description">
+                                    Classical CAN bus speed
+                                </div>
+                            </div>
+
+                            <div class="setting-control">
+                                <select
+                                    id="can-primary-bitrate"
+                                    class="theme-select"
+                                >
+                                    <option value="10000">10 kbit/s</option>
+                                    <option value="20000">20 kbit/s</option>
+                                    <option value="33333">33.333 kbit/s</option>
+                                    <option value="50000">50 kbit/s</option>
+                                    <option value="83333">83.333 kbit/s</option>
+                                    <option value="100000">100 kbit/s</option>
+                                    <option value="125000">125 kbit/s</option>
+                                    <option value="250000">250 kbit/s</option>
+                                    <option value="500000">500 kbit/s</option>
+                                    <option value="800000">800 kbit/s</option>
+                                    <option value="1000000">1 Mbit/s</option>
+                                </select>
+
+                                <span class="select-arrow">&#9662;</span>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Listen only
+                                </div>
+
+                                <div class="setting-description">
+                                    Receive CAN frames without transmitting
+                                    acknowledgements
+                                </div>
+                            </div>
+
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="can-primary-listen-only"
+                                        type="checkbox"
+                                    >
+
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
                         </div>
                     </div>
+                </section>
+                <section class="card" id="settings-section-7">
+                    <header class="card-header">
+                        <h2>Secondary CAN</h2>
+                        <p>Configure the MCP2518FD CAN FD interface</p>
+                    </header>
 
-                    <div class="setting-control">
-                        <select
-                            id="can-secondary-nominal-bitrate"
-                            class="theme-select"
-                        >
-                            <option value="10000">10 kbit/s</option>
-                            <option value="20000">20 kbit/s</option>
-                            <option value="33333">33.333 kbit/s</option>
-                            <option value="50000">50 kbit/s</option>
-                            <option value="83333">83.333 kbit/s</option>
-                            <option value="100000">100 kbit/s</option>
-                            <option value="125000">125 kbit/s</option>
-                            <option value="250000">250 kbit/s</option>
-                            <option value="500000">500 kbit/s</option>
-                            <option value="800000">800 kbit/s</option>
-                            <option value="1000000">1 Mbit/s</option>
-                        </select>
+                    <div class="card-content">
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">CAN enabled</div>
+                                <div class="setting-description">
+                                    Start the secondary MCP2518FD interface
+                                </div>
+                            </div>
 
-                        <span class="select-arrow">&#9662;</span>
-                    </div>
-                </div>
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="can-secondary-enabled"
+                                        type="checkbox"
+                                    >
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
 
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">CAN FD</div>
-                        <div class="setting-description">
-                            Allow CAN FD frames with payloads up to 64 bytes
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Nominal bitrate</div>
+                                <div class="setting-description">
+                                    Arbitration-phase bus speed
+                                </div>
+                            </div>
+
+                            <div class="setting-control">
+                                <select
+                                    id="can-secondary-nominal-bitrate"
+                                    class="theme-select"
+                                >
+                                    <option value="10000">10 kbit/s</option>
+                                    <option value="20000">20 kbit/s</option>
+                                    <option value="33333">33.333 kbit/s</option>
+                                    <option value="50000">50 kbit/s</option>
+                                    <option value="83333">83.333 kbit/s</option>
+                                    <option value="100000">100 kbit/s</option>
+                                    <option value="125000">125 kbit/s</option>
+                                    <option value="250000">250 kbit/s</option>
+                                    <option value="500000">500 kbit/s</option>
+                                    <option value="800000">800 kbit/s</option>
+                                    <option value="1000000">1 Mbit/s</option>
+                                </select>
+
+                                <span class="select-arrow">&#9662;</span>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">CAN FD</div>
+                                <div class="setting-description">
+                                    Allow CAN FD frames with payloads up to
+                                    64 bytes
+                                </div>
+                            </div>
+
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="can-secondary-fd-enabled"
+                                        type="checkbox"
+                                    >
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Bit-rate switching
+                                </div>
+                                <div class="setting-description">
+                                    Use a faster bitrate during the CAN FD
+                                    data phase
+                                </div>
+                            </div>
+
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="can-secondary-brs-enabled"
+                                        type="checkbox"
+                                    >
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Data bitrate</div>
+                                <div class="setting-description">
+                                    CAN FD data-phase speed when BRS is enabled
+                                </div>
+                            </div>
+
+                            <div class="setting-control">
+                                <select
+                                    id="can-secondary-data-bitrate"
+                                    class="theme-select"
+                                >
+                                    <option value="1000000">1 Mbit/s</option>
+                                    <option value="2000000">2 Mbit/s</option>
+                                    <option value="4000000">4 Mbit/s</option>
+                                    <option value="5000000">5 Mbit/s</option>
+                                </select>
+
+                                <span class="select-arrow">&#9662;</span>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Listen only</div>
+                                <div class="setting-description">
+                                    Receive frames without transmitting
+                                    acknowledgements
+                                </div>
+                            </div>
+
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="can-secondary-listen-only"
+                                        type="checkbox"
+                                    >
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
                         </div>
                     </div>
-
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input id="can-secondary-fd-enabled" type="checkbox">
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">Bit-rate switching</div>
-                        <div class="setting-description">
-                            Use a faster bitrate during the CAN FD data phase
-                        </div>
-                    </div>
-
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input id="can-secondary-brs-enabled" type="checkbox">
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">Data bitrate</div>
-                        <div class="setting-description">
-                            CAN FD data-phase speed when BRS is enabled
-                        </div>
-                    </div>
-
-                    <div class="setting-control">
-                        <select
-                            id="can-secondary-data-bitrate"
-                            class="theme-select"
-                        >
-                            <option value="1000000">1 Mbit/s</option>
-                            <option value="2000000">2 Mbit/s</option>
-                            <option value="4000000">4 Mbit/s</option>
-                            <option value="5000000">5 Mbit/s</option>
-                        </select>
-
-                        <span class="select-arrow">&#9662;</span>
-                    </div>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">Listen only</div>
-                        <div class="setting-description">
-                            Receive frames without transmitting acknowledgements
-                        </div>
-                    </div>
-
-                    <div class="switch-control">
-                        <label class="switch">
-                            <input
-                                id="can-secondary-listen-only"
-                                type="checkbox"
-                            >
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-        </section>
+                </section>
             </div>
         </div>
     </main>
@@ -927,5 +969,5 @@
         </div>
     </footer>
 
-    </body>
+</body>
 </html>

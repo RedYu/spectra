@@ -1,5 +1,168 @@
 /* Shared Spectra styles. Page selectors are scoped without increasing specificity. */
+#can-transmit, .tx-form {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.tx-panel {
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+}
+
+.tx-panel summary {
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.tx-panel summary span {
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 12px;
+    margin-left: 10px;
+}
+
+.tx-warning, .tx-status {
+    margin: 12px 0;
+    font-size: 12px;
+    color: var(--warning);
+}
+
+.tx-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+}
+
+.tx-form label {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.tx-form input, .tx-form select {
+    min-width: 0;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--background);
+    color: var(--text);
+    font-size: 12px;
+}
+
+.tx-data input {
+    font-family: Consolas, monospace;
+}
+
+.tx-increments {
+    margin: 14px 0;
+}
+
+.tx-increments p, .tx-note {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 10px;
+}
+
+.tx-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.tx-table {
+    max-width: 100%;
+    overflow: auto;
+    margin-top: 12px;
+}
+
 /* ===== index.html ===== */
+.can-settings-panel > .can-config {
+    margin-top: 14px;
+}
+
+.hardware-filter-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin: 14px 0;
+}
+
+.hardware-filter-form, .hardware-filter-form fieldset {
+    min-width: 0;
+}
+
+.hardware-filter-form fieldset {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 0;
+}
+
+.hardware-filter-form legend {
+    color: var(--accent);
+    font-size: 12px;
+}
+
+.hardware-filter-form label {
+    display: grid;
+    min-width: 0;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.hardware-filter-form input, .hardware-filter-form select {
+    box-sizing: border-box;
+    min-width: 0;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--background);
+    color: var(--text);
+}
+
+.hardware-filter-row {
+    display: grid;
+    grid-template-columns: minmax(70px, 1fr) minmax(70px, 1fr) minmax(75px, 1fr) 32px;
+    gap: 8px;
+    align-items: end;
+    margin: 12px 0;
+}
+
+.hardware-filter-row input {
+    font-family: Consolas, monospace;
+}
+
+.hardware-filter-row [data-remove] {
+    padding: 8px 0;
+    min-width: 0;
+}
+
+.hardware-filter-form .tx-actions {
+    align-items: center;
+    margin-top: 12px;
+    font-size: 12px;
+}
+
+.hardware-filter-form [data-count] {
+    color: var(--muted);
+}
+
+.hardware-filter-rows[hidden] {
+    display: none;
+}
+
+@media (max-width: 1100px) { .hardware-filter-cards { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 440px) { .hardware-filter-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 
         :root:where(.page-overview) {
             color-scheme: dark;

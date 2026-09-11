@@ -317,6 +317,36 @@ esp_err_t can_fd_service_abort_transmissions(void);
 esp_err_t can_fd_service_recover(void);
 
 /**
+ * @brief Copy the active MCP2518FD hardware acceptance-filter bank.
+ *
+ * @param[out] bank Destination filter-bank configuration.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if bank is NULL,
+ * ESP_ERR_INVALID_STATE if the service is not running, otherwise an
+ * ESP-IDF driver error.
+ */
+esp_err_t can_fd_service_get_filter_bank(
+    can_fd_mcp2518fd_filter_bank_t *bank
+);
+
+/**
+ * @brief Replace the MCP2518FD hardware acceptance-filter bank.
+ *
+ * Reception is paused while the new filter bank is applied. Frames can
+ * be lost during reconfiguration. This function does not save the
+ * configuration to persistent settings.
+ *
+ * @param[in] bank New filter-bank configuration.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if bank is NULL or
+ * contains invalid fields, ESP_ERR_INVALID_STATE if the service is not
+ * running, otherwise an ESP-IDF driver error.
+ */
+esp_err_t can_fd_service_set_filter_bank(
+    const can_fd_mcp2518fd_filter_bank_t *bank
+);
+
+/**
  * @brief Configure and enable one MCP2518FD acceptance filter.
  */
 esp_err_t can_fd_service_set_filter(

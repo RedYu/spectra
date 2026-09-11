@@ -494,7 +494,7 @@ esp_err_t can_service_start(
 
     if (result != ESP_OK) {
         can_service_delete_confirmation_queue();
-        
+
         vSemaphoreDelete(
             s_task_stopped
         );
@@ -765,9 +765,9 @@ esp_err_t can_service_run_self_test(
         can_service_stop();
 
     /*
-    * Do not delete the semaphore while the service task may still access
-    * the self-test callback.
-    */
+     * Do not delete the semaphore while the service task may still access
+     * the self-test callback.
+     */
     if (can_service_is_running()) {
         ESP_LOGE(
             TAG,
@@ -1008,11 +1008,12 @@ static bool can_service_driver_configs_equal(
          second->acceptance_filter.extended);
 }
 
-esp_err_t can_service_reconfigure(
-    const can_twai_driver_config_t *driver_config
+static esp_err_t can_service_reconfigure_internal(
+    const can_twai_driver_config_t *driver_config,
+    const can_twai_acceptance_filter_t *filter
 )
 {
-    if (driver_config == NULL) {
+    if ((driver_config == NULL) && (filter == NULL)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -1037,6 +1038,14 @@ esp_err_t can_service_reconfigure(
 
         can_service_unlock();
         return ESP_ERR_INVALID_STATE;
+    }
+
+    can_twai_driver_config_t filtered_config;
+
+    if (filter != NULL) {
+        filtered_config = s_config.driver;
+        filtered_config.acceptance_filter = *filter;
+        driver_config = &filtered_config;
     }
 
     if (can_service_driver_configs_equal(
@@ -1372,7 +1381,8 @@ esp_err_t can_service_reconfigure(
                 replacement_confirmation_queue
             );
 
-            replacement_confirmation_queue = NULL;
+            replacement_confirmation_queue =
+                NULL;
         }
 
         if (s_task_stopped != NULL) {
@@ -1436,6 +1446,77 @@ esp_err_t can_service_reconfigure(
     can_service_unlock();
 
     return reconfigure_result;
+}
+
+esp_err_t can_service_reconfigure(
+    const can_twai_driver_config_t *driver_config
+)
+{
+    return can_service_reconfigure_internal(
+        driver_config,
+        NULL
+    );
+}
+
+esp_err_t can_service_set_acceptance_filter(
+    const can_twai_acceptance_filter_t *filter
+)
+{
+    if (filter == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint32_t maximum_identifier =
+        filter->extended
+            ? CAN_TWAI_EXTENDED_ID_MAX
+            : CAN_TWAI_STANDARD_ID_MAX;
+
+    if ((filter->identifier > maximum_identifier) ||
+        (filter->mask > maximum_identifier)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return can_service_reconfigure_internal(
+        NULL,
+        filter
+    );
+}
+
+esp_err_t can_service_get_acceptance_filter(
+    can_twai_acceptance_filter_t *filter
+)
+{
+    if (filter == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t result =
+        can_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!atomic_load(
+            &s_running
+        ) ||
+        atomic_load(
+            &s_stop_requested
+        ) ||
+        atomic_load(
+            &s_stop_in_progress
+        )) {
+
+        result = ESP_ERR_INVALID_STATE;
+    } else {
+        *filter =
+            s_config.driver.acceptance_filter;
+    }
+
+    can_service_unlock();
+
+    return result;
 }
 
 esp_err_t can_service_transmit(

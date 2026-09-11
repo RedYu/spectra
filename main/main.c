@@ -40,6 +40,7 @@
 #include "can_service.h"
 #include "can_fd_service.h"
 #include "can_router.h"
+#include "can_transmit_service.h"
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
 #include "time_service.h"
@@ -634,6 +635,17 @@ static void startup_task(
         TAG,
         "CAN router started"
     );
+
+    const esp_err_t transmit_result =
+        can_transmit_service_init();
+
+    if (transmit_result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "CAN transmit service unavailable: %s",
+            esp_err_to_name(transmit_result)
+        );
+    }
 
     const can_monitor_service_config_t
         can_monitor_config = {

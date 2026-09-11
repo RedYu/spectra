@@ -16,6 +16,8 @@
 #include "web_settings_api.h"
 #include "web_files_api.h"
 #include "web_network_api.h"
+#include "web_can_transmit_api.h"
+#include "web_can_filters_api.h"
 #include "web_can_stream_service.h"
 
 #define WEB_SERVICE_MAX_URI_HANDLERS  (32U)
@@ -130,6 +132,24 @@ esp_err_t web_service_start(void)
 
     result =
         web_network_api_register(
+            s_server
+        );
+
+    if (result != ESP_OK) {
+        goto registration_failed;
+    }
+
+    result =
+        web_can_filters_api_register(
+            s_server
+        );
+
+    if (result != ESP_OK) {
+        goto registration_failed;
+    }
+
+    result =
+        web_can_transmit_api_register(
             s_server
         );
 
