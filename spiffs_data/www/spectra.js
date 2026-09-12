@@ -4892,13 +4892,221 @@
         }
     }
 
+    function init_isotp() {
+        const element = id => document.getElementById(id);
+        const status = element('isotp-status');
+        const message = element('isotp-message');
+        const sendButton = element('isotp-send');
+        const format = element('isotp-format');
+        const linkLength = element('isotp-link-length');
+        const brs = element('isotp-brs');
+        const payload = element('isotp-payload');
+        const response = element('isotp-response-data');
+        const responseSize = element('isotp-response-size');
+        const byteCount = element('isotp-byte-count');
+        let lastSequence = -1;
+        let latestPayload = '';
+
+        const stateNames = [
+            'Closed',
+            'Ready',
+            'Transmitting',
+            'Response received',
+            'Error'
+        ];
+
+        function parseHex(text) {
+            const compact = text.replace(/[\s,:-]+/g, '');
+
+            if (!compact.length)
+                throw new Error('Enter at least one payload byte.');
+
+            if (!/^[0-9a-f]+$/i.test(compact) || compact.length % 2)
+                throw new Error('Payload must contain complete hexadecimal bytes.');
+
+            if (compact.length / 2 > 1024)
+                throw new Error('Payload exceeds the 1024-byte web limit.');
+
+            return compact.match(/../g).join(' ').toUpperCase();
+        }
+
+        function parseIdentifier(input, extended) {
+            const text = input.value.trim();
+            const maximum = extended ? 0x1fffffff : 0x7ff;
+
+            if (!/^[0-9a-f]+$/i.test(text) || parseInt(text, 16) > maximum)
+                throw new Error(
+                    `CAN ID must fit the selected ${extended ? 29 : 11}-bit format.`);
+
+            return parseInt(text, 16);
+        }
+
+        async function command(body) {
+            const reply = await fetch('/api/isotp', {
+                method : 'POST',
+                headers : {'Content-Type' : 'application/json'},
+                body : JSON.stringify(body)
+            });
+            const result = await reply.json();
+
+            if (!reply.ok || !result.success)
+                throw new Error(result.message || `HTTP ${reply.status}`);
+
+            return result;
+        }
+
+        function updateFormat() {
+            const fd = format.value === 'fd';
+            brs.disabled = !fd;
+
+            for (const option of linkLength.options)
+                option.disabled = !fd && option.value !== '8';
+
+            if (!fd)
+                linkLength.value = '8';
+        }
+
+        function updateByteCount() {
+            try {
+                const normalized = parseHex(payload.value);
+                byteCount.textContent = `${normalized.split(' ').length} bytes`;
+                byteCount.classList.remove('error');
+            } catch (error) {
+                byteCount.textContent = error.message;
+                byteCount.classList.add('error');
+            }
+        }
+
+        async function refresh() {
+            try {
+                const reply = await fetch('/api/isotp', {cache : 'no-store'});
+                const data = await reply.json();
+
+                if (!reply.ok)
+                    throw new Error(`HTTP ${reply.status}`);
+
+                status.textContent = stateNames[data.state] || 'Unknown';
+                status.classList.toggle('error', data.state === 4);
+                sendButton.disabled = !data.open || data.state === 2;
+
+                if (data.sequence !== lastSequence) {
+                    lastSequence = data.sequence;
+
+                    if (data.payload_length > 0) {
+                        latestPayload = data.payload;
+                        response.textContent = data.payload;
+                        responseSize.textContent = `${data.payload_length} bytes`;
+                        message.textContent = 'A complete ISO-TP response was received.';
+                    } else if (data.state === 4) {
+                        message.textContent =
+                            `ISO-TP error ${data.session_error}; result ${data.result}.`;
+                    } else if (data.state === 1) {
+                        message.textContent = 'Channel is ready.';
+                    } else if (data.state === 2) {
+                        message.textContent = 'ISO-TP transmission is in progress.';
+                    }
+                }
+            } catch (error) {
+                status.textContent = 'Unavailable';
+                status.classList.add('error');
+                sendButton.disabled = true;
+                message.textContent = error.message;
+            }
+        }
+
+        element('isotp-open').addEventListener('click', async () => {
+            try {
+                const extended = element('isotp-extended').checked;
+                const fd = format.value === 'fd';
+
+                await command({
+                    action : 'configure',
+                    bus : Number(element('isotp-bus').value),
+                    tx_id : parseIdentifier(element('isotp-tx-id'), extended),
+                    rx_id : parseIdentifier(element('isotp-rx-id'), extended),
+                    extended,
+                    fd,
+                    brs : fd && brs.checked,
+                    link_data_length : Number(linkLength.value),
+                    block_size : Number(element('isotp-block-size').value),
+                    st_min : Number(element('isotp-st-min').value),
+                    timeout_ms : Number(element('isotp-timeout').value)
+                });
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('isotp-close').addEventListener('click', async () => {
+            try {
+                await command({action : 'close'});
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        sendButton.addEventListener('click', async () => {
+            try {
+                const data = parseHex(payload.value);
+                await command({action : 'send', data});
+                message.textContent = `Submitted ${data.split(' ').length} bytes.`;
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('isotp-copy').addEventListener('click', async () => {
+            if (!latestPayload)
+                return;
+
+            try {
+                await navigator.clipboard.writeText(latestPayload);
+                message.textContent = 'Response copied to the clipboard.';
+            } catch (_) {
+                message.textContent = 'Clipboard access is unavailable.';
+            }
+        });
+
+        element('isotp-clear').addEventListener('click', () => {
+            latestPayload = '';
+            response.textContent = 'No response received.';
+            responseSize.textContent = '0 bytes';
+        });
+
+        format.addEventListener('change', updateFormat);
+        payload.addEventListener('input', updateByteCount);
+        updateFormat();
+        updateByteCount();
+        refresh();
+        setInterval(refresh, 300);
+    }
+
+    function init_isotp_navigation() {
+        for (const navigation of document.querySelectorAll('.spectra-nav')) {
+            if (navigation.querySelector('a[href="/isotp"]'))
+                continue;
+
+            const link = document.createElement('a');
+            link.href = '/isotp';
+            link.textContent = 'ISO-TP';
+            const files = navigation.querySelector('a[href="/files"]');
+            navigation.insertBefore(link, files);
+        }
+    }
+
+    init_isotp_navigation();
+
     const pages = {
         'page-overview' : init_overview,
         'page-settings' : init_settings,
         'page-files' : init_files,
         'page-test' : init_test,
         'page-logger' : init_logger,
-        'page-analyzer' : init_analyzer
+        'page-analyzer' : init_analyzer,
+        'page-isotp' : init_isotp
     };
 
     for (const [page, initialize] of Object.entries(pages)) {

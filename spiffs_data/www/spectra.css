@@ -1092,6 +1092,128 @@ body:where(.page-settings) {
         flex: 1;
     }
 }
+
+.page-isotp .spectra-page {
+    max-width: 1500px;
+    margin: 0 auto;
+}
+
+.isotp-layout {
+    display: grid;
+    grid-template-columns: minmax(320px, 0.8fr) minmax(400px, 1.2fr);
+    gap: 14px;
+    align-items: start;
+}
+
+.isotp-layout .card {
+    min-width: 0;
+}
+
+.isotp-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.isotp-form-grid label,
+.isotp-transfer > label {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.isotp-form-grid input,
+.isotp-form-grid select,
+.isotp-transfer textarea {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.isotp-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    margin-top: 14px;
+}
+
+.isotp-options label {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.isotp-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.isotp-transfer textarea,
+.isotp-response pre {
+    font: 13px/1.65 Consolas, "Courier New", monospace;
+}
+
+.isotp-transfer textarea {
+    resize: vertical;
+    margin-top: 6px;
+}
+
+.isotp-payload-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 8px 0 14px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.isotp-response {
+    grid-column: 1 / -1;
+}
+
+.isotp-response pre {
+    min-height: 100px;
+    max-height: 300px;
+    margin: 12px 0 0;
+    padding: 14px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--background);
+    color: var(--text);
+}
+
+.isotp-events {
+    grid-column: 1 / -1;
+}
+
+#isotp-status.error,
+#isotp-message.error,
+#isotp-byte-count.error {
+    color: var(--danger);
+}
+
+@media (max-width: 850px) {
+    .isotp-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .isotp-response,
+    .isotp-events {
+        grid-column: auto;
+    }
+}
+
+@media (max-width: 520px) {
+    .isotp-form-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
 /* ===== files.html ===== */
 :root:where(.page-files) {
     color-scheme: dark;

@@ -18,7 +18,9 @@
 #include "web_network_api.h"
 #include "web_can_transmit_api.h"
 #include "web_can_filters_api.h"
+#include "web_isotp_api.h"
 #include "web_can_stream_service.h"
+#include "isotp_service.h"
 
 #define WEB_SERVICE_MAX_URI_HANDLERS  (32U)
 
@@ -155,6 +157,22 @@ esp_err_t web_service_start(void)
 
     if (result != ESP_OK) {
         goto registration_failed;
+    }
+
+    if (isotp_service_is_running()) {
+        result =
+            web_isotp_api_register(
+                s_server
+            );
+
+        if (result != ESP_OK) {
+            goto registration_failed;
+        }
+    } else {
+        ESP_LOGW(
+            TAG,
+            "ISO-TP Web API is unavailable"
+        );
     }
 
     const web_can_stream_service_config_t

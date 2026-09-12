@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en" class="page-isotp">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <link rel="icon" href="/favicon.ico">
+
+    <title>ISO-TP Diagnostics · Spectra</title>
+
+    <link rel="stylesheet" href="spectra.css?v=10">
+    <script src="spectra.js?v=10" defer></script>
+</head>
+
+<body class="page-isotp">
+    <header class="spectra-header">
+        <a class="spectra-brand" href="/">
+            <span aria-hidden="true">▧</span>
+            Spectra
+        </a>
+
+        <nav class="spectra-nav" aria-label="Main navigation">
+            <a href="/">Overview</a>
+            <a href="/can_logger">CAN Logger</a>
+            <a href="/can_analyzer">CAN Analyzer</a>
+            <a href="/isotp" aria-current="page">ISO-TP</a>
+            <a href="/files">Files</a>
+            <a href="/settings">Settings</a>
+            <a href="/can_test">Diagnostics</a>
+        </nav>
+
+        <span id="isotp-status" role="status">Closed</span>
+    </header>
+
+    <main class="spectra-page">
+        <div class="heading">
+            <div>
+                <h1>ISO-TP Diagnostics</h1>
+
+                <p>
+                    Send arbitrary ISO-TP payloads and inspect complete
+                    responses before adding UDS decoding.
+                </p>
+            </div>
+        </div>
+
+        <div class="isotp-layout">
+            <section class="card isotp-configuration">
+                <h2>Channel</h2>
+
+                <div class="isotp-form-grid">
+                    <label>
+                        CAN bus
+                        <select id="isotp-bus">
+                            <option value="0">Primary · TWAI</option>
+                            <option value="1">Secondary · MCP2518FD</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Frame format
+                        <select id="isotp-format">
+                            <option value="classic">Classical CAN</option>
+                            <option value="fd">CAN FD</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        TX identifier
+                        <input id="isotp-tx-id" value="7E0" spellcheck="false">
+                    </label>
+
+                    <label>
+                        RX identifier
+                        <input id="isotp-rx-id" value="7E8" spellcheck="false">
+                    </label>
+
+                    <label>
+                        Link payload
+                        <select id="isotp-link-length">
+                            <option value="8">8 bytes</option>
+                            <option value="12">12 bytes</option>
+                            <option value="16">16 bytes</option>
+                            <option value="20">20 bytes</option>
+                            <option value="24">24 bytes</option>
+                            <option value="32">32 bytes</option>
+                            <option value="48">48 bytes</option>
+                            <option value="64">64 bytes</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Timeout
+                        <span class="input-with-unit">
+                            <input id="isotp-timeout" type="number" min="10" max="60000" value="1000">
+                            <span>ms</span>
+                        </span>
+                    </label>
+
+                    <label>
+                        Block size
+                        <input id="isotp-block-size" type="number" min="0" max="255" value="0">
+                    </label>
+
+                    <label>
+                        STmin
+                        <input id="isotp-st-min" type="number" min="0" max="255" value="0">
+                    </label>
+                </div>
+
+                <div class="isotp-options">
+                    <label><input id="isotp-extended" type="checkbox">29-bit identifiers</label>
+                    <label><input id="isotp-brs" type="checkbox" disabled>CAN FD bit-rate switch</label>
+                </div>
+
+                <div class="isotp-actions">
+                    <button id="isotp-open" class="primary">Apply channel</button>
+                    <button id="isotp-close">Close channel</button>
+                </div>
+            </section>
+
+            <section class="card isotp-transfer">
+                <h2>Payload</h2>
+
+                <label for="isotp-payload">HEX bytes</label>
+
+                <textarea
+                    id="isotp-payload"
+                    rows="7"
+                    spellcheck="false"
+                    placeholder="22 F1 90"
+                >22 F1 90</textarea>
+
+                <div class="isotp-payload-meta">
+                    <span id="isotp-byte-count">3 bytes</span>
+                    <span>Maximum 1024 bytes</span>
+                </div>
+
+                <button id="isotp-send" class="primary" disabled>
+                    Send ISO-TP message
+                </button>
+            </section>
+
+            <section class="card isotp-response">
+                <div class="panel-title">
+                    <h2>Latest response</h2>
+                    <span id="isotp-response-size">0 bytes</span>
+                </div>
+
+                <pre id="isotp-response-data">No response received.</pre>
+
+                <div class="isotp-actions">
+                    <button id="isotp-copy">Copy HEX</button>
+                    <button id="isotp-clear">Clear</button>
+                </div>
+            </section>
+
+            <section class="card isotp-events">
+                <h2>Activity</h2>
+                <div id="isotp-message" role="status">Configure a channel to begin.</div>
+            </section>
+        </div>
+    </main>
+</body>
+</html>

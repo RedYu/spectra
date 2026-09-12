@@ -410,6 +410,20 @@ static esp_err_t web_content_can_test_page_handler(
     );
 }
 
+static esp_err_t web_content_isotp_page_handler(
+    httpd_req_t *request
+)
+{
+    return web_content_send_storage_file(
+        request,
+        WEB_CONTENT_TEXT_DIRECTORY
+        "isotp.html"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/html; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
+    );
+}
+
 static esp_err_t web_content_script_handler(
     httpd_req_t *request
 )
@@ -556,6 +570,20 @@ esp_err_t web_content_service_register(
             NULL,
     };
 
+    static const httpd_uri_t isotp_page_uri = {
+        .uri =
+            "/isotp",
+
+        .method =
+            HTTP_GET,
+
+        .handler =
+            web_content_isotp_page_handler,
+
+        .user_ctx =
+            NULL,
+    };
+
     static const httpd_uri_t script_uri = {
         .uri =
             "/spectra.js",
@@ -663,6 +691,16 @@ esp_err_t web_content_service_register(
             esp_err_to_name(result)
         );
 
+        return result;
+    }
+
+    result =
+        httpd_register_uri_handler(
+            server,
+            &isotp_page_uri
+        );
+
+    if (result != ESP_OK) {
         return result;
     }
 
