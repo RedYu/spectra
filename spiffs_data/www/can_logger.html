@@ -15,8 +15,8 @@
 
     <title>CAN Logger · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=9">
-    <script src="spectra.js?v=9" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=10">
+    <script src="spectra.js?v=10" defer></script>
 </head>
 
 <body class="page-logger">
@@ -130,8 +130,12 @@
                         Clear tables
                     </button>
 
-                    <button id="export">
+                    <button id="export-csv">
                         Export buffered CSV
+                    </button>
+
+                    <button id="export-scl">
+                        Export buffered SCL
                     </button>
                 </div>
 
@@ -154,8 +158,8 @@
 
                 <p class="note">
                     Pause affects this web stream. SD recording is
-                    controlled on the device. CSV contains only the
-                    retained browser history.
+                    controlled on the device. CSV and SCL contain only
+                    the retained browser history.
                 </p>
             </aside>
 

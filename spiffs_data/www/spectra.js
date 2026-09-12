@@ -3546,9 +3546,16 @@
                     offset + 40 + length > view.byteLength)
                     throw new Error("Invalid CAN event");
                 events.push({
-                    type, bus, source, flags: view.getUint8(offset + 3),
+                    type, bus,
+                    direction: view.getUint8(offset + 2),
+                    source,
+                    flags: view.getUint8(offset + 3),
+                    dlc: view.getUint8(offset + 4),
                     sequence: view.getUint32(offset + 8, true),
+                    transaction: view.getUint32(offset + 12, true),
+                    nativeSequence: view.getUint32(offset + 16, true),
                     id: view.getUint32(offset + 20, true),
+                    result: view.getUint32(offset + 24, true),
                     timestamp: view.getBigUint64(offset + 28, true),
                     data: Array.from(new Uint8Array(buffer, offset + 40, length))
                 });
@@ -3722,17 +3729,98 @@
             });
             received = 0;
         };
-        element("export").onclick = () => {
+
+        function bufferedEvents() {
+            return channels
+                .flatMap(channel => channel.history)
+                .sort((left, right) => left.sequence - right.sequence);
+        }
+
+        function downloadBufferedFile(data, type, extension) {
+            const url = URL.createObjectURL(new Blob([data], {type}));
+            const link = document.createElement("a");
+            const date = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
+
+            link.href = url;
+            link.download = `spectra-can-buffer-${date}.${extension}`;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        function encodeBufferedScl(events) {
+            const fileHeaderSize = 32;
+            const eventHeaderSize = 56;
+            const totalSize = events.reduce(
+                (size, event) => size + eventHeaderSize + event.data.length,
+                fileHeaderSize
+            );
+            const buffer = new ArrayBuffer(totalSize);
+            const view = new DataView(buffer);
+            const bytes = new Uint8Array(buffer);
+            const validTimestamps = events
+                .filter(event => event.source !== 0)
+                .map(event => event.timestamp);
+            const sessionStarted = validTimestamps.length
+                ? validTimestamps.reduce(
+                    (minimum, value) => value < minimum ? value : minimum
+                )
+                : 0n;
+
+            bytes.set([0x53, 0x43, 0x4c, 0x31], 0);
+            view.setUint16(4, 1, true);
+            view.setUint16(6, fileHeaderSize, true);
+            view.setUint32(8, 0x12345678, true);
+            view.setUint32(12, 0, true);
+            view.setBigUint64(16, 0n, true);
+            view.setBigUint64(24, sessionStarted, true);
+
+            let offset = fileHeaderSize;
+
+            for (const event of events) {
+                const recordSize = eventHeaderSize + event.data.length;
+                const capture =
+                    event.source !== 0 && event.timestamp >= sessionStarted
+                        ? event.timestamp - sessionStarted
+                        : 0n;
+
+                view.setUint16(offset, recordSize, true);
+                view.setUint8(offset + 2, 1);
+                view.setUint8(offset + 3, event.type);
+                view.setUint8(offset + 4, event.bus);
+                view.setUint8(offset + 5, event.direction);
+                view.setUint8(offset + 6, event.source);
+                view.setUint8(offset + 7, event.dlc);
+                view.setUint8(offset + 8, event.data.length);
+                view.setUint32(offset + 12, event.flags, true);
+                view.setUint32(offset + 16, event.id, true);
+                view.setUint32(offset + 20, event.sequence, true);
+                view.setUint32(offset + 24, event.transaction, true);
+                view.setUint32(offset + 28, event.nativeSequence, true);
+                view.setUint32(offset + 32, event.result, true);
+                view.setBigUint64(offset + 40, event.timestamp, true);
+                view.setBigUint64(offset + 48, capture, true);
+                bytes.set(event.data, offset + eventHeaderSize);
+                offset += recordSize;
+            }
+
+            return buffer;
+        }
+
+        element("export-csv").onclick = () => {
             const rows = ["bus,sequence,timestamp_us,timestamp_source,event,id,flags,data"];
-            channels.forEach((channel, bus) => channel.history.forEach(event => rows.push([
-                bus ? "Secondary" : "Primary", event.sequence, event.timestamp.toString(),
+            bufferedEvents().forEach(event => rows.push([
+                event.bus ? "Secondary" : "Primary", event.sequence, event.timestamp.toString(),
                 event.source, eventNames[event.type], identifier(event), event.flags,
                 event.data.map(byte => hex(byte)).join(" ")
-            ].join(","))));
-            const url = URL.createObjectURL(new Blob([rows.join("\r\n")], { type: "text/csv" }));
-            const link = document.createElement("a");
-            link.href = url; link.download = "spectra-can-buffer.csv"; link.click();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            ].join(",")));
+            downloadBufferedFile(rows.join("\r\n"), "text/csv", "csv");
+        };
+        element("export-scl").onclick = () => {
+            downloadBufferedFile(
+                encodeBufferedScl(bufferedEvents()),
+                "application/octet-stream",
+                "scl"
+            );
         };
         setInterval(() => { if (!document.hidden) render(); }, 250);
         setInterval(() => {
