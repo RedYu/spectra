@@ -4113,10 +4113,7 @@
                 Jobs continue after closing this page. Stop prevents new submissions; a queued frame may still transmit.</p>
             <form class="tx-form">
                 <div class="tx-fields">
-                    <label>Job<select name="slot">${
-                    [0, 1, 2, 3]
-                        .map(i => `<option value="${i}">Job ${i + 1}</option>`)
-                        .join('')}</select></label>
+                    <label>Job<select name="slot"><option value="">Loading…</option></select></label>
                     <label>Channel<select name="bus"><option value="0">Primary · TWAI</option><option value="1">Secondary · MCP2518FD</option></select></label>
                     <label>ID (hex)<input name="id" value="123" required maxlength="10"></label>
                     <label>ID format<select name="extended"><option value="0">Standard · 11 bit</option><option value="1">Extended · 29 bit</option></select></label>
@@ -4135,13 +4132,16 @@
                     <label>ID end (hex)<input name="id_end" value="123" required></label>
                     <label>DLC increment<select name="increment_dlc"><option value="0">Off</option><option value="1">+1 after each queued frame</option></select></label>
                     <label>DLC end<input name="dlc_end" type="number" min="0" max="15" value="8" required></label>
+                    <label>DATA increment<select name="data_mode"><option value="off">Off</option><option value="counter">Integer counter</option><option value="bytes">Masked bits per byte</option></select></label>
                     <label>Counter offset (byte)<input name="data_offset" type="number" min="0" max="63" value="0" required></label>
-                    <label>Counter width (0 = off)<input name="data_width" type="number" min="0" max="8" value="0" required></label>
+                    <label>Counter width<input name="data_width" type="number" min="1" max="8" value="1" required></label>
                     <label>Counter step<input name="data_step" type="number" min="1" max="4294967295" value="1" required></label>
                     <label>Counter byte order<select name="data_big_endian"><option value="0">Little endian</option><option value="1">Big endian</option></select></label>
+                    <label>Bit mask (ALL or hex bytes)<input name="data_byte_mask" value="ALL" maxlength="191" autocomplete="off"></label>
                 </div><p>ID and DLC wrap to the initial value at their end. DATA wraps at the selected counter width.
-                    The counter must fit the initial payload. Newly exposed bytes are zero-filled.</p></details>
-                <div class="tx-actions"><button type="submit" class="primary" disabled>Start job</button>
+                    F0 increments the upper nibble; 0F increments the lower nibble. Unmasked bits stay unchanged.</p></details>
+                <div class="tx-actions"><button type="button" data-tx="once" class="primary" disabled>Send once</button>
+                    <button type="submit" disabled>Start sequence</button>
                     <button type="button" data-tx="stop">Stop selected</button><button type="button" data-tx="stop-all">Stop all jobs</button>
                     <button type="button" data-tx="refresh">Refresh status</button></div>
             </form><p class="tx-status" role="status" aria-live="polite">Loading transmission service…</p>
@@ -4153,10 +4153,26 @@
         const panel = host.querySelector('.tx-panel');
         const status = host.querySelector('.tx-status');
         const start = form.querySelector('[type="submit"]');
+        const sendOnce = form.querySelector('[data-tx="once"]');
         let jobs = null, busy = false, polling = false;
+        function updateJobOptions() {
+            const select = control('slot');
+            const selected = Number(select.value);
+
+            select.replaceChildren();
+
+            for (const job of jobs) {
+                const option = document.createElement('option');
+                option.value = String(job.slot);
+                option.textContent = `Job ${job.slot + 1}`;
+                option.selected = job.slot === selected;
+                select.append(option);
+            }
+        }
         function controls() {
             const job = jobs?.find(j => j.slot === Number(control('slot').value));
             start.disabled = busy || !job || job.state === 'active' || job.pending !== 0;
+            sendOnce.disabled = start.disabled;
             const primary = control('bus').value === '0';
             for (const option of control('format').options)
                 option.disabled = primary && option.value !== 'classic';
@@ -4168,6 +4184,15 @@
             if (!fd && Number(control('dlc').value) > 8)
                 control('dlc').value = '8';
             control('dlc_end').max = fd ? '15' : '8';
+            const dataMode = control('data_mode').value;
+            control('data_offset').disabled = dataMode !== 'counter';
+            control('data_width').disabled = dataMode !== 'counter';
+            control('data_big_endian').disabled = dataMode !== 'counter';
+            control('data_byte_mask').disabled = dataMode !== 'bytes';
+            control('data_step').disabled = dataMode === 'off';
+            control('data_step').max = dataMode === 'bytes'
+                ? '255'
+                : '4294967295';
         }
         async function api(payload) {
             const controller = new AbortController();
@@ -4197,9 +4222,10 @@
             polling = true;
             try {
                 const result = await api();
-                if (!Array.isArray(result.jobs) || result.jobs.length !== 4)
+                if (!Array.isArray(result.jobs) || result.jobs.length === 0)
                     throw new Error('Invalid job status');
                 jobs = result.jobs;
+                updateJobOptions();
                 const table = host.querySelector('tbody');
                 table.replaceChildren();
                 for (const j of jobs) {
@@ -4237,13 +4263,87 @@
                 throw new Error(`${name} is out of range`);
             return n;
         }
+        function byteMask(length) {
+            const raw = control('data_byte_mask').value.trim();
+
+            if (raw.toUpperCase() === 'ALL' && length > 0)
+                return Array(length).fill(0xff);
+
+            const tokens = raw ? raw.split(/\s+/) : [];
+            if (!tokens.length || tokens.length > length ||
+                tokens.some(token => !/^[\da-f]{2}$/i.test(token)))
+                throw new Error(
+                    `Bit mask must be ALL or up to ${length} hexadecimal bytes`);
+
+            const mask = Array.from(
+                {length},
+                (_, index) => index < tokens.length
+                    ? parseInt(tokens[index], 16)
+                    : 0);
+
+            if (!mask.some(value => value !== 0))
+                throw new Error('Bit mask must select at least one bit');
+
+            return mask;
+        }
+        function incrementMaskedByte(value, mask, step) {
+            let counter = 0, width = 0;
+
+            for (let bit = 0; bit < 8; ++bit) {
+                if ((mask & (1 << bit)) === 0)
+                    continue;
+                if ((value & (1 << bit)) !== 0)
+                    counter |= 1 << width;
+                ++width;
+            }
+
+            counter = (counter + step) % (2 ** width);
+            let result = value & (~mask & 0xff), counterBit = 0;
+
+            for (let bit = 0; bit < 8; ++bit) {
+                if ((mask & (1 << bit)) === 0)
+                    continue;
+                if ((counter & (1 << counterBit)) !== 0)
+                    result |= 1 << bit;
+                ++counterBit;
+            }
+
+            return result;
+        }
+        function advanceData(payload) {
+            const data = [...payload.data];
+
+            if (payload.data_width > 0) {
+                let carry = BigInt(payload.data_step);
+
+                for (let i = 0; i < payload.data_width; ++i) {
+                    const index = payload.data_offset +
+                        (payload.data_big_endian ? payload.data_width - 1 - i : i);
+                    carry += BigInt(data[index]);
+                    data[index] = Number(carry & 0xffn);
+                    carry >>= 8n;
+                }
+            } else if (payload.increment_data_bytes) {
+                for (let i = 0; i < data.length; ++i) {
+                    const mask = payload.data_byte_mask[i];
+                    if (mask !== 0)
+                        data[i] = incrementMaskedByte(data[i], mask, payload.data_step);
+                }
+            }
+
+            control('data').value = data
+                .map(value => value.toString(16).toUpperCase().padStart(2, '0'))
+                .join(' ');
+        }
         async function command(payload) {
             if (busy)
-                return;
+                return false;
             busy = true;
             controls();
+            let accepted = false;
             try {
                 await api(payload);
+                accepted = true;
                 status.textContent =
                     'Command accepted. Check the job counters for actual transmission results.';
             } catch (error) {
@@ -4254,10 +4354,9 @@
                 await refresh();
                 controls();
             }
+            return accepted;
         }
-        form.addEventListener('change', controls);
-        form.addEventListener('submit', async event => {
-            event.preventDefault();
+        async function transmit(single) {
             if (start.disabled)
                 return;
             try {
@@ -4269,9 +4368,10 @@
                 const tokens = raw ? raw.split(/\s+/) : [];
                 if (tokens.length !== lengths[dlc] || tokens.some(t => !/^[\da-f]{2}$/i.test(t)))
                     throw new Error(`DATA must contain exactly ${lengths[dlc]} hexadecimal bytes`);
+                const dataMode = control('data_mode').value;
                 const payload = {
                     action : 'start',
-                    slot : integer('slot', 0, 3),
+                    slot : integer('slot', 0, jobs.length - 1),
                     bus : integer('bus', 0, 1),
                     id,
                     extended,
@@ -4279,34 +4379,77 @@
                     brs : control('format').value === 'brs',
                     dlc,
                     data : tokens.map(t => parseInt(t, 16)),
-                    interval_ms : integer('interval_ms', 10, 3600000),
-                    count : integer('count', 0, 1000000),
-                    id_step : hex('id_step', extended ? 0x1fffffff : 0x7ff),
-                    id_end : hex('id_end', extended ? 0x1fffffff : 0x7ff),
-                    increment_dlc : control('increment_dlc').value === '1',
-                    dlc_end : integer('dlc_end', 0, fd ? 15 : 8),
-                    data_offset : integer('data_offset', 0, 63),
-                    data_width : integer('data_width', 0, 8),
-                    data_step : integer('data_step', 1, 4294967295),
-                    data_big_endian : control('data_big_endian').value === '1'
+                    interval_ms : single
+                        ? 10
+                        : integer('interval_ms', 10, 3600000),
+                    count : single
+                        ? 1
+                        : integer('count', 0, 1000000),
+                    id_step : single
+                        ? 0
+                        : hex('id_step', extended ? 0x1fffffff : 0x7ff),
+                    id_end : single
+                        ? id
+                        : hex('id_end', extended ? 0x1fffffff : 0x7ff),
+                    increment_dlc : !single &&
+                        control('increment_dlc').value === '1',
+                    dlc_end : single
+                        ? dlc
+                        : integer('dlc_end', 0, fd ? 15 : 8),
+                    data_offset : dataMode === 'counter'
+                        ? integer('data_offset', 0, 63)
+                        : 0,
+                    data_width : dataMode === 'counter'
+                        ? integer('data_width', 1, 8)
+                        : 0,
+                    data_step : dataMode === 'off'
+                        ? 1
+                        : integer(
+                            'data_step',
+                            1,
+                            dataMode === 'bytes' ? 255 : 4294967295),
+                    data_big_endian : dataMode === 'counter' &&
+                        control('data_big_endian').value === '1',
+                    increment_data_bytes : dataMode === 'bytes',
+                    data_byte_mask : dataMode === 'bytes'
+                        ? byteMask(lengths[dlc])
+                        : []
                 };
+
                 if (payload.id_step && payload.id_end < id)
                     throw new Error('ID end must be at least the initial ID');
                 if (payload.increment_dlc && payload.dlc_end < dlc)
                     throw new Error('DLC end must be at least the initial DLC');
                 if (payload.data_width && payload.data_offset + payload.data_width > lengths[dlc])
                     throw new Error('DATA counter must fit the initial payload');
-                if (!window.confirm(`Start job ${payload.slot + 1} on ${
+                const confirmation = single
+                    ? `Send one frame on ${
+                        payload.bus === 0
+                            ? 'Primary'
+                            : 'Secondary'}? This transmits real CAN traffic.`
+                    : `Start sequence ${payload.slot + 1} on ${
                         payload.bus === 0
                             ? 'Primary'
                             : 'Secondary'}? ${payload.count || 'Unlimited'} attempts, interval ${
-                        payload.interval_ms} ms. This transmits real CAN traffic.`))
+                        payload.interval_ms} ms. This transmits real CAN traffic.`;
+
+                if (!window.confirm(confirmation))
                     return;
-                await command(payload);
+                const accepted = await command(payload);
+
+                if (single && accepted)
+                    advanceData(payload);
             } catch (error) {
                 status.textContent = error.message;
             }
+        }
+
+        form.addEventListener('change', controls);
+        form.addEventListener('submit', async event => {
+            event.preventDefault();
+            await transmit(false);
         });
+        sendOnce.addEventListener('click', () => transmit(true));
         host.querySelector('[data-tx="stop"]')
             .addEventListener(
                 'click', () => command({action : 'stop', slot : Number(control('slot').value)}));
@@ -4321,7 +4464,8 @@
         controls();
         refresh().then(() => {
             if (jobs)
-                status.textContent = 'Ready. No transmission starts until you press Start job.';
+                status.textContent =
+                    'Ready. No transmission starts until you press Send once or Start sequence.';
         });
         setInterval(() => {
             if (!document.hidden && panel.open && !busy)

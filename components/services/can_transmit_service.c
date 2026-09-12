@@ -44,6 +44,55 @@ static TaskHandle_t s_task;
 static uint32_t s_subscription;
 static atomic_bool s_running;
 
+static uint8_t can_transmit_increment_masked_byte(
+    uint8_t value,
+    uint8_t mask,
+    uint8_t step
+)
+{
+    uint16_t counter = 0U;
+    uint8_t counter_width = 0U;
+
+    for (uint8_t bit = 0U; bit < 8U; ++bit) {
+        const uint8_t bit_mask =
+            (uint8_t)(1U << bit);
+
+        if ((mask & bit_mask) != 0U) {
+            if ((value & bit_mask) != 0U) {
+                counter |=
+                    (uint16_t)(1U << counter_width);
+            }
+
+            ++counter_width;
+        }
+    }
+
+    const uint16_t modulus =
+        (uint16_t)(1U << counter_width);
+
+    counter =
+        (uint16_t)((counter + step) % modulus);
+
+    uint8_t result =
+        value & (uint8_t)~mask;
+    uint8_t counter_bit = 0U;
+
+    for (uint8_t bit = 0U; bit < 8U; ++bit) {
+        const uint8_t bit_mask =
+            (uint8_t)(1U << bit);
+
+        if ((mask & bit_mask) != 0U) {
+            if ((counter & (1U << counter_bit)) != 0U) {
+                result |= bit_mask;
+            }
+
+            ++counter_bit;
+        }
+    }
+
+    return result;
+}
+
 esp_err_t can_transmit_job_validate(
     const can_transmit_job_config_t *config
 )
@@ -81,11 +130,37 @@ esp_err_t can_transmit_job_validate(
          ((config->dlc_end < frame->dlc) ||
           (config->dlc_end > (fd ? 15U : 8U)))) ||
         (config->data_width > 8U) ||
+        (config->increment_data_bytes &&
+         (config->data_width != 0U)) ||
         ((config->data_width != 0U) &&
          ((config->data_step == 0U) ||
           (((uint32_t)config->data_offset + config->data_width) >
-           frame->data_length)))) {
+           frame->data_length))) ||
+        (config->increment_data_bytes &&
+         ((config->data_step == 0U) ||
+          (config->data_step > UINT8_MAX)))) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    if (config->increment_data_bytes) {
+        bool selected = false;
+
+        for (uint8_t i = 0U;
+             i < CAN_FRAME_FD_DATA_MAX_LENGTH;
+             ++i) {
+
+            if (config->data_byte_masks[i] != 0U) {
+                if (i >= frame->data_length) {
+                    return ESP_ERR_INVALID_ARG;
+                }
+
+                selected = true;
+            }
+        }
+
+        if (!selected) {
+            return ESP_ERR_INVALID_ARG;
+        }
     }
 
     return ESP_OK;
@@ -117,6 +192,22 @@ void can_transmit_job_advance(
         carry += frame->data[index];
         frame->data[index] = (uint8_t)carry;
         carry >>= 8U;
+    }
+
+    if (config->increment_data_bytes) {
+        for (uint8_t i = 0U; i < frame->data_length; ++i) {
+            const uint8_t mask =
+                config->data_byte_masks[i];
+
+            if (mask != 0U) {
+                frame->data[i] =
+                    can_transmit_increment_masked_byte(
+                        frame->data[i],
+                        mask,
+                        (uint8_t)config->data_step
+                    );
+            }
+        }
     }
 
     if (config->increment_dlc) {

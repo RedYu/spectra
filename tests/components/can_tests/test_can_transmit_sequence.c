@@ -298,3 +298,81 @@ TEST_CASE(
         can_transmit_job_validate(&job)
     );
 }
+
+TEST_CASE(
+    "CAN TX increments masked payload bits independently",
+    "[can_tx]"
+)
+{
+    can_transmit_job_config_t job =
+        can_transmit_test_config();
+
+    job.increment_data_bytes = true;
+    job.data_byte_masks[0] = 0xF0U;
+    job.data_byte_masks[1] = 0x0FU;
+    job.data_byte_masks[2] = 0xFFU;
+    job.data_step = 1U;
+
+    can_frame_t frame = job.frame;
+
+    frame.data[0] = 0xA5U;
+    frame.data[1] = 0xA5U;
+    frame.data[2] = 0xFFU;
+    frame.data[3] = 0x55U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        can_transmit_job_validate(&job)
+    );
+
+    can_transmit_job_advance(
+        &job,
+        &frame
+    );
+
+    TEST_ASSERT_EQUAL_HEX8(0xB5U, frame.data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xA6U, frame.data[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x00U, frame.data[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x55U, frame.data[3]);
+}
+
+TEST_CASE(
+    "CAN TX validates masked byte increment settings",
+    "[can_tx]"
+)
+{
+    can_transmit_job_config_t job =
+        can_transmit_test_config();
+
+    job.increment_data_bytes = true;
+    job.data_step = 1U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        can_transmit_job_validate(&job)
+    );
+
+    job.data_byte_masks[8] = 0xFFU;
+
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        can_transmit_job_validate(&job)
+    );
+
+    job.data_byte_masks[8] = 0U;
+    job.data_byte_masks[0] = 0xFFU;
+    job.data_width = 1U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        can_transmit_job_validate(&job)
+    );
+
+    job.data_width = 0U;
+    job.data_step = 256U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        can_transmit_job_validate(&job)
+    );
+}

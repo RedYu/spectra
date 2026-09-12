@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define CAN_TRANSMIT_JOB_COUNT        (4U)
+#define CAN_TRANSMIT_JOB_COUNT        (8U)
 #define CAN_TRANSMIT_MIN_INTERVAL_MS  (10U)
 
 /**
@@ -56,6 +56,12 @@ typedef struct
 
     /** True when the payload counter uses big-endian byte order. */
     bool data_big_endian;
+
+    /** True to increment masked bits in each payload byte. */
+    bool increment_data_bytes;
+
+    /** Per-byte masks selecting independently incremented payload bits. */
+    uint8_t data_byte_masks[CAN_FRAME_FD_DATA_MAX_LENGTH];
 
 } can_transmit_job_config_t;
 

@@ -1,6 +1,6 @@
 # CAN transmission jobs
 
-The device owns four volatile slots (0–3). Nothing is transmitted at boot or
+The device owns eight volatile slots (0–7). Nothing is transmitted at boot or
 page load. A job starts only after an explicit `start` request. Closing a browser
 does **not** stop a running job. Use only on authorized equipment, initially on a
 bench with a receiving/acknowledging CAN node.
@@ -11,7 +11,7 @@ Only Normal operating mode is allowed. RTR and ESI requests are rejected.
 
 ## HTTP API
 
-`GET /api/can/transmit` returns `jobs`, an array of four snapshots:
+`GET /api/can/transmit` returns `jobs`, an array of eight snapshots:
 `slot`, `state`, `bus`, `next_id`, `next_dlc`, `count`, `interval_ms`, `attempts`,
 `queued`, `completed`, `failed`, `aborted`, `unknown`, `pending`, `last_error`.
 `pending` is a router transaction ID, or zero. States: `idle`, `active`,
@@ -32,7 +32,8 @@ Example body (documentation only; sends three real frames if submitted):
   "id_step": 0, "id_end": 291,
   "increment_dlc": false, "dlc_end": 8,
   "data_offset": 0, "data_width": 1, "data_step": 1,
-  "data_big_endian": false
+  "data_big_endian": false,
+  "increment_data_bytes": false, "data_byte_mask": []
 }
 ```
 
@@ -42,7 +43,12 @@ required for start. Optional flags default false, interval defaults to 100 ms,
 ID step to zero, end to initial ID, DLC end to initial DLC, counter width and
 offset to zero, and counter step to one.
 
-Stop a slot: `{"action":"stop","slot":0}`. Stop all four:
+`increment_data_bytes` enables independent masked-bit increments. When enabled,
+`data_byte_mask` is an array of integer values from 0 to 255 with exactly one
+item per initial payload byte. This mode and the multi-byte integer counter are
+mutually exclusive.
+
+Stop a slot: `{"action":"stop","slot":0}`. Stop all eight:
 `{"action":"stop_all"}`. Stop only prevents new submissions; this router API
 cannot retract an already queued hardware frame or its hardware retransmissions.
 The configured controller retransmission policy remains in force.
@@ -57,7 +63,7 @@ Never automatically retry `start` after an HTTP timeout: first inspect job statu
 - Interval: 10–3,600,000 ms. Best-effort FreeRTOS timing, not a hard real-time generator.
 - Count: 1–1,000,000 submission attempts; zero runs until stopped. A defensive
   counter limit also stops an unlimited job at UINT32_MAX attempts.
-- One outstanding frame per job, four in total. No catch-up bursts after delays.
+- One outstanding frame per job, eight in total. No catch-up bursts after delays.
 - `queued` means accepted by the router, `completed` means controller confirmation.
   `failed` includes rejected submissions and failed confirmations; `aborted` is separate.
 - Immediate failure or unsuccessful confirmation stops the job. A missing
@@ -79,6 +85,19 @@ match initial DLC. Newly exposed payload bytes are zero; truncated bytes are cle
 DATA is a 1–8-byte unsigned counter at `data_offset`, with chosen endianness and
 positive 32-bit step. It wraps modulo its byte width and must fit the shortest
 (initial) payload. Width zero disables it. ID, DATA and DLC increments can coexist.
+
+Masked-bit mode applies the same 1–255 step independently inside every payload
+byte. Selected bits are packed as a counter, incremented and written back while
+unmasked bits remain unchanged. For example, `A5` with mask `F0` and step 1
+becomes `B5`; with mask `0F` it becomes `A6`. A mask of `FF` increments the full
+byte modulo 256. At least one bit must be selected, and masks may cover only
+bytes present in the initial payload. The web editor accepts masks as hex bytes,
+while the JSON API uses their decimal values.
+
+After a `Send once` command is accepted by the HTTP API, the web editor advances
+its DATA field using the selected DATA increment mode. Repeated clicks therefore
+submit successive values. Acceptance is not a hardware transmission confirmation;
+the job counters remain the source of the final result.
 
 ## Verification
 

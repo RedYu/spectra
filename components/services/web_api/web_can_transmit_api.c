@@ -204,6 +204,11 @@ static bool web_can_transmit_parse_job(
             root,
             "data_big_endian",
             &config->data_big_endian
+        ) ||
+        !web_can_transmit_boolean(
+            root,
+            "increment_data_bytes",
+            &config->increment_data_bytes
         )) {
 
         return false;
@@ -258,6 +263,45 @@ static bool web_can_transmit_parse_job(
         }
 
         config->frame.data[i] = (uint8_t)byte->valuedouble;
+    }
+
+    if (config->increment_data_bytes) {
+        const cJSON *mask =
+            cJSON_GetObjectItemCaseSensitive(
+                root,
+                "data_byte_mask"
+            );
+
+        if (!cJSON_IsArray(mask) ||
+            (cJSON_GetArraySize(mask) !=
+             config->frame.data_length)) {
+
+            return false;
+        }
+
+        for (uint8_t i = 0U;
+             i < config->frame.data_length;
+             ++i) {
+
+            const cJSON *byte_mask =
+                cJSON_GetArrayItem(
+                    mask,
+                    i
+                );
+
+            if (!cJSON_IsNumber(byte_mask) ||
+                !isfinite(byte_mask->valuedouble) ||
+                (byte_mask->valuedouble < 0.0) ||
+                (byte_mask->valuedouble > UINT8_MAX) ||
+                (floor(byte_mask->valuedouble) !=
+                 byte_mask->valuedouble)) {
+
+                return false;
+            }
+
+            config->data_byte_masks[i] =
+                (uint8_t)byte_mask->valuedouble;
+        }
     }
 
     return
@@ -562,7 +606,7 @@ static esp_err_t web_can_transmit_post(
                        root,
                        "slot",
                        0U,
-                       3U,
+                       CAN_TRANSMIT_JOB_COUNT - 1U,
                        &slot
                    )) {
             if (strcmp(
