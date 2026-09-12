@@ -19,7 +19,32 @@ static void uds_download_fail(
 {
     download->state = UDS_DOWNLOAD_ERROR;
     download->action_pending = false;
+    download->retry_pending = false;
     download->last_result = result;
+}
+
+static bool uds_download_retry_block(
+    uds_download_t *download,
+    uint8_t negative_response_code
+)
+{
+    if ((download->state != UDS_DOWNLOAD_TRANSFERRING) ||
+        (download->current_block_size == 0U) ||
+        (download->current_block_retry >=
+         download->maximum_block_retries)) {
+
+        return false;
+    }
+
+    download->current_block_retry++;
+    download->retry_count++;
+    download->last_negative_response_code =
+        negative_response_code;
+    download->retry_pending = true;
+    download->action_pending = true;
+    download->last_result = ESP_OK;
+
+    return true;
 }
 
 esp_err_t uds_download_open(
@@ -54,6 +79,14 @@ esp_err_t uds_download_open(
     download->config.client.callback =
         uds_download_client_callback;
     download->config.client.callback_context = download;
+    download->maximum_block_retries =
+        (config->maximum_block_retries != 0U)
+            ? config->maximum_block_retries
+            : UDS_DOWNLOAD_DEFAULT_MAXIMUM_BLOCK_RETRIES;
+    download->operation_timeout_us =
+        (config->operation_timeout_us != 0U)
+            ? config->operation_timeout_us
+            : UDS_DOWNLOAD_DEFAULT_OPERATION_TIMEOUT_US;
 
     const esp_err_t result =
         uds_client_open(
@@ -129,7 +162,13 @@ esp_err_t uds_download_start(
         download->block_data_capacity = 0U;
         download->current_block_size = 0U;
         download->block_sequence_counter = 1U;
+        download->current_block_retry = 0U;
+        download->last_negative_response_code = 0U;
+        download->acknowledged_blocks = 0U;
+        download->retry_count = 0U;
+        download->started_at_us = now_us;
         download->action_pending = false;
+        download->retry_pending = false;
     } else {
         uds_download_fail(download, result);
     }
@@ -151,6 +190,17 @@ esp_err_t uds_download_poll(
         return ESP_ERR_INVALID_STATE;
     }
 
+    if ((download->state != UDS_DOWNLOAD_IDLE) &&
+        (download->state != UDS_DOWNLOAD_COMPLETE) &&
+        (download->state != UDS_DOWNLOAD_CANCELLED) &&
+        (download->state != UDS_DOWNLOAD_ERROR) &&
+        ((now_us - download->started_at_us) >=
+         download->operation_timeout_us)) {
+
+        uds_download_fail(download, ESP_ERR_TIMEOUT);
+        return ESP_ERR_TIMEOUT;
+    }
+
     esp_err_t result =
         uds_client_poll(
             &download->client,
@@ -161,9 +211,13 @@ esp_err_t uds_download_poll(
         return ESP_OK;
     }
 
-    if (result != ESP_OK) {
+    if ((result != ESP_OK) && !download->retry_pending) {
         uds_download_fail(download, result);
         return result;
+    }
+
+    if (download->retry_pending) {
+        result = ESP_OK;
     }
 
     if (!download->action_pending) {
@@ -171,41 +225,48 @@ esp_err_t uds_download_poll(
     }
 
     if (download->state == UDS_DOWNLOAD_TRANSFERRING) {
-        const uint64_t remaining =
-            download->config.memory_size -
-            download->transferred_size;
-        size_t requested = download->block_data_capacity;
+        if (!download->retry_pending) {
+            const uint64_t remaining =
+                download->config.memory_size -
+                download->transferred_size;
+            size_t requested = download->block_data_capacity;
 
-        if (remaining < requested) {
-            requested = (size_t)remaining;
+            if (remaining < requested) {
+                requested = (size_t)remaining;
+            }
+
+            size_t read_size = 0U;
+            result =
+                download->config.read(
+                    download->transferred_size,
+                    download->config.transfer_buffer,
+                    requested,
+                    &read_size,
+                    download->config.read_context
+                );
+
+            if ((result == ESP_OK) &&
+                ((read_size == 0U) ||
+                 (read_size > requested))) {
+
+                result = ESP_ERR_INVALID_SIZE;
+            }
+
+            if (result == ESP_OK) {
+                download->current_block_size = read_size;
+            }
         }
 
-        size_t read_size = 0U;
-        result =
-            download->config.read(
-                download->transferred_size,
-                download->config.transfer_buffer,
-                requested,
-                &read_size,
-                download->config.read_context
-            );
-
-        if ((result == ESP_OK) &&
-            ((read_size == 0U) ||
-             (read_size > requested))) {
-
-            result = ESP_ERR_INVALID_SIZE;
-        }
+        download->action_pending = false;
+        download->retry_pending = false;
 
         if (result == ESP_OK) {
-            download->current_block_size = read_size;
-            download->action_pending = false;
             result =
                 uds_client_transfer_data(
                     &download->client,
                     download->block_sequence_counter,
                     download->config.transfer_buffer,
-                    read_size,
+                    download->current_block_size,
                     now_us
                 );
         }
@@ -261,6 +322,7 @@ esp_err_t uds_download_cancel(
 
     download->state = UDS_DOWNLOAD_CANCELLED;
     download->action_pending = false;
+    download->retry_pending = false;
     download->last_result = ESP_OK;
 
     return ESP_OK;
@@ -283,6 +345,11 @@ esp_err_t uds_download_get_progress(
         .block_data_capacity = download->block_data_capacity,
         .block_sequence_counter =
             download->block_sequence_counter,
+        .acknowledged_blocks = download->acknowledged_blocks,
+        .retry_count = download->retry_count,
+        .current_block_retry = download->current_block_retry,
+        .last_negative_response_code =
+            download->last_negative_response_code,
         .last_result = download->last_result,
     };
 
@@ -416,6 +483,9 @@ static void uds_download_client_callback(
             download->transferred_size +=
                 download->current_block_size;
             download->current_block_size = 0U;
+            download->current_block_retry = 0U;
+            download->last_negative_response_code = 0U;
+            download->acknowledged_blocks++;
 
             if (download->transferred_size ==
                 download->config.memory_size) {
@@ -447,6 +517,21 @@ static void uds_download_client_callback(
         } else {
             uds_download_fail(download, result);
         }
+    } else if ((event->type == UDS_CLIENT_EVENT_TIMEOUT) &&
+               uds_download_retry_block(download, 0U)) {
+
+        /* Retry the same data and block counter. */
+    } else if ((event->type == UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) &&
+               ((event->response.negative_response_code ==
+                 UDS_NRC_WRONG_BLOCK_SEQUENCE_COUNTER) ||
+                (event->response.negative_response_code ==
+                 UDS_NRC_BUSY_REPEAT_REQUEST)) &&
+               uds_download_retry_block(
+                   download,
+                   event->response.negative_response_code
+               )) {
+
+        /* Retry only explicitly recoverable TransferData failures. */
     } else if ((download->state != UDS_DOWNLOAD_CANCELLED) &&
                ((event->type ==
                  UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) ||

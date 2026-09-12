@@ -87,6 +87,14 @@ HTTP requests only read progress or request cancellation. The 512-byte transfer
 buffer is allocated in PSRAM and the SD file is closed on completion,
 cancellation, or error.
 
+Automatic Web downloads accept only regular `.bin`, `.hex`, `.srec`, or `.mot`
+files directly inside `/firmwares`. Empty files and images larger than 64 MiB
+are rejected before a diagnostic request is sent. TransferData retries the same
+payload with the same block sequence counter up to three times after a response
+timeout, `busyRepeatRequest` (`0x21`), or `wrongBlockSequenceCounter` (`0x73`).
+The complete automatic transfer is limited to ten minutes. Progress reports the
+acknowledged block count, total retry count, current block retry, and last NRC.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
@@ -100,6 +108,3 @@ payload memory.
 - no typed DID value or routine-result decoders yet;
 - no persistent resume after reset or interrupted ECU programming;
 - no authentication or role-based protection for destructive UDS requests.
-
-The next layer should connect the automatic download state machine to an SD-card
-file reader and a guarded Web API with progress reporting and cancellation.

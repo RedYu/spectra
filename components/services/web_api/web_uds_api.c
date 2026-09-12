@@ -28,6 +28,8 @@
 #define WEB_UDS_BODY_MAX_SIZE     (4096U)
 #define WEB_UDS_LOCK_TIMEOUT_MS   (100U)
 #define WEB_UDS_DOWNLOAD_TASK_STACK_SIZE (4096U)
+#define WEB_UDS_FIRMWARE_DIRECTORY       "/firmwares/"
+#define WEB_UDS_FIRMWARE_MAX_SIZE        (64U * 1024U * 1024U)
 
 static SemaphoreHandle_t s_lock = NULL;
 static uint8_t *s_receive_buffer = NULL;
@@ -116,6 +118,10 @@ static void web_uds_download_close_file(void);
 
 static esp_err_t web_uds_download_start(
     const cJSON *root
+);
+
+static bool web_uds_firmware_path_valid(
+    const char *path
 );
 
 static void web_uds_download_task(
@@ -1012,8 +1018,7 @@ static esp_err_t web_uds_download_start(
     if (!s_client_config_valid ||
         s_download_active ||
         !cJSON_IsString(path) ||
-        (path->valuestring[0] == '\0') ||
-        (strstr(path->valuestring, "..") != NULL) ||
+        !web_uds_firmware_path_valid(path->valuestring) ||
         !web_uds_number(root, "data_format", UINT8_MAX, &data_format) ||
         !web_uds_number(root, "address_length", 8U, &address_length) ||
         !web_uds_number(root, "size_length", 8U, &size_length) ||
@@ -1031,7 +1036,9 @@ static esp_err_t web_uds_download_start(
 
     if ((result != ESP_OK) ||
         !S_ISREG(information.st_mode) ||
-        (information.st_size <= 0)) {
+        (information.st_size <= 0) ||
+        ((uint64_t)information.st_size >
+         WEB_UDS_FIRMWARE_MAX_SIZE)) {
 
         return (result != ESP_OK)
             ? result
@@ -1064,6 +1071,8 @@ static esp_err_t web_uds_download_start(
             .memory_address_length = (uint8_t)address_length,
             .memory_size = (uint64_t)information.st_size,
             .memory_size_length = (uint8_t)size_length,
+            .maximum_block_retries = 3U,
+            .operation_timeout_us = 600000000ULL,
         };
 
         result = uds_download_open(&s_download, &config);
@@ -1103,6 +1112,34 @@ static esp_err_t web_uds_download_start(
     }
 
     return result;
+}
+
+static bool web_uds_firmware_path_valid(
+    const char *path
+)
+{
+    if ((path == NULL) ||
+        (strncmp(
+            path,
+            WEB_UDS_FIRMWARE_DIRECTORY,
+            sizeof(WEB_UDS_FIRMWARE_DIRECTORY) - 1U
+        ) != 0) ||
+        (strstr(path, "..") != NULL) ||
+        (strchr(
+            &path[sizeof(WEB_UDS_FIRMWARE_DIRECTORY) - 1U],
+            '/'
+        ) != NULL)) {
+
+        return false;
+    }
+
+    const char *extension = strrchr(path, '.');
+
+    return (extension != NULL) &&
+           ((strcmp(extension, ".bin") == 0) ||
+            (strcmp(extension, ".hex") == 0) ||
+            (strcmp(extension, ".srec") == 0) ||
+            (strcmp(extension, ".mot") == 0));
 }
 
 static esp_err_t web_uds_get_handler(
@@ -1255,6 +1292,26 @@ static esp_err_t web_uds_get_handler(
             response,
             "download_result",
             download_progress.last_result
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_blocks",
+            download_progress.acknowledged_blocks
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_retries",
+            download_progress.retry_count
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_block_retry",
+            download_progress.current_block_retry
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_nrc",
+            download_progress.last_negative_response_code
         ) != NULL);
 
     free(payload);

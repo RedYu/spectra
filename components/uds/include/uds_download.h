@@ -17,6 +17,9 @@
 extern "C" {
 #endif
 
+#define UDS_DOWNLOAD_DEFAULT_MAXIMUM_BLOCK_RETRIES (3U)
+#define UDS_DOWNLOAD_DEFAULT_OPERATION_TIMEOUT_US  (600000000ULL)
+
 typedef enum
 {
     UDS_DOWNLOAD_CLOSED = 0,
@@ -52,6 +55,8 @@ typedef struct
     uint8_t memory_size_length;
     const uint8_t *exit_parameter_record;
     size_t exit_parameter_record_length;
+    uint8_t maximum_block_retries;
+    uint64_t operation_timeout_us;
 
 } uds_download_config_t;
 
@@ -63,6 +68,10 @@ typedef struct
     uint64_t maximum_block_length;
     size_t block_data_capacity;
     uint8_t block_sequence_counter;
+    uint32_t acknowledged_blocks;
+    uint32_t retry_count;
+    uint8_t current_block_retry;
+    uint8_t last_negative_response_code;
     esp_err_t last_result;
 
 } uds_download_progress_t;
@@ -79,7 +88,15 @@ typedef struct
     size_t block_data_capacity;
     size_t current_block_size;
     uint8_t block_sequence_counter;
+    uint8_t maximum_block_retries;
+    uint8_t current_block_retry;
+    uint8_t last_negative_response_code;
+    uint32_t acknowledged_blocks;
+    uint32_t retry_count;
+    uint64_t started_at_us;
+    uint64_t operation_timeout_us;
     bool action_pending;
+    bool retry_pending;
     esp_err_t last_result;
 
 } uds_download_t;

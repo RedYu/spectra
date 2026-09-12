@@ -5858,7 +5858,13 @@
                 downloadProgressText.textContent = data.download_active
                     ? `${data.download_transferred} / ${data.download_total} bytes · ` +
                       `block ${data.download_block_size || 0} · ` +
-                      `state ${data.download_state} · result ${data.download_result}`
+                      `${data.download_blocks || 0} acknowledged · ` +
+                      `${data.download_retries || 0} retries · ` +
+                      `state ${data.download_state} · ` +
+                      `result ${data.download_result}` +
+                      (data.download_nrc
+                          ? ` · NRC 0x${data.download_nrc.toString(16).toUpperCase()}`
+                          : '')
                     : 'No automatic download';
 
                 if (data.sequence === lastSequence)
@@ -5951,10 +5957,17 @@
 
         downloadStart.addEventListener('click', async () => {
             try {
+                const path =
+                    element('uds-download-path').value.trim();
                 const addressLength =
                     Number(element('uds-download-address-length').value);
                 const sizeLength =
                     Number(element('uds-download-size-length').value);
+
+                if (!/^\/firmwares\/[^/]+\.(bin|hex|srec|mot)$/.test(path))
+                    throw new Error(
+                        'Firmware must be a BIN, HEX, SREC, or MOT file in /firmwares.'
+                    );
 
                 if (!window.confirm(
                         'Program the selected SD-card file into the ECU?'
@@ -5965,7 +5978,7 @@
 
                 await command({
                     action : 'download_start',
-                    path : element('uds-download-path').value.trim(),
+                    path,
                     data_format : parseHexNumber(
                         element('uds-download-format'),
                         0xff,
