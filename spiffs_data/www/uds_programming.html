@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en" class="page-uds-programming">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="/favicon.ico">
+    <title>UDS Programming · Spectra</title>
+    <link rel="stylesheet" href="spectra.css?v=26">
+    <script src="spectra.js?v=26" defer></script>
+</head>
+
+<body class="page-uds-programming">
+    <header class="spectra-header">
+        <a class="spectra-brand" href="/">
+            <span aria-hidden="true">▧</span>
+            Spectra
+        </a>
+
+        <nav class="spectra-nav" aria-label="Main navigation">
+            <a href="/">Overview</a>
+            <a href="/can_logger">CAN Logger</a>
+            <a href="/can_analyzer">CAN Analyzer</a>
+            <a href="/isotp">ISO-TP</a>
+            <a href="/uds_programming" aria-current="page">Programming</a>
+            <a href="/files">Files</a>
+            <a href="/settings">Settings</a>
+            <a href="/can_test">Diagnostics</a>
+        </nav>
+
+        <span id="program-status" role="status">Loading</span>
+    </header>
+
+    <main class="program-page">
+        <div class="program-heading">
+            <div>
+                <h1>UDS Programming</h1>
+                <p>Program an ECU from a validated image stored in <code>/firmwares</code>.</p>
+            </div>
+
+            <a class="program-files-link" href="/files">Open file manager</a>
+        </div>
+
+        <div class="program-layout">
+            <section class="card program-setup">
+                <div class="program-section-title">
+                    <h2>Target and transport</h2>
+                    <span id="program-channel-state">Channel closed</span>
+                </div>
+
+                <fieldset id="program-transport-fields">
+                    <div class="program-form-grid">
+                        <label>
+                            CAN bus
+                            <select id="program-bus">
+                                <option value="0">Primary · TWAI</option>
+                                <option value="1">Secondary · MCP2518FD</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            Frame format
+                            <select id="program-format">
+                                <option value="classic">Classical CAN</option>
+                                <option value="fd">CAN FD</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            Request ID
+                            <input id="program-tx-id" value="7E0" spellcheck="false">
+                        </label>
+
+                        <label>
+                            Response ID
+                            <input id="program-rx-id" value="7E8" spellcheck="false">
+                        </label>
+
+                        <label>
+                            P2 timeout
+                            <span class="program-input-unit">
+                                <input id="program-p2" type="number" min="10" max="60000" value="1000">
+                                <span>ms</span>
+                            </span>
+                        </label>
+
+                        <label>
+                            P2* timeout
+                            <span class="program-input-unit">
+                                <input id="program-p2-star" type="number" min="10" max="60000" value="5000">
+                                <span>ms</span>
+                            </span>
+                        </label>
+
+                        <label>
+                            Flow-control block size
+                            <input id="program-block-size" type="number" min="0" max="255" value="0">
+                        </label>
+
+                        <label>
+                            Flow-control STmin
+                            <input id="program-st-min" type="number" min="0" max="255" value="0">
+                        </label>
+                    </div>
+
+                    <div class="program-options">
+                        <label><input id="program-extended" type="checkbox">29-bit identifiers</label>
+                        <label><input id="program-brs" type="checkbox" disabled>CAN FD bit-rate switch</label>
+                    </div>
+                </fieldset>
+
+                <div class="program-actions">
+                    <button id="program-apply" class="primary">Apply channel</button>
+                    <button id="program-close">Close channel</button>
+                </div>
+            </section>
+
+            <section class="card program-image">
+                <div class="program-section-title">
+                    <h2>Firmware image</h2>
+                    <button id="program-refresh-files" class="compact">Refresh</button>
+                </div>
+
+                <fieldset id="program-image-fields">
+                    <label>
+                        Image from /firmwares
+                        <select id="program-file">
+                            <option value="">Loading firmware files…</option>
+                        </select>
+                    </label>
+
+                    <div id="program-file-info" class="program-file-info">No image selected.</div>
+
+                    <div class="program-form-grid">
+                        <label>
+                            Memory address
+                            <input id="program-address" value="00000000" spellcheck="false">
+                        </label>
+
+                        <label>
+                            Data format identifier
+                            <input id="program-data-format" value="00" spellcheck="false">
+                        </label>
+
+                        <label>
+                            Address length
+                            <select id="program-address-length">
+                                <option value="1">1 byte</option>
+                                <option value="2">2 bytes</option>
+                                <option value="3">3 bytes</option>
+                                <option value="4" selected>4 bytes</option>
+                                <option value="5">5 bytes</option>
+                                <option value="6">6 bytes</option>
+                                <option value="7">7 bytes</option>
+                                <option value="8">8 bytes</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            Size length
+                            <select id="program-size-length">
+                                <option value="1">1 byte</option>
+                                <option value="2">2 bytes</option>
+                                <option value="3">3 bytes</option>
+                                <option value="4" selected>4 bytes</option>
+                                <option value="5">5 bytes</option>
+                                <option value="6">6 bytes</option>
+                                <option value="7">7 bytes</option>
+                                <option value="8">8 bytes</option>
+                            </select>
+                        </label>
+                    </div>
+                </fieldset>
+
+                <div class="program-warning">
+                    <strong>Keep the ECU powered and the CAN connection stable.</strong>
+                    Cancelling or interrupting power can leave the ECU unbootable.
+                </div>
+
+                <div class="program-actions">
+                    <button id="program-start" class="primary" disabled>Start programming</button>
+                    <button id="program-cancel" class="danger" disabled>Cancel</button>
+                </div>
+            </section>
+
+            <section class="card program-progress-card">
+                <div class="program-section-title">
+                    <h2>Programming progress</h2>
+                    <strong id="program-percent">0%</strong>
+                </div>
+
+                <progress id="program-progress" value="0" max="1"></progress>
+                <div id="program-stage" class="program-stage">Waiting for configuration.</div>
+
+                <dl class="program-metrics">
+                    <div><dt>Transferred</dt><dd id="program-transferred">0 B / 0 B</dd></div>
+                    <div><dt>Speed</dt><dd id="program-speed">—</dd></div>
+                    <div><dt>Remaining</dt><dd id="program-eta">—</dd></div>
+                    <div><dt>Elapsed</dt><dd id="program-elapsed">—</dd></div>
+                    <div><dt>Block size</dt><dd id="program-block">—</dd></div>
+                    <div><dt>Sequence counter</dt><dd id="program-sequence">—</dd></div>
+                    <div><dt>Acknowledged blocks</dt><dd id="program-blocks">0</dd></div>
+                    <div><dt>Retries</dt><dd id="program-retries">0</dd></div>
+                    <div><dt>Last NRC</dt><dd id="program-nrc">None</dd></div>
+                    <div><dt>Journal</dt><dd id="program-journal">—</dd></div>
+                </dl>
+
+                <div id="program-message" role="status">Select a firmware image and apply the channel.</div>
+            </section>
+        </div>
+    </main>
+</body>
+</html>

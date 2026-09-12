@@ -51,6 +51,7 @@ static FILE *s_download_file = NULL;
 static FILE *s_download_journal = NULL;
 static uint64_t s_download_file_offset = 0U;
 static uint64_t s_download_started_at_us = 0U;
+static uint64_t s_download_finished_at_us = 0U;
 static uint32_t s_download_logged_retries = 0U;
 static bool s_download_journal_finalized = false;
 static char s_download_journal_path[
@@ -1114,6 +1115,7 @@ static esp_err_t web_uds_download_open_journal(
 
     s_download_started_at_us =
         (uint64_t)esp_timer_get_time();
+    s_download_finished_at_us = 0U;
     s_download_logged_retries = 0U;
     s_download_journal_finalized = false;
 
@@ -1184,6 +1186,7 @@ static void web_uds_download_finalize_journal(
     s_download_journal_finalized = true;
     const uint64_t now_us =
         (uint64_t)esp_timer_get_time();
+    s_download_finished_at_us = now_us;
 
     (void)web_uds_download_write_journal(
         "event=finish time_us=%" PRIu64
@@ -1632,6 +1635,24 @@ static esp_err_t web_uds_get_handler(
             response,
             "download_block_retry",
             download_progress.current_block_retry
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_sequence_counter",
+            download_progress.block_sequence_counter
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_elapsed_ms",
+            (s_download_started_at_us != 0U)
+                ? (double)(
+                    ((s_download_finished_at_us != 0U
+                        ? s_download_finished_at_us
+                        : (uint64_t)esp_timer_get_time()) -
+                     s_download_started_at_us) /
+                    1000ULL
+                )
+                : 0.0
         ) != NULL) &&
         (cJSON_AddNumberToObject(
             response,

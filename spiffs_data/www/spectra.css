@@ -1850,6 +1850,354 @@ body:where(.page-test) {
         grid-template-columns: minmax(130px, 1fr) auto;
     }
 }
+
+/* ===== uds_programming.html ===== */
+:root:where(.page-uds-programming) {
+    color-scheme: dark;
+    --background: #0b0f14;
+    --surface: #121820;
+    --surface-hover: #171f29;
+    --input: #0d131a;
+    --border: #27313d;
+    --text: #f3f6f9;
+    --muted: #8f9ba8;
+    --accent: #3b82f6;
+    --success: #31c48d;
+    --danger: #ef6461;
+}
+
+:where(body.page-uds-programming),
+:where(body.page-uds-programming) * {
+    box-sizing: border-box;
+}
+
+body:where(.page-uds-programming) {
+    margin: 0;
+    background: var(--background);
+    color: var(--text);
+    font: 14px Inter, "Segoe UI", Arial, sans-serif;
+}
+
+:where(body.page-uds-programming) .program-page {
+    width: 100%;
+    padding: 24px;
+}
+
+:where(body.page-uds-programming) .program-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 20px;
+}
+
+:where(body.page-uds-programming) .program-heading h1 {
+    margin: 0 0 6px;
+    font-size: 24px;
+}
+
+:where(body.page-uds-programming) .program-heading p {
+    margin: 0;
+    color: var(--muted);
+}
+
+:where(body.page-uds-programming) .program-heading code {
+    color: #9cc1ff;
+}
+
+:where(body.page-uds-programming) .program-files-link {
+    padding: 9px 13px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    text-decoration: none;
+}
+
+:where(body.page-uds-programming) #program-status {
+    margin-left: auto;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+:where(body.page-uds-programming) #program-status.active {
+    border-color: #276554;
+    background: #13302a;
+    color: #73dfbb;
+}
+
+:where(body.page-uds-programming) #program-status.error {
+    border-color: #7f3639;
+    background: #32191c;
+    color: #ff9a98;
+}
+
+:where(body.page-uds-programming) .program-layout {
+    display: grid;
+    grid-template-columns: minmax(360px, .85fr) minmax(420px, 1.15fr);
+    gap: 16px;
+    align-items: start;
+}
+
+:where(body.page-uds-programming) .card {
+    min-width: 0;
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+}
+
+:where(body.page-uds-programming) .program-progress-card {
+    grid-column: 1 / -1;
+}
+
+:where(body.page-uds-programming) .program-section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+:where(body.page-uds-programming) .program-section-title h2 {
+    margin: 0;
+    font-size: 14px;
+}
+
+:where(body.page-uds-programming) .program-section-title span {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+:where(body.page-uds-programming) fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+:where(body.page-uds-programming) .program-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+:where(body.page-uds-programming) label {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+:where(body.page-uds-programming) input,
+:where(body.page-uds-programming) select {
+    width: 100%;
+    min-width: 0;
+    padding: 10px 11px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    outline: none;
+    background: var(--input);
+    color: var(--text);
+    font: inherit;
+}
+
+:where(body.page-uds-programming) input:focus,
+:where(body.page-uds-programming) select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgb(59 130 246 / 18%);
+}
+
+:where(body.page-uds-programming) .program-input-unit {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--input);
+}
+
+:where(body.page-uds-programming) .program-input-unit input {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+:where(body.page-uds-programming) .program-input-unit > span {
+    padding: 0 11px;
+    color: var(--muted);
+}
+
+:where(body.page-uds-programming) .program-options,
+:where(body.page-uds-programming) .program-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin-top: 16px;
+}
+
+:where(body.page-uds-programming) .program-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+:where(body.page-uds-programming) input[type="checkbox"] {
+    width: auto;
+    accent-color: var(--accent);
+}
+
+:where(body.page-uds-programming) button {
+    min-height: 40px;
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #18222e;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+}
+
+:where(body.page-uds-programming) button.compact {
+    min-height: 32px;
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+:where(body.page-uds-programming) button.primary {
+    border-color: var(--accent);
+    background: var(--accent);
+}
+
+:where(body.page-uds-programming) button.danger {
+    border-color: #7f3639;
+    background: #32191c;
+    color: #ff9a98;
+}
+
+:where(body.page-uds-programming) button:disabled,
+:where(body.page-uds-programming) fieldset:disabled {
+    cursor: not-allowed;
+    opacity: .48;
+}
+
+:where(body.page-uds-programming) .program-file-info {
+    min-height: 38px;
+    margin: 12px 0 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--input);
+    color: var(--muted);
+}
+
+:where(body.page-uds-programming) .program-warning {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border: 1px solid #795c26;
+    border-radius: 8px;
+    background: #2c2515;
+    color: #e9c875;
+    line-height: 1.5;
+}
+
+:where(body.page-uds-programming) .program-warning strong {
+    display: block;
+    color: #ffe3a0;
+}
+
+:where(body.page-uds-programming) progress {
+    width: 100%;
+    height: 18px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 999px;
+    accent-color: var(--accent);
+}
+
+:where(body.page-uds-programming) .program-stage {
+    margin: 12px 0 18px;
+    color: #9cc1ff;
+    font-weight: 600;
+}
+
+:where(body.page-uds-programming) .program-metrics {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 1px;
+    margin: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--border);
+}
+
+:where(body.page-uds-programming) .program-metrics div {
+    min-width: 0;
+    padding: 12px;
+    background: var(--input);
+}
+
+:where(body.page-uds-programming) .program-metrics dt {
+    margin-bottom: 6px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+:where(body.page-uds-programming) .program-metrics dd {
+    margin: 0;
+    overflow: hidden;
+    color: var(--text);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 12px "Cascadia Mono", Consolas, monospace;
+}
+
+:where(body.page-uds-programming) #program-journal {
+    color: #9cc1ff;
+}
+
+:where(body.page-uds-programming) #program-message {
+    margin-top: 16px;
+    color: var(--muted);
+    line-height: 1.5;
+}
+
+@media (max-width: 1050px) {
+    :where(body.page-uds-programming) .program-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    :where(body.page-uds-programming) .program-progress-card {
+        grid-column: auto;
+    }
+
+    :where(body.page-uds-programming) .program-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 560px) {
+    :where(body.page-uds-programming) .program-page {
+        padding: 16px;
+    }
+
+    :where(body.page-uds-programming) .program-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    :where(body.page-uds-programming) .program-form-grid,
+    :where(body.page-uds-programming) .program-metrics {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
 /* ===== can_logger.html ===== */
 :root:where(.page-logger) {
     color-scheme: dark;

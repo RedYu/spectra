@@ -5503,10 +5503,6 @@
         const response = element('uds-response-data');
         const summary = element('uds-response-summary');
         const brs = element('uds-brs');
-        const downloadStart = element('uds-download-start');
-        const downloadCancel = element('uds-download-cancel');
-        const downloadProgress = element('uds-download-progress');
-        const downloadProgressText = element('uds-download-progress-text');
         let lastSequence = -1;
 
         const stateNames = [
@@ -5850,26 +5846,6 @@
                     data.state === 2 ||
                     data.state === 3 ||
                     data.state === 4;
-                downloadStart.disabled =
-                    !data.open || data.download_active;
-                downloadCancel.disabled = !data.download_active;
-                downloadProgress.max = data.download_total || 1;
-                downloadProgress.value = data.download_transferred || 0;
-                downloadProgressText.textContent = data.download_active
-                    ? `${data.download_transferred} / ${data.download_total} bytes · ` +
-                      `block ${data.download_block_size || 0} · ` +
-                      `${data.download_blocks || 0} acknowledged · ` +
-                      `${data.download_retries || 0} retries · ` +
-                      `state ${data.download_state} · ` +
-                      `result ${data.download_result}` +
-                      (data.download_nrc
-                          ? ` · NRC 0x${data.download_nrc.toString(16).toUpperCase()}`
-                          : '') +
-                      (data.download_journal
-                          ? ` · ${data.download_journal}`
-                          : '')
-                    : 'No automatic download';
-
                 if (data.sequence === lastSequence)
                     return;
 
@@ -5952,59 +5928,6 @@
         element('uds-close').addEventListener('click', async () => {
             try {
                 await command({action : 'close'});
-                await refresh();
-            } catch (error) {
-                message.textContent = error.message;
-            }
-        });
-
-        downloadStart.addEventListener('click', async () => {
-            try {
-                const path =
-                    element('uds-download-path').value.trim();
-                const addressLength =
-                    Number(element('uds-download-address-length').value);
-                const sizeLength =
-                    Number(element('uds-download-size-length').value);
-
-                if (!/^\/firmwares\/[^/]+\.(bin|hex|srec|mot)$/.test(path))
-                    throw new Error(
-                        'Firmware must be a BIN, HEX, SREC, or MOT file in /firmwares.'
-                    );
-
-                if (!window.confirm(
-                        'Program the selected SD-card file into the ECU?'
-                    )) {
-
-                    return;
-                }
-
-                await command({
-                    action : 'download_start',
-                    path,
-                    data_format : parseHexNumber(
-                        element('uds-download-format'),
-                        0xff,
-                        'Data format identifier'
-                    ),
-                    address : parseHexIntegerText(
-                        element('uds-download-address'),
-                        addressLength,
-                        'Memory address',
-                        true
-                    ),
-                    address_length : addressLength,
-                    size_length : sizeLength
-                });
-                await refresh();
-            } catch (error) {
-                message.textContent = error.message;
-            }
-        });
-
-        downloadCancel.addEventListener('click', async () => {
-            try {
-                await command({action : 'download_cancel'});
                 await refresh();
             } catch (error) {
                 message.textContent = error.message;
@@ -6272,16 +6195,456 @@
         init_uds();
     }
 
+    function init_uds_programming() {
+        const element = id => document.getElementById(id);
+        const status = element('program-status');
+        const message = element('program-message');
+        const fileSelector = element('program-file');
+        const format = element('program-format');
+        const brs = element('program-brs');
+        const applyButton = element('program-apply');
+        const closeButton = element('program-close');
+        const startButton = element('program-start');
+        const cancelButton = element('program-cancel');
+        const transportFields = element('program-transport-fields');
+        const imageFields = element('program-image-fields');
+        let files = [];
+        let lastTransferred = 0;
+        let lastSampleTime = 0;
+        let measuredSpeed = 0;
+        let channelOpen = false;
+        let downloadReserved = false;
+
+        const clientStateNames = [
+            'Closed',
+            'Ready',
+            'Transmitting',
+            'Waiting for response',
+            'Response pending',
+            'Complete',
+            'Negative response',
+            'Error'
+        ];
+        const downloadStateNames = [
+            'Closed',
+            'Ready',
+            'Requesting download',
+            'Transferring firmware',
+            'Finalizing transfer',
+            'Programming completed',
+            'Programming cancelled',
+            'Programming failed'
+        ];
+        const nrcNames = {
+            0x21 : 'Busy repeat request',
+            0x22 : 'Conditions not correct',
+            0x24 : 'Request sequence error',
+            0x31 : 'Request out of range',
+            0x33 : 'Security access denied',
+            0x35 : 'Invalid key',
+            0x36 : 'Exceeded attempts',
+            0x37 : 'Required delay not expired',
+            0x70 : 'Upload/download not accepted',
+            0x71 : 'Transfer data suspended',
+            0x72 : 'General programming failure',
+            0x73 : 'Wrong block sequence counter',
+            0x78 : 'Response pending'
+        };
+
+        function formatBytes(value) {
+            const bytes = Number(value) || 0;
+
+            if (bytes >= 1024 * 1024)
+                return `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
+            if (bytes >= 1024)
+                return `${(bytes / 1024).toFixed(1)} KiB`;
+
+            return `${bytes} B`;
+        }
+
+        function formatDuration(milliseconds) {
+            if (!Number.isFinite(milliseconds) || milliseconds < 0)
+                return '—';
+
+            const seconds = Math.ceil(milliseconds / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const remainder = seconds % 60;
+
+            return minutes
+                ? `${minutes}m ${remainder}s`
+                : `${remainder}s`;
+        }
+
+        function parseIdentifier(input, extended) {
+            const text = input.value.trim();
+            const maximum = extended ? 0x1fffffff : 0x7ff;
+
+            if (!/^[0-9a-f]+$/i.test(text) || parseInt(text, 16) > maximum)
+                throw new Error(
+                    `CAN ID must fit the selected ${extended ? 29 : 11}-bit format.`
+                );
+
+            return parseInt(text, 16);
+        }
+
+        function parseHex(input, maximum, name) {
+            const text = input.value.trim();
+
+            if (!/^[0-9a-f]+$/i.test(text) || parseInt(text, 16) > maximum)
+                throw new Error(`${name} is not a valid hexadecimal value.`);
+
+            return parseInt(text, 16);
+        }
+
+        function parseAddress(input, byteLength) {
+            const text = input.value.trim();
+
+            if (!/^[0-9a-f]+$/i.test(text) ||
+                text.length > 16 ||
+                text.length > byteLength * 2) {
+
+                throw new Error(
+                    `Memory address does not fit the selected ${byteLength}-byte length.`
+                );
+            }
+
+            return text.toUpperCase();
+        }
+
+        async function command(body) {
+            const response = await fetch('/api/uds', {
+                method : 'POST',
+                headers : {'Content-Type' : 'application/json'},
+                body : JSON.stringify(body)
+            });
+            const result = await response.json();
+
+            if (!response.ok || !result.success)
+                throw new Error(result.message || `HTTP ${response.status}`);
+
+            return result;
+        }
+
+        function updateFileInfo() {
+            const selected = files.find(
+                entry => `/firmwares/${entry.name}` === fileSelector.value
+            );
+
+            element('program-file-info').textContent = selected
+                ? `${selected.name} · ${formatBytes(selected.size)}`
+                : 'No image selected.';
+            startButton.disabled =
+                !selected || !channelOpen || downloadReserved;
+        }
+
+        async function loadFiles() {
+            const previous = fileSelector.value;
+            fileSelector.disabled = true;
+
+            try {
+                const query = new URLSearchParams({
+                    volume : 'sd',
+                    path : '/firmwares',
+                    offset : '0',
+                    limit : '64'
+                });
+                const response = await fetch(
+                    `/api/files?${query.toString()}`,
+                    {cache : 'no-store'}
+                );
+                const result = await response.json();
+
+                if (!response.ok)
+                    throw new Error(result.message || `HTTP ${response.status}`);
+
+                files = (result.entries || [])
+                    .filter(entry =>
+                        entry.type !== 'directory' &&
+                        /\.(bin|hex|srec|mot)$/i.test(entry.name)
+                    )
+                    .sort((left, right) =>
+                        left.name.localeCompare(right.name)
+                    );
+
+                fileSelector.replaceChildren();
+
+                if (!files.length) {
+                    fileSelector.add(new Option('No firmware images found', ''));
+                } else {
+                    fileSelector.add(new Option('Select firmware image…', ''));
+
+                    for (const entry of files) {
+                        fileSelector.add(
+                            new Option(
+                                `${entry.name} · ${formatBytes(entry.size)}`,
+                                `/firmwares/${entry.name}`
+                            )
+                        );
+                    }
+
+                    if (files.some(entry =>
+                            `/firmwares/${entry.name}` === previous
+                        )) {
+
+                        fileSelector.value = previous;
+                    }
+                }
+
+                message.textContent = files.length
+                    ? `${files.length} firmware image${files.length === 1 ? '' : 's'} available.`
+                    : 'No supported files found in /firmwares.';
+            } catch (error) {
+                files = [];
+                fileSelector.replaceChildren(
+                    new Option('Firmware directory unavailable', '')
+                );
+                message.textContent = error.message;
+            } finally {
+                fileSelector.disabled = false;
+                updateFileInfo();
+            }
+        }
+
+        function updateProgress(data) {
+            const total = Number(data.download_total) || 0;
+            const transferred = Number(data.download_transferred) || 0;
+            const percent = total
+                ? Math.min(100, (transferred / total) * 100)
+                : 0;
+            const now = performance.now();
+
+            if (data.download_active &&
+                transferred >= lastTransferred &&
+                lastSampleTime > 0 &&
+                now > lastSampleTime &&
+                transferred !== lastTransferred) {
+
+                const sampleSpeed =
+                    (transferred - lastTransferred) * 1000 /
+                    (now - lastSampleTime);
+                measuredSpeed = measuredSpeed
+                    ? measuredSpeed * 0.7 + sampleSpeed * 0.3
+                    : sampleSpeed;
+            }
+
+            if (!data.download_active || transferred < lastTransferred)
+                measuredSpeed = 0;
+
+            lastTransferred = transferred;
+            lastSampleTime = now;
+
+            element('program-progress').max = total || 1;
+            element('program-progress').value = transferred;
+            element('program-percent').textContent = `${percent.toFixed(1)}%`;
+            element('program-stage').textContent =
+                downloadStateNames[data.download_state] || 'Unknown state';
+            element('program-transferred').textContent =
+                `${formatBytes(transferred)} / ${formatBytes(total)}`;
+            element('program-speed').textContent = measuredSpeed
+                ? `${formatBytes(measuredSpeed)}/s`
+                : '—';
+            element('program-eta').textContent =
+                measuredSpeed && transferred < total
+                    ? formatDuration((total - transferred) * 1000 / measuredSpeed)
+                    : '—';
+            element('program-elapsed').textContent =
+                formatDuration(Number(data.download_elapsed_ms));
+            element('program-block').textContent = data.download_block_size
+                ? `${data.download_block_size} bytes`
+                : '—';
+            element('program-sequence').textContent =
+                data.download_active
+                    ? `0x${Number(data.download_sequence_counter)
+                        .toString(16).padStart(2, '0').toUpperCase()}`
+                    : '—';
+            element('program-blocks').textContent = data.download_blocks || 0;
+            element('program-retries').textContent =
+                data.download_block_retry
+                    ? `${data.download_retries || 0} · current ${data.download_block_retry}`
+                    : data.download_retries || 0;
+            element('program-nrc').textContent = data.download_nrc
+                ? `0x${Number(data.download_nrc)
+                    .toString(16).padStart(2, '0').toUpperCase()} · ` +
+                  (nrcNames[data.download_nrc] || 'Unknown NRC')
+                : 'None';
+            element('program-journal').textContent =
+                data.download_journal || '—';
+        }
+
+        async function refresh() {
+            try {
+                const response = await fetch('/api/uds', {cache : 'no-store'});
+                const data = await response.json();
+
+                if (!response.ok)
+                    throw new Error(`HTTP ${response.status}`);
+
+                const active = data.download_active &&
+                    data.download_state >= 2 &&
+                    data.download_state <= 4;
+                const terminal = data.download_active &&
+                    data.download_state >= 5;
+                channelOpen = data.open;
+                downloadReserved = data.download_active;
+
+                status.textContent = active
+                    ? 'Programming'
+                    : terminal
+                        ? downloadStateNames[data.download_state]
+                        : clientStateNames[data.state] || 'Unknown';
+                status.classList.toggle('active', active);
+                status.classList.toggle(
+                    'error',
+                    data.download_state === 7 || data.state === 7
+                );
+                element('program-channel-state').textContent = data.open
+                    ? clientStateNames[data.state] || 'Channel open'
+                    : 'Channel closed';
+
+                transportFields.disabled = data.download_active;
+                imageFields.disabled = data.download_active;
+                applyButton.disabled = data.download_active;
+                startButton.disabled =
+                    data.download_active || !data.open || !fileSelector.value;
+                cancelButton.disabled = !active;
+                closeButton.disabled = active || !data.open;
+                element('program-refresh-files').disabled = data.download_active;
+                updateProgress(data);
+
+                if (data.download_state === 5)
+                    message.textContent = 'Programming completed successfully.';
+                else if (data.download_state === 6)
+                    message.textContent = 'Programming was cancelled.';
+                else if (data.download_state === 7)
+                    message.textContent =
+                        `Programming failed with result ${data.download_result}.`;
+            } catch (error) {
+                status.textContent = 'Unavailable';
+                status.classList.add('error');
+                startButton.disabled = true;
+                cancelButton.disabled = true;
+                message.textContent = error.message;
+            }
+        }
+
+        format.addEventListener('change', () => {
+            brs.disabled = format.value !== 'fd';
+        });
+        fileSelector.addEventListener('change', updateFileInfo);
+        element('program-refresh-files').addEventListener('click', loadFiles);
+
+        applyButton.addEventListener('click', async () => {
+            try {
+                const extended = element('program-extended').checked;
+                const fd = format.value === 'fd';
+
+                await command({
+                    action : 'configure',
+                    bus : Number(element('program-bus').value),
+                    tx_id : parseIdentifier(element('program-tx-id'), extended),
+                    rx_id : parseIdentifier(element('program-rx-id'), extended),
+                    extended,
+                    fd,
+                    brs : fd && brs.checked,
+                    link_data_length : fd ? 64 : 8,
+                    block_size : Number(element('program-block-size').value),
+                    st_min : Number(element('program-st-min').value),
+                    p2_ms : Number(element('program-p2').value),
+                    p2_star_ms : Number(element('program-p2-star').value)
+                });
+                message.textContent = 'UDS channel configured.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        closeButton.addEventListener('click', async () => {
+            try {
+                await command({action : 'close'});
+                message.textContent = 'UDS channel closed.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        startButton.addEventListener('click', async () => {
+            try {
+                const path = fileSelector.value;
+                const addressLength =
+                    Number(element('program-address-length').value);
+                const sizeLength =
+                    Number(element('program-size-length').value);
+
+                if (!path)
+                    throw new Error('Select a firmware image first.');
+
+                if (!window.confirm(
+                        `Program ${path} into the selected ECU? ` +
+                        'Do not disconnect power or CAN during this operation.'
+                    )) {
+
+                    return;
+                }
+
+                await command({
+                    action : 'download_start',
+                    path,
+                    data_format : parseHex(
+                        element('program-data-format'),
+                        0xff,
+                        'Data format identifier'
+                    ),
+                    address : parseAddress(
+                        element('program-address'),
+                        addressLength
+                    ),
+                    address_length : addressLength,
+                    size_length : sizeLength
+                });
+                message.textContent = 'Programming started.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        cancelButton.addEventListener('click', async () => {
+            if (!window.confirm('Cancel the active programming operation?'))
+                return;
+
+            try {
+                await command({action : 'download_cancel'});
+                message.textContent = 'Cancellation requested.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        loadFiles();
+        refresh();
+        setInterval(refresh, 300);
+    }
+
     function init_isotp_navigation() {
         for (const navigation of document.querySelectorAll('.spectra-nav')) {
-            if (navigation.querySelector('a[href="/isotp"]'))
-                continue;
-
-            const link = document.createElement('a');
-            link.href = '/isotp';
-            link.textContent = 'ISO-TP';
             const files = navigation.querySelector('a[href="/files"]');
-            navigation.insertBefore(link, files);
+
+            if (!navigation.querySelector('a[href="/isotp"]')) {
+                const link = document.createElement('a');
+                link.href = '/isotp';
+                link.textContent = 'ISO-TP';
+                navigation.insertBefore(link, files);
+            }
+
+            if (!navigation.querySelector('a[href="/uds_programming"]')) {
+                const programming = document.createElement('a');
+                programming.href = '/uds_programming';
+                programming.textContent = 'Programming';
+                navigation.insertBefore(programming, files);
+            }
         }
     }
 
@@ -6294,7 +6657,8 @@
         'page-test' : init_test,
         'page-logger' : init_logger,
         'page-analyzer' : init_analyzer,
-        'page-isotp' : init_diagnostics_transport
+        'page-isotp' : init_diagnostics_transport,
+        'page-uds-programming' : init_uds_programming
     };
 
     for (const [page, initialize] of Object.entries(pages)) {

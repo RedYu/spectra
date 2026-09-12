@@ -102,6 +102,15 @@ size, target address, data format, retry events, transferred bytes, block and
 retry counters, final NRC, result, duration, and the final outcome. The journal
 is flushed when opened and synchronized to the SD card before it is closed.
 
+The dedicated `/uds_programming` page separates automatic ECU programming
+from manual ISO-TP and UDS diagnostics. It lists supported images directly
+from `/firmwares`, configures the diagnostic CAN channel, locks mutable fields
+while an operation owns the channel, and displays the current stage, percent,
+throughput estimate, ETA, elapsed time, negotiated block size, sequence
+counter, acknowledged blocks, retries, last NRC, and journal path. Manual
+RequestDownload, TransferData, and RequestTransferExit controls remain on the
+ISO-TP diagnostics page for protocol testing.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
