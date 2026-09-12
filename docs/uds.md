@@ -33,6 +33,13 @@ WriteDataByIdentifier (`0x2E`) accepts one 16-bit DID and between 1 and 256
 data bytes. The client validates the payload before transmission and the web
 diagnostics page asks for confirmation before writing to the ECU.
 
+RoutineControl (`0x31`) supports StartRoutine (`0x01`), StopRoutine (`0x02`),
+and RequestRoutineResults (`0x03`). Requests contain a 16-bit routine identifier
+and an optional routine-control option record of up to 256 bytes. The web page
+asks for confirmation before starting or stopping a routine and supports the
+suppress-positive-response bit. Positive response `0x71` is decoded into its
+operation, routine identifier, and optional routine status record.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
@@ -43,8 +50,8 @@ payload memory.
 - physical addressing only through the selected ISO-TP channel;
 - no periodic Tester Present scheduler;
 - no security-access algorithm integration;
-- no typed DID value, routine, download, or transfer decoders yet;
+- no typed DID value, routine-result, download, or transfer decoders yet;
 - no authentication or role-based protection for destructive UDS requests.
 
-The next layer should add RoutineControl with explicit confirmation and request
-validation before adding download and transfer services.
+The next layer should add SecurityAccess through an application-provided key
+algorithm before adding download and transfer services.

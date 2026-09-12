@@ -449,3 +449,73 @@ TEST_CASE(
     TEST_ASSERT_FALSE(status.test_not_completed_this_operation_cycle);
     TEST_ASSERT_TRUE(status.warning_indicator_requested);
 }
+
+TEST_CASE(
+    "UDS request helper encodes Routine Control",
+    "[uds]"
+)
+{
+    const uint8_t option_record[] = {
+        0x12U,
+        0x34U,
+    };
+    uint8_t buffer[6] = {0};
+    size_t encoded_size = 0U;
+    const uint8_t expected[] = {
+        0x31U,
+        0x81U,
+        0xFFU,
+        0x00U,
+        0x12U,
+        0x34U,
+    };
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_routine_control(
+            UDS_ROUTINE_CONTROL_START,
+            0xFF00U,
+            option_record,
+            sizeof(option_record),
+            true,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(sizeof(expected), encoded_size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        expected,
+        buffer,
+        sizeof(expected)
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_request_encode_routine_control(
+            0x04U,
+            0xFF00U,
+            NULL,
+            0U,
+            false,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_routine_control(
+            UDS_ROUTINE_CONTROL_REQUEST_RESULTS,
+            0xFF00U,
+            NULL,
+            0U,
+            false,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(4U, encoded_size);
+    TEST_ASSERT_EQUAL_HEX8(0x31U, buffer[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x03U, buffer[1]);
+}

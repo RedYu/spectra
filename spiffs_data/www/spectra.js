@@ -5584,6 +5584,12 @@
                 element('uds-dtc-subfunction').value === '0A';
             element('uds-dtc-group-field').hidden =
                 selected !== 'clear_dtc';
+            element('uds-routine-type-field').hidden =
+                selected !== 'routine';
+            element('uds-routine-id-field').hidden =
+                selected !== 'routine';
+            element('uds-routine-data-field').hidden =
+                selected !== 'routine';
             element('uds-subfunction-field').hidden =
                 selected !== 'session' && selected !== 'reset';
             element('uds-raw-sid-field').hidden = selected !== 'raw';
@@ -5662,6 +5668,41 @@
             return active.length ? active.join(', ') : 'no status flags';
         }
 
+        function decodeRoutineResponse(payloadText) {
+            const bytes = payloadText
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .map(value => parseInt(value, 16));
+
+            if (bytes.length < 3)
+                return null;
+
+            const operationNames = {
+                0x01 : 'Start routine',
+                0x02 : 'Stop routine',
+                0x03 : 'Routine results'
+            };
+            const operation = bytes[0] & 0x7f;
+            const routineIdentifier =
+                (bytes[1] << 8) |
+                bytes[2];
+            const lines = [
+                `${operationNames[operation] || 'Routine operation'} · ` +
+                `ID 0x${routineIdentifier.toString(16).padStart(4, '0').toUpperCase()}`
+            ];
+
+            if (bytes.length > 3) {
+                lines.push(
+                    `Status record: ${bytes.slice(3)
+                        .map(value => value.toString(16).padStart(2, '0').toUpperCase())
+                        .join(' ')}`
+                );
+            }
+
+            return lines.join('\n');
+        }
+
         async function refresh() {
             try {
                 const reply = await fetch('/api/uds', {cache : 'no-store'});
@@ -5701,7 +5742,9 @@
                     const decoded =
                         data.response_sid === 0x59
                             ? decodeDtcResponse(data.payload || '')
-                            : null;
+                            : data.response_sid === 0x71
+                                ? decodeRoutineResponse(data.payload || '')
+                                : null;
 
                     response.textContent =
                         decoded ||
@@ -5825,6 +5868,44 @@
                             0xffffff,
                             'Group of DTC'
                         );
+                } else if (kind === 'routine') {
+                    request.value =
+                        parseHexNumber(
+                            element('uds-routine-type'),
+                            0x7f,
+                            'Routine operation'
+                        );
+                    request.routine_id =
+                        parseHexNumber(
+                            element('uds-routine-id'),
+                            0xffff,
+                            'Routine identifier'
+                        );
+                    request.data =
+                        normalizeHex(
+                            element('uds-routine-data').value,
+                            true
+                        );
+                    request.suppress = element('uds-suppress').checked;
+
+                    if (request.data &&
+                        request.data.split(' ').length > 256) {
+
+                        throw new Error(
+                            'Routine option record exceeds the 256-byte limit.'
+                        );
+                    }
+
+                    if (request.value !== 0x03) {
+                        const confirmed = window.confirm(
+                            request.value === 0x01
+                                ? 'Start the selected ECU routine?'
+                                : 'Stop the selected ECU routine?'
+                        );
+
+                        if (!confirmed)
+                            return;
+                    }
                 } else if (kind === 'session' || kind === 'reset') {
                     request.value =
                         parseHexNumber(element('uds-subfunction'), 0x7f, 'Sub-function');

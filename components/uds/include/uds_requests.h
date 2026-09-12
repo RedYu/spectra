@@ -34,6 +34,14 @@ typedef enum
 
 } uds_reset_type_t;
 
+typedef enum
+{
+    UDS_ROUTINE_CONTROL_START = 0x01,
+    UDS_ROUTINE_CONTROL_STOP = 0x02,
+    UDS_ROUTINE_CONTROL_REQUEST_RESULTS = 0x03,
+
+} uds_routine_control_type_t;
+
 esp_err_t uds_request_encode_diagnostic_session_control(
     uint8_t session_type,
     bool suppress_positive_response,
@@ -84,6 +92,17 @@ esp_err_t uds_request_encode_read_dtc_information(
 
 esp_err_t uds_request_encode_clear_diagnostic_information(
     uint32_t group_of_dtc,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_routine_control(
+    uint8_t control_type,
+    uint16_t routine_identifier,
+    const uint8_t *option_record,
+    size_t option_record_length,
+    bool suppress_positive_response,
     uint8_t *buffer,
     size_t capacity,
     size_t *encoded_size

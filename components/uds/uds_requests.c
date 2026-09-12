@@ -238,3 +238,51 @@ esp_err_t uds_request_encode_clear_diagnostic_information(
         encoded_size
     );
 }
+
+esp_err_t uds_request_encode_routine_control(
+    uint8_t control_type,
+    uint16_t routine_identifier,
+    const uint8_t *option_record,
+    size_t option_record_length,
+    bool suppress_positive_response,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((control_type < UDS_ROUTINE_CONTROL_START) ||
+        (control_type > UDS_ROUTINE_CONTROL_REQUEST_RESULTS) ||
+        ((option_record == NULL) && (option_record_length != 0U)) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL) ||
+        (option_record_length > (SIZE_MAX - 4U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size = 4U + option_record_length;
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_ROUTINE_CONTROL;
+    buffer[1] =
+        control_type |
+        (suppress_positive_response
+            ? UDS_SUPPRESS_POSITIVE_RESPONSE
+            : 0U);
+    buffer[2] = (uint8_t)(routine_identifier >> 8U);
+    buffer[3] = (uint8_t)routine_identifier;
+
+    if (option_record_length != 0U) {
+        memcpy(
+            &buffer[4],
+            option_record,
+            option_record_length
+        );
+    }
+
+    *encoded_size = required_size;
+    return ESP_OK;
+}

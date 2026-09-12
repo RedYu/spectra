@@ -537,6 +537,51 @@ static esp_err_t web_uds_request(
         );
     }
 
+    if (strcmp(kind->valuestring, "routine") == 0) {
+        const cJSON *data =
+            cJSON_GetObjectItemCaseSensitive(root, "data");
+        uint32_t routine_identifier = 0U;
+
+        if (!web_uds_number(root, "value", 0x7FU, &value) ||
+            !web_uds_number(
+                root,
+                "routine_id",
+                UINT16_MAX,
+                &routine_identifier
+            ) ||
+            !web_uds_boolean(root, "suppress", false, &suppress) ||
+            !cJSON_IsString(data)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        uint8_t option_record[
+            UDS_CLIENT_ROUTINE_OPTION_MAX_LENGTH
+        ];
+        size_t option_record_length = 0U;
+        const esp_err_t parse_result =
+            web_uds_parse_hex(
+                data->valuestring,
+                option_record,
+                sizeof(option_record),
+                &option_record_length
+            );
+
+        if (parse_result != ESP_OK) {
+            return parse_result;
+        }
+
+        return uds_client_routine_control(
+            &s_client,
+            (uint8_t)value,
+            (uint16_t)routine_identifier,
+            option_record,
+            option_record_length,
+            suppress,
+            now_us
+        );
+    }
+
     if (strcmp(kind->valuestring, "session") == 0) {
         if (!web_uds_number(root, "value", 0x7FU, &value) ||
             !web_uds_boolean(root, "suppress", false, &suppress)) {

@@ -417,6 +417,54 @@ esp_err_t uds_client_clear_diagnostic_information(
     );
 }
 
+esp_err_t uds_client_routine_control(
+    uds_client_t *client,
+    uint8_t control_type,
+    uint16_t routine_identifier,
+    const uint8_t *option_record,
+    size_t option_record_length,
+    bool suppress_positive_response,
+    uint64_t now_us
+)
+{
+    if ((option_record_length >
+         UDS_CLIENT_ROUTINE_OPTION_MAX_LENGTH) ||
+        ((option_record == NULL) &&
+         (option_record_length != 0U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t request_size = 0U;
+    uint8_t request[
+        4U + UDS_CLIENT_ROUTINE_OPTION_MAX_LENGTH
+    ];
+    const esp_err_t result =
+        uds_request_encode_routine_control(
+            control_type,
+            routine_identifier,
+            option_record,
+            option_record_length,
+            suppress_positive_response,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_start_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        !suppress_positive_response,
+        now_us
+    );
+}
+
 bool uds_client_busy(
     const uds_client_t *client
 )

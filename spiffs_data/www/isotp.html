@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=21">
-    <script src="spectra.js?v=21" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=22">
+    <script src="spectra.js?v=22" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -271,6 +271,7 @@
                             <option value="write_did">Write Data By Identifier</option>
                             <option value="read_dtc">Read DTC Information</option>
                             <option value="clear_dtc">Clear Diagnostic Information</option>
+                            <option value="routine">Routine Control</option>
                             <option value="session">Diagnostic Session Control</option>
                             <option value="tester_present">Tester Present</option>
                             <option value="reset">ECU Reset</option>
@@ -312,6 +313,20 @@
                         <input id="uds-dtc-group" value="FFFFFF" spellcheck="false">
                     </label>
 
+                    <label id="uds-routine-type-field" hidden>
+                        Routine operation
+                        <select id="uds-routine-type">
+                            <option value="01">Start routine</option>
+                            <option value="02">Stop routine</option>
+                            <option value="03">Request routine results</option>
+                        </select>
+                    </label>
+
+                    <label id="uds-routine-id-field" hidden>
+                        Routine identifier
+                        <input id="uds-routine-id" value="FF00" spellcheck="false">
+                    </label>
+
                     <label id="uds-raw-sid-field" hidden>
                         Service ID
                         <input id="uds-raw-sid" value="22" spellcheck="false">
@@ -321,6 +336,11 @@
                 <label id="uds-raw-data-field" hidden>
                     Parameters (HEX bytes)
                     <textarea id="uds-raw-data" rows="4" spellcheck="false">F1 90</textarea>
+                </label>
+
+                <label id="uds-routine-data-field" hidden>
+                    Routine option record (HEX bytes)
+                    <textarea id="uds-routine-data" rows="4" spellcheck="false"></textarea>
                 </label>
 
                 <div class="isotp-options">
