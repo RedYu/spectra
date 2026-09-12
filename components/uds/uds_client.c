@@ -465,6 +465,86 @@ esp_err_t uds_client_routine_control(
     );
 }
 
+esp_err_t uds_client_security_access_request_seed(
+    uds_client_t *client,
+    uint8_t security_level,
+    const uint8_t *data_record,
+    size_t data_record_length,
+    uint64_t now_us
+)
+{
+    if (data_record_length >
+        UDS_CLIENT_SECURITY_DATA_MAX_LENGTH) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t request[
+        2U + UDS_CLIENT_SECURITY_DATA_MAX_LENGTH
+    ];
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_security_access_request_seed(
+            security_level,
+            data_record,
+            data_record_length,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        now_us
+    );
+}
+
+esp_err_t uds_client_security_access_send_key(
+    uds_client_t *client,
+    uint8_t security_level,
+    const uint8_t *key,
+    size_t key_length,
+    uint64_t now_us
+)
+{
+    if (key_length > UDS_CLIENT_SECURITY_DATA_MAX_LENGTH) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t request[
+        2U + UDS_CLIENT_SECURITY_DATA_MAX_LENGTH
+    ];
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_security_access_send_key(
+            security_level,
+            key,
+            key_length,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        now_us
+    );
+}
+
 bool uds_client_busy(
     const uds_client_t *client
 )

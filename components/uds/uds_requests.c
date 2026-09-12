@@ -286,3 +286,89 @@ esp_err_t uds_request_encode_routine_control(
     *encoded_size = required_size;
     return ESP_OK;
 }
+
+static bool uds_request_security_level_valid(
+    uint8_t security_level
+)
+{
+    return (security_level >= UDS_SECURITY_ACCESS_LEVEL_MIN) &&
+           (security_level <= UDS_SECURITY_ACCESS_LEVEL_MAX) &&
+           ((security_level & 1U) != 0U);
+}
+
+esp_err_t uds_request_encode_security_access_request_seed(
+    uint8_t security_level,
+    const uint8_t *data_record,
+    size_t data_record_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (!uds_request_security_level_valid(security_level) ||
+        ((data_record == NULL) && (data_record_length != 0U)) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL) ||
+        (data_record_length > (SIZE_MAX - 2U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size = 2U + data_record_length;
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_SECURITY_ACCESS;
+    buffer[1] = security_level;
+
+    if (data_record_length != 0U) {
+        memcpy(
+            &buffer[2],
+            data_record,
+            data_record_length
+        );
+    }
+
+    *encoded_size = required_size;
+    return ESP_OK;
+}
+
+esp_err_t uds_request_encode_security_access_send_key(
+    uint8_t security_level,
+    const uint8_t *key,
+    size_t key_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (!uds_request_security_level_valid(security_level) ||
+        (key == NULL) ||
+        (key_length == 0U) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL) ||
+        (key_length > (SIZE_MAX - 2U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size = 2U + key_length;
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_SECURITY_ACCESS;
+    buffer[1] = security_level + 1U;
+
+    memcpy(
+        &buffer[2],
+        key,
+        key_length
+    );
+
+    *encoded_size = required_size;
+    return ESP_OK;
+}

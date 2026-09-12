@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=22">
-    <script src="spectra.js?v=22" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=23">
+    <script src="spectra.js?v=23" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -272,6 +272,8 @@
                             <option value="read_dtc">Read DTC Information</option>
                             <option value="clear_dtc">Clear Diagnostic Information</option>
                             <option value="routine">Routine Control</option>
+                            <option value="security_seed">Security Access · Request Seed</option>
+                            <option value="security_key">Security Access · Send Key</option>
                             <option value="session">Diagnostic Session Control</option>
                             <option value="tester_present">Tester Present</option>
                             <option value="reset">ECU Reset</option>
@@ -327,6 +329,11 @@
                         <input id="uds-routine-id" value="FF00" spellcheck="false">
                     </label>
 
+                    <label id="uds-security-level-field" hidden>
+                        Security level
+                        <input id="uds-security-level" value="01" spellcheck="false">
+                    </label>
+
                     <label id="uds-raw-sid-field" hidden>
                         Service ID
                         <input id="uds-raw-sid" value="22" spellcheck="false">
@@ -341,6 +348,11 @@
                 <label id="uds-routine-data-field" hidden>
                     Routine option record (HEX bytes)
                     <textarea id="uds-routine-data" rows="4" spellcheck="false"></textarea>
+                </label>
+
+                <label id="uds-security-data-field" hidden>
+                    <span id="uds-security-data-label">Data record (HEX bytes)</span>
+                    <textarea id="uds-security-data" rows="4" spellcheck="false"></textarea>
                 </label>
 
                 <div class="isotp-options">

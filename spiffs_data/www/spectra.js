@@ -5590,6 +5590,15 @@
                 selected !== 'routine';
             element('uds-routine-data-field').hidden =
                 selected !== 'routine';
+            const security =
+                selected === 'security_seed' ||
+                selected === 'security_key';
+            element('uds-security-level-field').hidden = !security;
+            element('uds-security-data-field').hidden = !security;
+            element('uds-security-data-label').textContent =
+                selected === 'security_key'
+                    ? 'Calculated key (HEX bytes)'
+                    : 'Seed request data record (HEX bytes, optional)';
             element('uds-subfunction-field').hidden =
                 selected !== 'session' && selected !== 'reset';
             element('uds-raw-sid-field').hidden = selected !== 'raw';
@@ -5598,6 +5607,7 @@
                 selected === 'read_did' ||
                 selected === 'write_did' ||
                 selected === 'read_dtc' ||
+                security ||
                 selected === 'raw';
         }
 
@@ -5703,6 +5713,40 @@
             return lines.join('\n');
         }
 
+        function decodeSecurityAccessResponse(payloadText) {
+            const bytes = payloadText
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .map(value => parseInt(value, 16));
+
+            if (!bytes.length)
+                return null;
+
+            const subfunction = bytes[0];
+            const level =
+                (subfunction & 1) !== 0
+                    ? subfunction
+                    : subfunction - 1;
+            const lines = [
+                `Security level 0x${level.toString(16).padStart(2, '0').toUpperCase()}`
+            ];
+
+            if ((subfunction & 1) !== 0) {
+                lines.push(
+                    bytes.length > 1
+                        ? `Seed: ${bytes.slice(1)
+                            .map(value => value.toString(16).padStart(2, '0').toUpperCase())
+                            .join(' ')}`
+                        : 'Seed: empty (security level already unlocked)'
+                );
+            } else {
+                lines.push('Key accepted by ECU.');
+            }
+
+            return lines.join('\n');
+        }
+
         async function refresh() {
             try {
                 const reply = await fetch('/api/uds', {cache : 'no-store'});
@@ -5744,7 +5788,9 @@
                             ? decodeDtcResponse(data.payload || '')
                             : data.response_sid === 0x71
                                 ? decodeRoutineResponse(data.payload || '')
-                                : null;
+                                : data.response_sid === 0x67
+                                    ? decodeSecurityAccessResponse(data.payload || '')
+                                    : null;
 
                     response.textContent =
                         decoded ||
@@ -5905,6 +5951,50 @@
 
                         if (!confirmed)
                             return;
+                    }
+                } else if (kind === 'security_seed' ||
+                           kind === 'security_key') {
+
+                    request.value =
+                        parseHexNumber(
+                            element('uds-security-level'),
+                            0x7d,
+                            'Security level'
+                        );
+
+                    if ((request.value & 1) === 0 ||
+                        request.value === 0) {
+
+                        throw new Error(
+                            'Security level must be an odd value from 01 to 7D.'
+                        );
+                    }
+
+                    request.data =
+                        normalizeHex(
+                            element('uds-security-data').value,
+                            kind === 'security_seed'
+                        );
+
+                    if (request.data === null)
+                        throw new Error(
+                            'Send Key requires at least one key byte.'
+                        );
+
+                    if (request.data &&
+                        request.data.split(' ').length > 256) {
+
+                        throw new Error(
+                            'Security Access data exceeds the 256-byte limit.'
+                        );
+                    }
+
+                    if (kind === 'security_key' &&
+                        !window.confirm(
+                            'Send this calculated security key to the selected ECU?'
+                        )) {
+
+                        return;
                     }
                 } else if (kind === 'session' || kind === 'reset') {
                     request.value =

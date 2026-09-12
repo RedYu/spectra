@@ -42,6 +42,9 @@ typedef enum
 
 } uds_routine_control_type_t;
 
+#define UDS_SECURITY_ACCESS_LEVEL_MIN  (0x01U)
+#define UDS_SECURITY_ACCESS_LEVEL_MAX  (0x7DU)
+
 esp_err_t uds_request_encode_diagnostic_session_control(
     uint8_t session_type,
     bool suppress_positive_response,
@@ -103,6 +106,24 @@ esp_err_t uds_request_encode_routine_control(
     const uint8_t *option_record,
     size_t option_record_length,
     bool suppress_positive_response,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_security_access_request_seed(
+    uint8_t security_level,
+    const uint8_t *data_record,
+    size_t data_record_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_security_access_send_key(
+    uint8_t security_level,
+    const uint8_t *key,
+    size_t key_length,
     uint8_t *buffer,
     size_t capacity,
     size_t *encoded_size

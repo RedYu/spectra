@@ -40,6 +40,15 @@ asks for confirmation before starting or stopping a routine and supports the
 suppress-positive-response bit. Positive response `0x71` is decoded into its
 operation, routine identifier, and optional routine status record.
 
+SecurityAccess (`0x27`) supports requesting a seed for odd security levels from
+`0x01` through `0x7D` and sending the corresponding key with the following even
+subfunction. Both seed-request records and keys are limited to 256 bytes. The
+protocol deliberately does not contain an OEM seed-to-key algorithm: application
+code receives the positive `0x67` response through the existing UDS client event
+callback, calculates the key, and submits it with
+`uds_client_security_access_send_key()`. The web page provides equivalent manual
+Request Seed and Send Key operations and decodes the `0x67` response.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
@@ -49,9 +58,9 @@ payload memory.
 - one outstanding request per client;
 - physical addressing only through the selected ISO-TP channel;
 - no periodic Tester Present scheduler;
-- no security-access algorithm integration;
+- no built-in OEM security-access algorithms;
 - no typed DID value, routine-result, download, or transfer decoders yet;
 - no authentication or role-based protection for destructive UDS requests.
 
-The next layer should add SecurityAccess through an application-provided key
-algorithm before adding download and transfer services.
+The next layer should add an optional asynchronous seed-to-key adapter before
+adding download and transfer services.

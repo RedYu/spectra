@@ -582,6 +582,60 @@ static esp_err_t web_uds_request(
         );
     }
 
+    if ((strcmp(kind->valuestring, "security_seed") == 0) ||
+        (strcmp(kind->valuestring, "security_key") == 0)) {
+
+        const bool send_key =
+            strcmp(kind->valuestring, "security_key") == 0;
+        const cJSON *data =
+            cJSON_GetObjectItemCaseSensitive(root, "data");
+
+        if (!web_uds_number(
+                root,
+                "value",
+                UDS_SECURITY_ACCESS_LEVEL_MAX,
+                &value
+            ) ||
+            !cJSON_IsString(data)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        uint8_t security_data[
+            UDS_CLIENT_SECURITY_DATA_MAX_LENGTH
+        ];
+        size_t security_data_length = 0U;
+        const esp_err_t parse_result =
+            web_uds_parse_hex(
+                data->valuestring,
+                security_data,
+                sizeof(security_data),
+                &security_data_length
+            );
+
+        if (parse_result != ESP_OK) {
+            return parse_result;
+        }
+
+        if (send_key) {
+            return uds_client_security_access_send_key(
+                &s_client,
+                (uint8_t)value,
+                security_data,
+                security_data_length,
+                now_us
+            );
+        }
+
+        return uds_client_security_access_request_seed(
+            &s_client,
+            (uint8_t)value,
+            security_data,
+            security_data_length,
+            now_us
+        );
+    }
+
     if (strcmp(kind->valuestring, "session") == 0) {
         if (!web_uds_number(root, "value", 0x7FU, &value) ||
             !web_uds_boolean(root, "suppress", false, &suppress)) {

@@ -519,3 +519,97 @@ TEST_CASE(
     TEST_ASSERT_EQUAL_HEX8(0x31U, buffer[0]);
     TEST_ASSERT_EQUAL_HEX8(0x03U, buffer[1]);
 }
+
+TEST_CASE(
+    "UDS request helpers encode Security Access",
+    "[uds]"
+)
+{
+    const uint8_t key[] = {
+        0x12U,
+        0x34U,
+        0x56U,
+        0x78U,
+    };
+    uint8_t buffer[6] = {0};
+    size_t encoded_size = 0U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_security_access_request_seed(
+            0x01U,
+            NULL,
+            0U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(2U, encoded_size);
+    TEST_ASSERT_EQUAL_HEX8(0x27U, buffer[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x01U, buffer[1]);
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_security_access_send_key(
+            0x01U,
+            key,
+            sizeof(key),
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(6U, encoded_size);
+    TEST_ASSERT_EQUAL_HEX8(0x27U, buffer[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x02U, buffer[1]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        key,
+        &buffer[2],
+        sizeof(key)
+    );
+}
+
+TEST_CASE(
+    "UDS Security Access rejects invalid levels and empty keys",
+    "[uds]"
+)
+{
+    const uint8_t key = 0x12U;
+    uint8_t buffer[3] = {0};
+    size_t encoded_size = 0U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_request_encode_security_access_request_seed(
+            0x02U,
+            NULL,
+            0U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_request_encode_security_access_request_seed(
+            0x7FU,
+            NULL,
+            0U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_request_encode_security_access_send_key(
+            0x01U,
+            &key,
+            0U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+}

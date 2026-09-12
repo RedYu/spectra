@@ -23,6 +23,7 @@ extern "C" {
 #define UDS_CLIENT_DEFAULT_P2_STAR_TIMEOUT_US  (5000000ULL)
 #define UDS_CLIENT_WRITE_DATA_MAX_LENGTH       (256U)
 #define UDS_CLIENT_ROUTINE_OPTION_MAX_LENGTH   (256U)
+#define UDS_CLIENT_SECURITY_DATA_MAX_LENGTH    (256U)
 
 typedef enum
 {
@@ -157,6 +158,22 @@ esp_err_t uds_client_routine_control(
     const uint8_t *option_record,
     size_t option_record_length,
     bool suppress_positive_response,
+    uint64_t now_us
+);
+
+esp_err_t uds_client_security_access_request_seed(
+    uds_client_t *client,
+    uint8_t security_level,
+    const uint8_t *data_record,
+    size_t data_record_length,
+    uint64_t now_us
+);
+
+esp_err_t uds_client_security_access_send_key(
+    uds_client_t *client,
+    uint8_t security_level,
+    const uint8_t *key,
+    size_t key_length,
     uint64_t now_us
 );
 
