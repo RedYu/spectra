@@ -166,3 +166,92 @@ const char *uds_protocol_negative_response_name(
             return "Unknown negative response";
     }
 }
+
+esp_err_t uds_protocol_decode_dtc_response(
+    const uds_response_t *response,
+    uds_dtc_response_t *dtc_response
+)
+{
+    if ((response == NULL) ||
+        (dtc_response == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        dtc_response,
+        0,
+        sizeof(*dtc_response)
+    );
+
+    if (!response->positive ||
+        (response->request_service_id !=
+         UDS_SERVICE_READ_DTC_INFORMATION) ||
+        (response->payload == NULL) ||
+        (response->payload_length < 2U)) {
+
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    dtc_response->subfunction = response->payload[0];
+    dtc_response->status_availability_mask =
+        response->payload[1];
+
+    switch (dtc_response->subfunction) {
+        case UDS_READ_DTC_REPORT_NUMBER_BY_STATUS_MASK:
+            if (response->payload_length != 5U) {
+                return ESP_ERR_INVALID_RESPONSE;
+            }
+
+            dtc_response->format_identifier =
+                response->payload[2];
+            dtc_response->reported_count =
+                ((uint16_t)response->payload[3] << 8U) |
+                response->payload[4];
+            return ESP_OK;
+
+        case UDS_READ_DTC_REPORT_BY_STATUS_MASK:
+        case UDS_READ_DTC_REPORT_SUPPORTED:
+            if (((response->payload_length - 2U) % 4U) != 0U) {
+                return ESP_ERR_INVALID_RESPONSE;
+            }
+
+            dtc_response->record_data = &response->payload[2];
+            dtc_response->record_count =
+                (response->payload_length - 2U) / 4U;
+            return ESP_OK;
+
+        default:
+            return ESP_ERR_NOT_SUPPORTED;
+    }
+}
+
+esp_err_t uds_protocol_get_dtc_record(
+    const uds_dtc_response_t *response,
+    size_t index,
+    uds_dtc_record_t *record
+)
+{
+    if ((response == NULL) ||
+        (record == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((response->record_data == NULL) ||
+        (index >= response->record_count)) {
+
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    const uint8_t *data =
+        &response->record_data[index * 4U];
+
+    record->code =
+        ((uint32_t)data[0] << 16U) |
+        ((uint32_t)data[1] << 8U) |
+        data[2];
+    record->status = data[3];
+
+    return ESP_OK;
+}

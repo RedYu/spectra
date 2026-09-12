@@ -22,6 +22,14 @@ extern "C" {
 
 typedef enum
 {
+    UDS_READ_DTC_REPORT_NUMBER_BY_STATUS_MASK = 0x01,
+    UDS_READ_DTC_REPORT_BY_STATUS_MASK = 0x02,
+    UDS_READ_DTC_REPORT_SUPPORTED = 0x0A,
+
+} uds_read_dtc_subfunction_t;
+
+typedef enum
+{
     UDS_SERVICE_DIAGNOSTIC_SESSION_CONTROL = 0x10,
     UDS_SERVICE_ECU_RESET = 0x11,
     UDS_SERVICE_CLEAR_DIAGNOSTIC_INFORMATION = 0x14,
@@ -89,6 +97,24 @@ typedef struct
 
 } uds_response_t;
 
+typedef struct
+{
+    uint32_t code;
+    uint8_t status;
+
+} uds_dtc_record_t;
+
+typedef struct
+{
+    uint8_t subfunction;
+    uint8_t status_availability_mask;
+    uint8_t format_identifier;
+    uint16_t reported_count;
+    const uint8_t *record_data;
+    size_t record_count;
+
+} uds_dtc_response_t;
+
 esp_err_t uds_protocol_encode_request(
     uint8_t service_id,
     const uint8_t *parameters,
@@ -107,6 +133,17 @@ esp_err_t uds_protocol_decode_response(
 
 const char *uds_protocol_negative_response_name(
     uint8_t negative_response_code
+);
+
+esp_err_t uds_protocol_decode_dtc_response(
+    const uds_response_t *response,
+    uds_dtc_response_t *dtc_response
+);
+
+esp_err_t uds_protocol_get_dtc_record(
+    const uds_dtc_response_t *response,
+    size_t index,
+    uds_dtc_record_t *record
 );
 
 #ifdef __cplusplus

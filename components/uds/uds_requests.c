@@ -137,3 +137,37 @@ esp_err_t uds_request_encode_read_data_by_identifier(
     *encoded_size = required_size;
     return ESP_OK;
 }
+
+esp_err_t uds_request_encode_read_dtc_information(
+    uint8_t subfunction,
+    uint8_t status_mask,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    uint8_t parameters[2] = {
+        subfunction,
+        status_mask,
+    };
+    size_t parameter_length = sizeof(parameters);
+
+    if (subfunction == UDS_READ_DTC_REPORT_SUPPORTED) {
+        parameter_length = 1U;
+    } else if ((subfunction !=
+                UDS_READ_DTC_REPORT_NUMBER_BY_STATUS_MASK) &&
+               (subfunction !=
+                UDS_READ_DTC_REPORT_BY_STATUS_MASK)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return uds_protocol_encode_request(
+        UDS_SERVICE_READ_DTC_INFORMATION,
+        parameters,
+        parameter_length,
+        buffer,
+        capacity,
+        encoded_size
+    );
+}

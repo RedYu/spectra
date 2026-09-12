@@ -18,6 +18,12 @@ existing `isotp_service` channel and provides:
 - positive, negative, timeout, protocol-error, and transport-error events;
 - human-readable names for commonly used negative response codes.
 
+The ReadDTCInformation implementation supports reporting the DTC count by
+status mask (`0x19 0x01`), reporting DTC records by status mask (`0x19 0x02`),
+and reporting supported DTCs (`0x19 0x0A`). Positive responses expose the
+status-availability mask, DTC format identifier, 24-bit DTC values, and status
+bytes through allocation-free views of the ISO-TP response buffer.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.

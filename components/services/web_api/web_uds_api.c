@@ -460,6 +460,28 @@ static esp_err_t web_uds_request(
         );
     }
 
+    if (strcmp(kind->valuestring, "read_dtc") == 0) {
+        uint32_t status_mask = 0U;
+
+        if (!web_uds_number(root, "value", 0xFFU, &value) ||
+            !web_uds_number(
+                root,
+                "status_mask",
+                0xFFU,
+                &status_mask
+            )) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        return uds_client_read_dtc_information(
+            &s_client,
+            (uint8_t)value,
+            (uint8_t)status_mask,
+            now_us
+        );
+    }
+
     if (strcmp(kind->valuestring, "session") == 0) {
         if (!web_uds_number(root, "value", 0x7FU, &value) ||
             !web_uds_boolean(root, "suppress", false, &suppress)) {

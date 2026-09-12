@@ -5573,11 +5573,67 @@
         function updateService() {
             const selected = service.value;
             element('uds-did-field').hidden = selected !== 'read_did';
+            element('uds-dtc-subfunction-field').hidden =
+                selected !== 'read_dtc';
+            element('uds-dtc-mask-field').hidden =
+                selected !== 'read_dtc' ||
+                element('uds-dtc-subfunction').value === '0A';
             element('uds-subfunction-field').hidden =
                 selected !== 'session' && selected !== 'reset';
             element('uds-raw-sid-field').hidden = selected !== 'raw';
             element('uds-raw-data-field').hidden = selected !== 'raw';
-            element('uds-suppress').disabled = selected === 'read_did' || selected === 'raw';
+            element('uds-suppress').disabled =
+                selected === 'read_did' ||
+                selected === 'read_dtc' ||
+                selected === 'raw';
+        }
+
+        function decodeDtcResponse(payloadText) {
+            const bytes = payloadText
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .map(value => parseInt(value, 16));
+
+            if (bytes.length < 2)
+                return null;
+
+            const subfunction = bytes[0];
+            const availability = bytes[1];
+            const hex = (value, width) =>
+                value.toString(16).toUpperCase().padStart(width, '0');
+
+            if (subfunction === 0x01 && bytes.length === 5) {
+                const count = (bytes[3] << 8) | bytes[4];
+
+                return `DTC count: ${count}\n` +
+                    `Status availability: 0x${hex(availability, 2)}\n` +
+                    `DTC format: 0x${hex(bytes[2], 2)}\n\n` +
+                    `Raw: ${payloadText}`;
+            }
+
+            if ((subfunction === 0x02 || subfunction === 0x0A) &&
+                ((bytes.length - 2) % 4 === 0)) {
+                const lines = [];
+
+                for (let offset = 2; offset < bytes.length; offset += 4) {
+                    const code =
+                        (bytes[offset] << 16) |
+                        (bytes[offset + 1] << 8) |
+                        bytes[offset + 2];
+
+                    lines.push(
+                        `0x${hex(code, 6)}  status 0x${hex(bytes[offset + 3], 2)}`
+                    );
+                }
+
+                return `DTC records: ${lines.length}\n` +
+                    `Status availability: 0x${hex(availability, 2)}\n\n` +
+                    `${lines.length ? lines.join('\n') : 'No matching DTCs.'}\n\n` +
+                    `Raw: ${payloadText}`;
+            }
+
+            return null;
         }
 
         async function refresh() {
@@ -5616,7 +5672,15 @@
                     summary.textContent =
                         `Positive · SID 0x${data.response_sid
                             .toString(16).padStart(2, '0').toUpperCase()}`;
-                    response.textContent = data.payload || 'Positive response without parameters.';
+                    const decoded =
+                        data.response_sid === 0x59
+                            ? decodeDtcResponse(data.payload || '')
+                            : null;
+
+                    response.textContent =
+                        decoded ||
+                        data.payload ||
+                        'Positive response without parameters.';
                     message.textContent = 'A complete UDS response was received.';
                 } else if (data.state === 4) {
                     summary.textContent = 'Response pending';
@@ -5679,6 +5743,19 @@
                 if (kind === 'read_did') {
                     request.did =
                         parseHexNumber(element('uds-did'), 0xffff, 'Data identifier');
+                } else if (kind === 'read_dtc') {
+                    request.value =
+                        parseHexNumber(
+                            element('uds-dtc-subfunction'),
+                            0xff,
+                            'DTC report'
+                        );
+                    request.status_mask =
+                        parseHexNumber(
+                            element('uds-dtc-mask'),
+                            0xff,
+                            'DTC status mask'
+                        );
                 } else if (kind === 'session' || kind === 'reset') {
                     request.value =
                         parseHexNumber(element('uds-subfunction'), 0x7f, 'Sub-function');
@@ -5701,6 +5778,10 @@
 
         format.addEventListener('change', updateFormat);
         service.addEventListener('change', updateService);
+        element('uds-dtc-subfunction').addEventListener(
+            'change',
+            updateService
+        );
         updateFormat();
         updateService();
         refresh();

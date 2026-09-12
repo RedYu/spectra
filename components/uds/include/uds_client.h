@@ -127,6 +127,13 @@ esp_err_t uds_client_read_data_by_identifier(
     uint64_t now_us
 );
 
+esp_err_t uds_client_read_dtc_information(
+    uds_client_t *client,
+    uint8_t subfunction,
+    uint8_t status_mask,
+    uint64_t now_us
+);
+
 esp_err_t uds_client_poll(
     uds_client_t *client,
     uint64_t now_us

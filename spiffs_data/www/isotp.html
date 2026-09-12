@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=18">
-    <script src="spectra.js?v=18" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=19">
+    <script src="spectra.js?v=19" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -268,6 +268,7 @@
                         Service
                         <select id="uds-service">
                             <option value="read_did">Read Data By Identifier</option>
+                            <option value="read_dtc">Read DTC Information</option>
                             <option value="session">Diagnostic Session Control</option>
                             <option value="tester_present">Tester Present</option>
                             <option value="reset">ECU Reset</option>
@@ -283,6 +284,20 @@
                     <label id="uds-subfunction-field" hidden>
                         Sub-function
                         <input id="uds-subfunction" value="03" spellcheck="false">
+                    </label>
+
+                    <label id="uds-dtc-subfunction-field" hidden>
+                        DTC report
+                        <select id="uds-dtc-subfunction">
+                            <option value="01">Number by status mask</option>
+                            <option value="02">DTCs by status mask</option>
+                            <option value="0A">Supported DTCs</option>
+                        </select>
+                    </label>
+
+                    <label id="uds-dtc-mask-field" hidden>
+                        DTC status mask
+                        <input id="uds-dtc-mask" value="FF" spellcheck="false">
                     </label>
 
                     <label id="uds-raw-sid-field" hidden>
