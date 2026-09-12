@@ -92,10 +92,9 @@ idf_component_register(
 if(NOT SPECTRA_TEST_BUILD)
     if(CONFIG_SPECTRA_WEB_CONTENT_GZIP)
 
-        /*
-         * Check whether Python dependencies required by the
-         * web asset build script are available.
-         */
+        # Check whether Python dependencies required by the
+        # web asset build script are available.
+
         execute_process(
             COMMAND
                 ${PYTHON}
@@ -109,9 +108,8 @@ if(NOT SPECTRA_TEST_BUILD)
             ERROR_QUIET
         )
 
-        /*
-         * Install missing Python dependencies only when required.
-         */
+        # Install missing Python dependencies only when required.
+
         if(NOT WEB_PYTHON_DEPS_RESULT EQUAL 0)
             message(
                 STATUS
@@ -142,9 +140,8 @@ if(NOT SPECTRA_TEST_BUILD)
             endif()
         endif()
 
-        /*
-         * Build minified and gzip-compressed web resources.
-         */
+        # Build minified and gzip-compressed web resources.
+
         execute_process(
             COMMAND
                 ${PYTHON}
