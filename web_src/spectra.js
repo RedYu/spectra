@@ -2812,7 +2812,7 @@
     }
 
     // ===== can_test.html =====
-    function init_test() {
+    function init_legacy_websocket_test() {
 
         const BATCH_HEADER_SIZE = 8;
         const EVENT_HEADER_SIZE = 40;
@@ -3479,6 +3479,238 @@
                 }
             );
     
+    }
+
+    function init_test() {
+        const REFRESH_INTERVAL_MS = 5000;
+
+        let refreshTimer = null;
+        let refreshInProgress = false;
+
+        const element = id =>
+            document.getElementById(id);
+
+        const setText = (id, value) => {
+            const target = element(id);
+
+            if (target !== null) {
+                target.textContent = value;
+            }
+        };
+
+        function formatBytes(value) {
+            const bytes = Number(value ?? 0);
+
+            if (!Number.isFinite(bytes)) {
+                return "—";
+            }
+
+            if (bytes >= (1024 * 1024 * 1024)) {
+                return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+            }
+
+            if (bytes >= (1024 * 1024)) {
+                return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+            }
+
+            return `${(bytes / 1024).toFixed(1)} KiB`;
+        }
+
+        function formatCount(value) {
+            return Number(value ?? 0).toLocaleString();
+        }
+
+        function formatUptime(value) {
+            let seconds = Math.max(0, Number(value ?? 0));
+            const days = Math.floor(seconds / 86400);
+            seconds %= 86400;
+            const hours = Math.floor(seconds / 3600);
+            seconds %= 3600;
+            const minutes = Math.floor(seconds / 60);
+
+            return days > 0
+                ? `${days}d ${hours}h ${minutes}m`
+                : `${hours}h ${minutes}m`;
+        }
+
+        function formatQueue(current, peak, capacity) {
+            return `${formatCount(current)} / ${formatCount(capacity)} · peak ${formatCount(peak)}`;
+        }
+
+        function setBadge(id, text, state) {
+            const badge = element(id);
+
+            if (badge === null) {
+                return;
+            }
+
+            badge.textContent = text;
+            badge.classList.remove("ok", "warning", "error");
+
+            if (state !== "") {
+                badge.classList.add(state);
+            }
+        }
+
+        function updateSystem(system, diagnostics) {
+            const heap = diagnostics.heap ?? {};
+            const cpu = Number(system.cpu_usage ?? 0);
+            const internalFree = Number(heap.internal_free ?? system.free_heap ?? 0);
+            const internalMinimum = Number(heap.internal_minimum_free ?? system.minimum_free_heap ?? 0);
+            const internalLargest = Number(heap.internal_largest_block ?? 0);
+
+            setText("diagnostics-cpu", `${cpu.toFixed(1)}%`);
+            element("diagnostics-cpu-meter").style.width =
+                `${Math.min(100, Math.max(0, cpu))}%`;
+            setText("diagnostics-internal", formatBytes(internalFree));
+            setText("diagnostics-internal-minimum", `Minimum ${formatBytes(internalMinimum)}`);
+            setText(
+                "diagnostics-temperature",
+                system.chip_temperature_valid
+                    ? `${Number(system.chip_temperature_celsius).toFixed(1)} °C`
+                    : "—"
+            );
+            setText(
+                "diagnostics-temperature-state",
+                system.chip_temperature_valid ? "Sensor active" : "Sensor unavailable"
+            );
+            setText("diagnostics-uptime", formatUptime(system.uptime_sec));
+            setText("diagnostics-reset", `Reset: ${system.reset_reason_name ?? "unknown"}`);
+
+            setText("diagnostics-internal-free", formatBytes(internalFree));
+            setText("diagnostics-internal-largest", formatBytes(internalLargest));
+            setText("diagnostics-dma-free", formatBytes(heap.dma_free));
+            setText("diagnostics-dma-largest", formatBytes(heap.dma_largest_block));
+            setText("diagnostics-psram-free", formatBytes(heap.psram_free ?? system.psram_free));
+            setText("diagnostics-psram-largest", formatBytes(heap.psram_largest_block));
+
+            const memoryWarning =
+                (internalFree < (32 * 1024)) ||
+                (internalLargest < (12 * 1024));
+            setBadge(
+                "diagnostics-memory-state",
+                memoryWarning ? "Low" : "Healthy",
+                memoryWarning ? "warning" : "ok"
+            );
+
+            setText("diagnostics-sd-mounted", system.sd_card_mounted ? "Mounted" : "Not mounted");
+            setText("diagnostics-sd-filesystem", system.sd_card_filesystem || "—");
+            setText("diagnostics-sd-free", formatBytes(system.sd_card_free_bytes));
+            setText("diagnostics-sd-used", formatBytes(system.sd_card_used_bytes));
+            setText("diagnostics-time", system.time?.local ?? "Unavailable");
+            setText("diagnostics-time-sync", system.time?.synchronized ? "Synchronized" : "Not synchronized");
+            setBadge(
+                "diagnostics-storage-state",
+                system.sd_card_mounted ? "Ready" : "Unavailable",
+                system.sd_card_mounted ? "ok" : "warning"
+            );
+
+            setText("diagnostics-device", system.device_name || system.device_id || "Spectra");
+            setText("diagnostics-firmware", system.firmware_version ?? "—");
+            setText("diagnostics-chip", `${system.chip_model ?? "—"} · ${system.chip_cores ?? 0} cores`);
+            setText("diagnostics-frequency", `${system.cpu_frequency_mhz ?? 0} MHz`);
+            setText("diagnostics-internet", system.internet_available ? "Available" : "Unavailable");
+            setText("diagnostics-ota", system.ota_available ? "Available" : "Unavailable");
+            setBadge(
+                "diagnostics-network-state",
+                system.internet_available ? "Online" : "Offline",
+                system.internet_available ? "ok" : "warning"
+            );
+        }
+
+        function updateCan(diagnostics) {
+            const can = diagnostics.can ?? {};
+            const consumers = diagnostics.consumers ?? {};
+
+            setText("diagnostics-primary-state", can.primary_running ? "Running" : "Stopped");
+            setText("diagnostics-primary-traffic", `${formatCount(can.primary_received_frames)} / ${formatCount(can.primary_transmitted_frames)}`);
+            setText("diagnostics-secondary-state", can.secondary_running ? "Running" : "Stopped");
+            setText("diagnostics-secondary-traffic", `${formatCount(can.secondary_received_frames)} / ${formatCount(can.secondary_transmitted_frames)}`);
+            setText("diagnostics-router-queue", formatQueue(can.router_queue_current, can.router_queue_peak, can.router_queue_capacity));
+            setText("diagnostics-monitor-queue", formatQueue(can.monitor_queue_current, can.monitor_queue_peak, can.monitor_queue_capacity));
+            setText("diagnostics-identifiers", `${formatCount(can.monitor_identifiers)} / ${formatCount(can.monitor_identifier_capacity)}`);
+
+            const canHealthy = can.primary_running && can.secondary_running;
+            setBadge("diagnostics-can-state", canHealthy ? "Running" : "Partial", canHealthy ? "ok" : "warning");
+
+            setText("diagnostics-stream-client", consumers.stream_client_connected ? "Connected" : "Disconnected");
+            setText("diagnostics-stream-queue", formatQueue(consumers.stream_queue_current, consumers.stream_queue_peak, consumers.stream_queue_capacity));
+            setText("diagnostics-stream-errors", `${formatCount(consumers.stream_dropped_events)} / ${formatCount(consumers.stream_send_failures)}`);
+
+            const loggerStates = ["Idle", "Starting", "Recording", "Stopping", "Error"];
+            setText("diagnostics-logger-state", loggerStates[consumers.logger_state] ?? "Unknown");
+            setText("diagnostics-logger-queue", formatQueue(consumers.logger_queue_current, consumers.logger_queue_peak, consumers.logger_queue_capacity));
+            setText("diagnostics-logger-written", `${formatCount(consumers.logger_written_events)} / ${formatBytes(consumers.logger_written_bytes)}`);
+            setBadge("diagnostics-consumer-state", "Available", "ok");
+
+            setText("diagnostics-router-drops", formatCount(can.router_dropped_events));
+            setText("diagnostics-monitor-drops", formatCount(can.monitor_dropped_events));
+            setText("diagnostics-primary-drops", formatCount(can.primary_dropped_confirmations));
+            setText("diagnostics-secondary-errors", `${formatCount(can.secondary_receive_errors)} / ${formatCount(can.secondary_tx_event_errors)}`);
+            setText("diagnostics-logger-drops", formatCount(consumers.logger_dropped_events));
+            setText("diagnostics-logger-errors", `${formatCount(consumers.logger_write_failures)} / ${formatCount(consumers.logger_sync_failures)}`);
+
+            const totalErrors =
+                Number(can.router_dropped_events ?? 0) +
+                Number(can.monitor_dropped_events ?? 0) +
+                Number(can.primary_dropped_confirmations ?? 0) +
+                Number(can.secondary_receive_errors ?? 0) +
+                Number(can.secondary_tx_event_errors ?? 0) +
+                Number(consumers.logger_dropped_events ?? 0) +
+                Number(consumers.logger_write_failures ?? 0) +
+                Number(consumers.logger_sync_failures ?? 0);
+
+            setBadge(
+                "diagnostics-error-state",
+                totalErrors === 0 ? "No errors" : `${formatCount(totalErrors)} total`,
+                totalErrors === 0 ? "ok" : "warning"
+            );
+        }
+
+        async function refresh() {
+            if (refreshInProgress) {
+                return;
+            }
+
+            refreshInProgress = true;
+
+            try {
+                const [systemResponse, diagnosticsResponse] = await Promise.all([
+                    fetch("/api/system", {cache: "no-store"}),
+                    fetch("/api/diagnostics", {cache: "no-store"})
+                ]);
+
+                if (!systemResponse.ok || !diagnosticsResponse.ok) {
+                    throw new Error("Device rejected the diagnostics request");
+                }
+
+                const [system, diagnostics] = await Promise.all([
+                    systemResponse.json(),
+                    diagnosticsResponse.json()
+                ]);
+
+                updateSystem(system, diagnostics);
+                updateCan(diagnostics);
+                setText("status", "Connected");
+                setText("diagnostics-updated", `Updated ${new Date().toLocaleTimeString()}`);
+                element("status").classList.remove("warning");
+            } catch (error) {
+                setText("status", "Unavailable");
+                setText("diagnostics-updated", error.message);
+                element("status").classList.add("warning");
+            } finally {
+                refreshInProgress = false;
+            }
+        }
+
+        element("diagnostics-refresh").addEventListener("click", refresh);
+
+        refresh();
+        refreshTimer = setInterval(refresh, REFRESH_INTERVAL_MS);
+
+        window.addEventListener("pagehide", () => {
+            clearInterval(refreshTimer);
+        });
     }
 
     function initResizableCanTables(root = document) {

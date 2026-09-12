@@ -56,6 +56,7 @@ Clients should primarily use the HTTP status for control flow and treat
 | Method | Endpoint | Purpose |
 |---|---|---|
 | `GET` | `/api/system` | System identity, runtime, memory, storage, and reset state |
+| `GET` | `/api/diagnostics` | Heap, CAN pipeline, WebSocket, and logger diagnostics |
 | `POST` | `/api/system/restart` | Schedule a graceful restart |
 | `GET` | `/api/power` | PMIC, charger, rail, interrupt, and battery state |
 | `GET` | `/api/network` | Wi-Fi, USB RNDIS, DNS, and mDNS state |
@@ -115,6 +116,30 @@ Response members:
 
 Temperature and SD-card capacity fields must be used only when their matching
 validity flag is true.
+
+## Diagnostics API
+
+### `GET /api/diagnostics`
+
+Returns a lightweight runtime snapshot used by the Device Diagnostics page.
+The endpoint reads existing service counters and does not enable FreeRTOS
+task tracing or reset any counters.
+
+```bash
+curl http://spectra.device/api/diagnostics
+```
+
+The response contains three objects:
+
+- `heap`: current, minimum, and largest-block values for internal, DMA-capable,
+  and PSRAM heaps;
+- `can`: router and monitor queue usage, traffic totals, interface state, and
+  CAN service error counters;
+- `consumers`: WebSocket stream and CAN logger state, queue usage, drops,
+  failures, and output totals.
+
+Queue values are exposed as separate `*_current`, `*_peak`, and `*_capacity`
+members. Error and drop counters are cumulative for the current service run.
 
 ### `POST /api/system/restart`
 

@@ -32,6 +32,7 @@ idf_component_register(
 
         "web_api/web_api_common.c"
         "web_api/web_system_api.c"
+        "web_api/web_diagnostics_api.c"
         "web_api/web_power_api.c"
         "web_api/web_settings_api.c"
         "web_api/web_files_api.c"

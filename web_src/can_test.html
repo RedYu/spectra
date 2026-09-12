@@ -2,169 +2,51 @@
 <html lang="en" class="page-test">
 <head>
     <meta charset="UTF-8">
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1"
-    >
-
-    <title>CAN WebSocket Test</title>
-
-    <link rel="stylesheet" href="spectra.css?v=26">
-    <script src="spectra.js?v=26" defer></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Device Diagnostics · Spectra</title>
+    <link rel="stylesheet" href="spectra.css?v=27">
+    <script src="spectra.js?v=27" defer></script>
 </head>
-
 <body class="page-test">
     <header class="spectra-header">
-        <a
-            class="spectra-brand"
-            href="/"
-        >
-            <span aria-hidden="true">▧</span>
-            Spectra
-        </a>
-
-        <nav
-            class="spectra-nav"
-            aria-label="Main navigation"
-        >
-            <a href="/">Overview</a>
-            <a href="/can_logger">CAN Logger</a>
-            <a href="/can_analyzer">CAN Analyzer</a>
-            <a href="/files">Files</a>
-            <a href="/settings">Settings</a>
-
-            <a
-                href="/can_test"
-                aria-current="page"
-            >
-                Diagnostics
-            </a>
+        <a class="spectra-brand" href="/"><span aria-hidden="true">▧</span> Spectra</a>
+        <nav class="spectra-nav" aria-label="Main navigation">
+            <a href="/">Overview</a><a href="/can_logger">CAN Logger</a><a href="/can_analyzer">CAN Analyzer</a><a href="/files">Files</a><a href="/settings">Settings</a><a href="/can_test" aria-current="page">Diagnostics</a>
         </nav>
+        <span id="status" role="status">Loading</span>
     </header>
-
-    <main class="spectra-page">
-        <div class="page-header">
-            <div class="page-header-main">
-                <h1 class="page-title">
-                    CAN WebSocket Test
-                </h1>
-
-                <div class="connection-toolbar">
-                    <div id="status">
-                        Disconnected
-                    </div>
-
-                    <div class="connection-actions">
-                        <button id="connect">
-                            Connect
-                        </button>
-
-                        <button id="disconnect">
-                            Disconnect
-                        </button>
-
-                        <button id="clear">
-                            Clear
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <section class="statistics-panel">
-                <h2 class="statistics-title">
-                    Stream statistics
-                </h2>
-
-                <div class="statistics-grid">
-                    <span class="statistics-label">Queued events</span>
-                    <span
-                        id="statistics-queued"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Sent events</span>
-                    <span
-                        id="statistics-sent"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Dropped events</span>
-                    <span
-                        id="statistics-dropped"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Send failures</span>
-                    <span
-                        id="statistics-failures"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Queue</span>
-                    <span
-                        id="statistics-queue"
-                        class="statistics-value"
-                    >0 / 64</span>
-
-                    <span class="statistics-label">Queue peak</span>
-                    <span
-                        id="statistics-queue-peak"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Sent batches</span>
-                    <span
-                        id="statistics-sent-batches"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Binary payload</span>
-                    <span
-                        id="statistics-binary-bytes"
-                        class="statistics-value"
-                    >0 B</span>
-
-                    <span class="statistics-label">Batch events total</span>
-                    <span
-                        id="statistics-batch-events-total"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Batch average</span>
-                    <span
-                        id="statistics-batch-average"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Batch peak</span>
-                    <span
-                        id="statistics-batch-peak"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Received batches</span>
-                    <span
-                        id="statistics-batches"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Received events</span>
-                    <span
-                        id="statistics-events"
-                        class="statistics-value"
-                    >0</span>
-
-                    <span class="statistics-label">Filtered events</span>
-                    <span
-                        id="statistics-filtered"
-                        class="statistics-value"
-                    >0</span>
-                </div>
-            </section>
-        </div>
-
-        <div id="log"></div>
+    <main class="diagnostics-page">
+        <section class="diagnostics-heading">
+            <div><h1>Device Diagnostics</h1><p>Live health, memory, storage and CAN pipeline information.</p></div>
+            <div class="diagnostics-actions"><span id="diagnostics-updated">Not updated</span><button id="diagnostics-refresh" type="button">Refresh</button></div>
+        </section>
+        <section class="diagnostics-summary" aria-label="Device health summary">
+            <article class="diagnostics-card diagnostics-summary-card"><span class="diagnostics-card-label">CPU load</span><strong id="diagnostics-cpu">—</strong><div class="diagnostics-meter"><span id="diagnostics-cpu-meter"></span></div></article>
+            <article class="diagnostics-card diagnostics-summary-card"><span class="diagnostics-card-label">Internal heap</span><strong id="diagnostics-internal">—</strong><small id="diagnostics-internal-minimum">Minimum —</small></article>
+            <article class="diagnostics-card diagnostics-summary-card"><span class="diagnostics-card-label">Temperature</span><strong id="diagnostics-temperature">—</strong><small id="diagnostics-temperature-state">Sensor state unknown</small></article>
+            <article class="diagnostics-card diagnostics-summary-card"><span class="diagnostics-card-label">Uptime</span><strong id="diagnostics-uptime">—</strong><small id="diagnostics-reset">Reset reason —</small></article>
+        </section>
+        <section class="diagnostics-grid">
+            <article class="diagnostics-card"><header><h2>Memory</h2><span id="diagnostics-memory-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
+                <dt>Internal free</dt><dd id="diagnostics-internal-free">—</dd><dt>Internal largest block</dt><dd id="diagnostics-internal-largest">—</dd><dt>DMA free</dt><dd id="diagnostics-dma-free">—</dd><dt>DMA largest block</dt><dd id="diagnostics-dma-largest">—</dd><dt>PSRAM free</dt><dd id="diagnostics-psram-free">—</dd><dt>PSRAM largest block</dt><dd id="diagnostics-psram-largest">—</dd>
+            </dl></article>
+            <article class="diagnostics-card"><header><h2>Storage &amp; time</h2><span id="diagnostics-storage-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
+                <dt>SD card</dt><dd id="diagnostics-sd-mounted">—</dd><dt>Filesystem</dt><dd id="diagnostics-sd-filesystem">—</dd><dt>SD free</dt><dd id="diagnostics-sd-free">—</dd><dt>SD used</dt><dd id="diagnostics-sd-used">—</dd><dt>Local time</dt><dd id="diagnostics-time">—</dd><dt>Synchronization</dt><dd id="diagnostics-time-sync">—</dd>
+            </dl></article>
+            <article class="diagnostics-card"><header><h2>CAN pipeline</h2><span id="diagnostics-can-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
+                <dt>Primary CAN</dt><dd id="diagnostics-primary-state">—</dd><dt>Primary RX / TX</dt><dd id="diagnostics-primary-traffic">—</dd><dt>Secondary CAN</dt><dd id="diagnostics-secondary-state">—</dd><dt>Secondary RX / TX</dt><dd id="diagnostics-secondary-traffic">—</dd><dt>Router queue</dt><dd id="diagnostics-router-queue">—</dd><dt>Monitor queue</dt><dd id="diagnostics-monitor-queue">—</dd><dt>Tracked identifiers</dt><dd id="diagnostics-identifiers">—</dd>
+            </dl></article>
+            <article class="diagnostics-card"><header><h2>Consumers</h2><span id="diagnostics-consumer-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
+                <dt>WebSocket client</dt><dd id="diagnostics-stream-client">—</dd><dt>WebSocket queue</dt><dd id="diagnostics-stream-queue">—</dd><dt>WebSocket drops / failures</dt><dd id="diagnostics-stream-errors">—</dd><dt>CAN logger</dt><dd id="diagnostics-logger-state">—</dd><dt>Logger queue</dt><dd id="diagnostics-logger-queue">—</dd><dt>Written events / bytes</dt><dd id="diagnostics-logger-written">—</dd>
+            </dl></article>
+            <article class="diagnostics-card diagnostics-errors"><header><h2>Error counters</h2><span id="diagnostics-error-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
+                <dt>Router drops</dt><dd id="diagnostics-router-drops">—</dd><dt>Monitor drops</dt><dd id="diagnostics-monitor-drops">—</dd><dt>Primary confirmation drops</dt><dd id="diagnostics-primary-drops">—</dd><dt>Secondary RX / TX errors</dt><dd id="diagnostics-secondary-errors">—</dd><dt>Logger drops</dt><dd id="diagnostics-logger-drops">—</dd><dt>Logger write / sync failures</dt><dd id="diagnostics-logger-errors">—</dd>
+            </dl></article>
+            <article class="diagnostics-card"><header><h2>Device</h2><span id="diagnostics-network-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
+                <dt>Device</dt><dd id="diagnostics-device">—</dd><dt>Firmware</dt><dd id="diagnostics-firmware">—</dd><dt>Chip</dt><dd id="diagnostics-chip">—</dd><dt>CPU frequency</dt><dd id="diagnostics-frequency">—</dd><dt>Internet</dt><dd id="diagnostics-internet">—</dd><dt>OTA</dt><dd id="diagnostics-ota">—</dd>
+            </dl></article>
+        </section>
+        <p class="diagnostics-note">Values update every 5 seconds. Task-level tracing is intentionally disabled to keep diagnostics lightweight.</p>
     </main>
-
 </body>
 </html>

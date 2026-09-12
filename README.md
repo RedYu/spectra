@@ -329,7 +329,7 @@ ws://spectra.device/ws/can
 The complete wire format is described in
 [docs/websocket-can-protocol.md](docs/websocket-can-protocol.md).
 
-The development CAN stream page is available at:
+The device diagnostics page is available at:
 
 ```text
 http://spectra.device/can_test
@@ -354,6 +354,7 @@ Detailed request and response documentation is available in
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/api/system` | Read system, CPU, memory, storage, and reset information |
+| `GET` | `/api/diagnostics` | Read heap, CAN pipeline, WebSocket, and logger diagnostics |
 | `POST` | `/api/system/restart` | Request a graceful device restart |
 | `GET` | `/api/network` | Read Wi-Fi, USB RNDIS, DNS, and mDNS information |
 | `POST` | `/api/network/wifi/scan` | Start a Wi-Fi network scan |
