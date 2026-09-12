@@ -43,6 +43,7 @@
 #include "can_transmit_service.h"
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
+#include "isotp_service.h"
 #include "time_service.h"
 #include "storage_sd_benchmark.h"
 
@@ -644,6 +645,24 @@ static void startup_task(
             TAG,
             "CAN transmit service unavailable: %s",
             esp_err_to_name(transmit_result)
+        );
+    }
+
+    const isotp_service_config_t isotp_config = {
+        .queue_depth = 32U,
+        .transmit_timeout_ms = 20U,
+    };
+
+    const esp_err_t isotp_result =
+        isotp_service_start(
+            &isotp_config
+        );
+
+    if (isotp_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "ISO-TP service unavailable: %s",
+            esp_err_to_name(isotp_result)
         );
     }
 

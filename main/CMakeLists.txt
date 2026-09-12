@@ -13,6 +13,7 @@ idf_component_register(
         models
         lvgl_port
         gui
+        isotp
         services
         freertos
         esp_event

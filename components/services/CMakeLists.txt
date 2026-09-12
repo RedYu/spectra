@@ -39,6 +39,7 @@ idf_component_register(
         "web_api/web_can_protocol.c"
         "web_api/web_can_transmit_api.c"
         "web_api/web_can_filters_api.c"
+        "web_api/web_isotp_api.c"
 
     INCLUDE_DIRS
         "include"
@@ -49,6 +50,7 @@ idf_component_register(
         models
         can
         can_monitor
+        isotp
 
     PRIV_REQUIRES
         app_task_config

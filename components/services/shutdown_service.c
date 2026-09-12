@@ -33,6 +33,7 @@
 #include "can_transmit_service.h"
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
+#include "isotp_service.h"
 #include "network_service.h"
 #include "time_service.h"
 
@@ -189,6 +190,23 @@ static void shutdown_service_task(
      * storage shutdown begins.
      */
     bool can_consumers_stopped = true;
+
+    if (isotp_service_is_running()) {
+        const esp_err_t isotp_result =
+            isotp_service_stop();
+
+        if ((isotp_result != ESP_OK) &&
+            (isotp_result != ESP_ERR_INVALID_STATE)) {
+
+            can_consumers_stopped = false;
+
+            ESP_LOGW(
+                TAG,
+                "Failed to stop ISO-TP service: %s",
+                esp_err_to_name(isotp_result)
+            );
+        }
+    }
 
     if (can_logger_service_is_running()) {
         const esp_err_t logger_result =
