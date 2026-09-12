@@ -1,0 +1,3 @@
+htmlmin
+rcssmin
+rjsmin

@@ -91,12 +91,68 @@ idf_component_register(
 
 if(NOT SPECTRA_TEST_BUILD)
     if(CONFIG_SPECTRA_WEB_CONTENT_GZIP)
+
+        /*
+         * Check whether Python dependencies required by the
+         * web asset build script are available.
+         */
+        execute_process(
+            COMMAND
+                ${PYTHON}
+                -c
+                "import htmlmin, rcssmin, rjsmin"
+
+            RESULT_VARIABLE
+                WEB_PYTHON_DEPS_RESULT
+
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+
+        /*
+         * Install missing Python dependencies only when required.
+         */
+        if(NOT WEB_PYTHON_DEPS_RESULT EQUAL 0)
+            message(
+                STATUS
+                "Installing Spectra web build Python dependencies..."
+            )
+
+            execute_process(
+                COMMAND
+                    ${PYTHON}
+                    -m
+                    pip
+                    install
+                    -r
+                    ${PROJECT_DIR}/scripts/requirements.txt
+
+                WORKING_DIRECTORY
+                    ${PROJECT_DIR}
+
+                RESULT_VARIABLE
+                    WEB_REQUIREMENTS_RESULT
+            )
+
+            if(NOT WEB_REQUIREMENTS_RESULT EQUAL 0)
+                message(
+                    FATAL_ERROR
+                    "Failed to install Spectra web build dependencies"
+                )
+            endif()
+        endif()
+
+        /*
+         * Build minified and gzip-compressed web resources.
+         */
         execute_process(
             COMMAND
                 ${PYTHON}
                 ${PROJECT_DIR}/scripts/build_web.py
+
             WORKING_DIRECTORY
                 ${PROJECT_DIR}
+
             RESULT_VARIABLE
                 WEB_CONTENT_BUILD_RESULT
         )
