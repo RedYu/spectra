@@ -22,8 +22,8 @@
 
     <title>Spectra Files</title>
 
-    <link rel="stylesheet" href="spectra.css?v=4">
-    <script src="spectra.js?v=4" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=9">
+    <script src="spectra.js?v=9" defer></script>
 </head>
 
 <body class="page-files">
@@ -85,7 +85,33 @@
             </div>
         </section>
 
-        <section class="card">
+        <div class="files-browser">
+            <aside
+                class="directory-panel"
+                aria-label="Storage folders"
+            >
+                <div class="directory-panel-header">
+                    <h2>Folders</h2>
+
+                    <button
+                        id="refresh-tree"
+                        class="directory-refresh"
+                        type="button"
+                        title="Refresh folder tree"
+                        aria-label="Refresh folder tree"
+                    >
+                        ↻
+                    </button>
+                </div>
+
+                <div
+                    id="directory-tree"
+                    class="directory-tree"
+                    role="tree"
+                ></div>
+            </aside>
+
+            <section class="card file-panel">
             <nav
                 class="file-toolbar"
                 aria-label="Directory navigation"
@@ -158,7 +184,8 @@
                     Next
                 </button>
             </nav>
-        </section>
+            </section>
+        </div>
 
         <p
             id="status"

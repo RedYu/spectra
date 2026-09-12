@@ -289,14 +289,9 @@
         }
 
         function updateSystem(system) {
-            const title =
-                system.device_name
-                    ? `${system.device_id}`
-                    : system.device_id || "spectra";
-
             setText(
                 "device-title",
-                title
+                "Spectra"
             );
 
             setText(
@@ -1622,7 +1617,7 @@
                 settings.schema_version ?? "-";
 
             elements.deviceTitle.textContent =
-                device.target || "Spectra";
+                "Spectra";
 
             elements.deviceSubtitle.textContent =
                 device.name || "Device settings";
@@ -2344,6 +2339,10 @@
 
         const statusElement = document.getElementById("status");
 
+        const directoryTree = document.getElementById("directory-tree");
+
+        const refreshTreeButton = document.getElementById("refresh-tree");
+
         const backButton = document.getElementById("back");
 
         const previousPageButton = document.getElementById("previous-page");
@@ -2356,6 +2355,7 @@
         let currentOffset = 0;
         let hasMore = false;
         let activeRequest = null;
+        let treeGeneration = 0;
 
         function setStatus(message, error = false) {
             statusElement.textContent = message;
@@ -2437,11 +2437,21 @@
 
             const actionCell = document.createElement("td");
 
-            nameCell.textContent = entry.name;
+            const nameIcon = document.createElement("span");
+
+            nameIcon.className = "file-entry-icon";
+            nameIcon.textContent = entry.type === "directory" ? "▸" : "·";
+
+            const name = document.createElement("span");
+
+            name.className = "file-entry-name";
+            name.textContent = entry.name;
+
+            nameCell.append(nameIcon, name);
 
             nameCell.title = entry.name;
 
-            typeCell.textContent = entry.type;
+            typeCell.textContent = entry.type === "directory" ? "Folder" : "File";
 
             sizeCell.textContent = entry.type === "directory" ? "-" : formatSize(entry.size);
 
@@ -2450,6 +2460,7 @@
             button.type = "button";
 
             if (entry.type === "directory") {
+                row.classList.add("directory-row");
                 button.textContent = "Open";
 
                 button.addEventListener("click", () => {
@@ -2478,6 +2489,150 @@
             row.append(nameCell, typeCell, sizeCell, actionCell);
 
             return row;
+        }
+
+        async function loadDirectoryFolders(volume, path, generation) {
+            const folders = [];
+            let offset = 0;
+            let more = false;
+
+            do {
+                const query = new URLSearchParams({
+                    volume,
+                    path,
+                    offset : String(offset),
+                    limit : "32"
+                });
+
+                const response = await fetch(
+                    `/api/files?${query.toString()}`,
+                    {cache : "no-store"}
+                );
+
+                const result = await response.json();
+
+                if (!response.ok)
+                    throw new Error(result.message || `HTTP ${response.status}`);
+                if (generation !== treeGeneration)
+                    return [];
+                if (!Array.isArray(result.entries))
+                    throw new Error("Invalid folder-list response");
+
+                folders.push(
+                    ...result.entries.filter(entry =>
+                        entry && entry.type === "directory" &&
+                        typeof entry.name === "string")
+                );
+
+                offset += result.entries.length;
+                more = result.has_more === true;
+            } while (more && offset <= 1024);
+
+            return folders.sort((left, right) =>
+                left.name.localeCompare(right.name, undefined, {sensitivity : "base"}));
+        }
+
+        function createDirectoryNode(volume, path, label, depth, generation) {
+            const node = document.createElement("div");
+            const row = document.createElement("div");
+            const toggle = document.createElement("button");
+            const select = document.createElement("button");
+            const children = document.createElement("div");
+
+            node.className = "directory-node";
+            node.dataset.path = path;
+            row.className = "directory-node-row";
+            row.style.setProperty("--tree-depth", String(depth));
+            toggle.className = "directory-toggle";
+            toggle.type = "button";
+            toggle.textContent = "›";
+            toggle.setAttribute("aria-label", `Expand ${label}`);
+            toggle.setAttribute("aria-expanded", "false");
+            select.className = "directory-name";
+            select.type = "button";
+            select.innerHTML = `<span aria-hidden="true">▰</span><span></span>`;
+            select.lastElementChild.textContent = label;
+            select.title = path;
+            children.className = "directory-children";
+            children.hidden = true;
+
+            select.addEventListener("click", () => {
+                currentPath = path;
+                currentOffset = 0;
+                hasMore = false;
+                loadFiles();
+            });
+
+            toggle.addEventListener("click", async () => {
+                if (node.dataset.loaded === "true") {
+                    const expanded = children.hidden;
+                    children.hidden = !expanded;
+                    toggle.classList.toggle("expanded", expanded);
+                    toggle.setAttribute("aria-expanded", String(expanded));
+                    return;
+                }
+
+                toggle.disabled = true;
+                toggle.classList.add("loading");
+
+                try {
+                    const folders = await loadDirectoryFolders(volume, path, generation);
+
+                    if (generation !== treeGeneration)
+                        return;
+
+                    for (const folder of folders) {
+                        children.append(
+                            createDirectoryNode(
+                                volume,
+                                joinPath(path, folder.name),
+                                folder.name,
+                                depth + 1,
+                                generation
+                            )
+                        );
+                    }
+
+                    updateActiveDirectory();
+
+                    node.dataset.loaded = "true";
+                    toggle.classList.toggle("empty", folders.length === 0);
+                    toggle.classList.toggle("expanded", folders.length !== 0);
+                    toggle.setAttribute("aria-expanded", String(folders.length !== 0));
+                    children.hidden = folders.length === 0;
+                } catch (error) {
+                    setStatus(`Failed to load folders: ${error.message}`, true);
+                } finally {
+                    toggle.disabled = false;
+                    toggle.classList.remove("loading");
+                }
+            });
+
+            row.append(toggle, select);
+            node.append(row, children);
+
+            return node;
+        }
+
+        function updateActiveDirectory() {
+            for (const node of directoryTree.querySelectorAll(".directory-node")) {
+                const name = node.firstElementChild?.querySelector(".directory-name");
+
+                name?.classList.toggle(
+                    "active",
+                    node.dataset.path === currentPath
+                );
+            }
+        }
+
+        function loadDirectoryTree() {
+            const generation = ++treeGeneration;
+            const volume = volumeSelector.value;
+            const root = createDirectoryNode(volume, "/", volume === "sd" ? "SD card" : "Internal", 0,
+                                             generation);
+
+            directoryTree.replaceChildren(root);
+            root.querySelector(".directory-toggle").click();
         }
 
         async function loadFiles() {
@@ -2541,9 +2696,22 @@
 
                 currentPathElement.title = currentPath;
 
+                updateActiveDirectory();
+
                 hasMore = result.has_more === true;
 
-                for (const entry of result.entries) {
+                const entries = [...result.entries].sort((left, right) => {
+                    if (left.type !== right.type)
+                        return left.type === "directory" ? -1 : 1;
+
+                    return String(left.name).localeCompare(
+                        String(right.name),
+                        undefined,
+                        {sensitivity : "base"}
+                    );
+                });
+
+                for (const entry of entries) {
                     if ((typeof entry !== "object") || (entry === null) ||
                         (typeof entry.name !== "string") ||
                         ((entry.type !== "file") && (entry.type !== "directory"))) {
@@ -2633,46 +2801,13 @@
             currentPathElement.title = currentPath;
 
             loadFiles();
+            loadDirectoryTree();
         });
 
+        refreshTreeButton.addEventListener("click", loadDirectoryTree);
+
         loadFiles();
-
-
-        async function loadDeviceTitle() {
-            const title =
-                document.getElementById(
-                    "device-title"
-                );
-
-            try {
-                const response =
-                    await fetch(
-                        "/api/system",
-                        {
-                            cache: "no-store"
-                        }
-                    );
-
-                if (!response.ok) {
-                    return;
-                }
-
-                const system =
-                    await response.json();
-
-                title.textContent =
-                    system.device_id ||
-                    "Spectra";
-
-            } catch (error) {
-                console.error(
-                    "Failed to load device title:",
-                    error
-                );
-            }
-        }
-
-        loadDeviceTitle();
+        loadDirectoryTree();
     
     }
 
@@ -3371,9 +3506,9 @@
                 '</span><h2>' + (bus ? "Secondary CAN" : "Primary CAN") +
                 '</h2><span class="rate" id="rate' + bus + '">RX 0/s · TX 0/s</span></div>' +
                 '<div class="tables"><div class="panel"><div class="panel-title">Identifiers<span id="ids' + bus +
-                '">0 IDs</span></div><div class="scroll"><table><thead><tr><th>ID / type</th><th>Count</th><th>Data</th><th>Δ ms</th></tr></thead><tbody id="idrows' + bus +
+                '">0 IDs</span></div><div class="scroll"><table class="identifier-table"><thead><tr><th>ID / type</th><th>Count</th><th>Data</th><th>Δ ms</th></tr></thead><tbody id="idrows' + bus +
                 '"></tbody></table></div></div><div class="panel"><div class="panel-title">Event buffer<span id="buffer' + bus +
-                '">0 events</span></div><div class="scroll"><table><thead><tr><th>No.</th><th>Time / source</th><th>Event</th><th>ID</th><th>Data</th></tr></thead><tbody id="history' + bus +
+                '">0 events</span></div><div class="scroll"><table class="event-table"><thead><tr><th>No.</th><th>Time / source</th><th>Event</th><th>ID</th><th>Data</th><th>Text</th></tr></thead><tbody id="history' + bus +
                 '"></tbody></table></div></div></div>';
             element("channels").append(section);
         }
@@ -3461,6 +3596,24 @@
                 '">' + hex(byte) + "</span>").join(" ");
         }
 
+        function payloadText(event) {
+            if (event.flags & 2)
+                return "—";
+
+            const limit = 12;
+            const text = event.data
+                .slice(0, limit)
+                .map(byte => byte >= 32 && byte <= 126
+                    ? String.fromCharCode(byte)
+                    : "·")
+                .join("")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+
+            return text + (event.data.length > limit ? "…" : "");
+        }
+
         function render() {
             const query = element("search").value.trim().toUpperCase().replace(/^0X/, "");
             channels.forEach((channel, bus) => {
@@ -3470,7 +3623,7 @@
                 const rows = Array.from(channel.identifiers.values()).filter(row => identifier(row.event).includes(query));
                 element("idrows" + bus).innerHTML = rows.map(row =>
                     "<tr><td>" + identifier(row.event) + (row.event.flags & 4 ? " FD" : "") +
-                    "</td><td>" + row.count + "</td><td>" + payload(row.event, row) +
+                    "</td><td>" + row.count + "</td><td class=\"data-cell\">" + payload(row.event, row) +
                     "</td><td>" + (row.delta === null ? "—" : row.delta.toFixed(1)) + "</td></tr>"
                 ).join("") || '<tr><td class="empty" colspan="4">No matching frames received</td></tr>';
                 const history = channel.history.filter(event => identifier(event).includes(query));
@@ -3478,8 +3631,9 @@
                     "<tr><td>" + event.sequence + "</td><td>" + timeText(event) +
                     (event.source === 1 ? " SW" : event.source === 2 ? " HW" : "") +
                     "</td><td>" + eventNames[event.type] + "</td><td>" + identifier(event) +
-                    "</td><td>" + payload(event) + "</td></tr>"
-                ).join("") || '<tr><td class="empty" colspan="5">Connect to start receiving CAN events</td></tr>';
+                    "</td><td class=\"data-cell\">" + payload(event) + "</td><td class=\"text-cell\">" +
+                    payloadText(event) + "</td></tr>"
+                ).join("") || '<tr><td class="empty" colspan="6">Connect to start receiving CAN events</td></tr>';
                 element("ids" + bus).textContent = channel.identifiers.size + " IDs";
                 element("buffer" + bus).textContent = channel.history.length + " events";
             });
@@ -3610,6 +3764,15 @@
         const idText = e => hex(e.id, e.flags & 1 ? 8 : 3);
         const timeText = us => (us / 1000000n).toString() + "." + (us % 1000000n).toString().padStart(6, "0");
         const dataText = e => e.flags & 2 ? "RTR" : e.data.map(b => hex(b)).join(" ");
+        const payloadText = e => {
+            if (e.flags & 2)
+                return "—";
+            const limit = 12;
+            const text = e.data.slice(0, limit).map(byte =>
+                byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : "·").join("");
+            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") +
+                (e.data.length > limit ? "…" : "");
+        };
         const formatText = e => (e.flags & 1 ? " EXT" : " STD") + (e.flags & 4 ? " FD" : "") + (e.flags & 2 ? " RTR" : "");
         function validate(e) {
             if (e.bus > 1 || e.type > 4 || e.source > 2 || e.data.length > 64 ||
@@ -3813,7 +3976,9 @@
             $("events").innerHTML = filtered.slice(page * PAGE, (page + 1) * PAGE).map(index => {
                 const e = records[index], time = e.capture !== null ? timeText(e.capture) : e.source ? timeText(e.timestamp) : "—";
                 return '<tr data-index="' + index + '" tabindex="0"><td>' + (index + 1) + '</td><td>' + (e.bus ? "S" : "P") +
-                    '</td><td>' + time + '</td><td>' + names[e.type] + '</td><td>' + idText(e) + '</td><td>' + dataText(e) + '</td></tr>';
+                    '</td><td>' + time + '</td><td>' + names[e.type] + '</td><td>' + idText(e) +
+                    '</td><td class="data-cell">' + dataText(e) + '</td><td class="text-cell">' +
+                    payloadText(e) + '</td></tr>';
             }).join("");
             $("matches").textContent = filtered.length.toLocaleString() + " events";
             $("page").textContent = (pages ? page + 1 : 0) + " / " + pages;

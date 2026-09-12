@@ -1244,6 +1244,105 @@ body:where(.page-files) {
     border-radius: 14px;
     background: var(--surface);
 }
+:where(body.page-files) .files-browser {
+    display: grid;
+    align-items: start;
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    gap: 16px;
+}
+:where(body.page-files) .directory-panel {
+    overflow: hidden;
+    min-height: 240px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+}
+:where(body.page-files) .directory-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 64px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+}
+:where(body.page-files) .directory-panel-header h2 {
+    margin: 0;
+    font-size: 14px;
+}
+:where(body.page-files) .directory-refresh,
+:where(body.page-files) .directory-toggle,
+:where(body.page-files) .directory-name {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+:where(body.page-files) .directory-refresh {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--muted);
+}
+:where(body.page-files) .directory-refresh:hover {
+    border-color: var(--accent);
+    color: var(--text);
+}
+:where(body.page-files) .directory-tree {
+    overflow: auto;
+    max-height: 560px;
+    padding: 8px;
+}
+:where(body.page-files) .directory-node-row {
+    display: flex;
+    align-items: center;
+    min-width: max-content;
+    padding-left: calc(var(--tree-depth) * 14px);
+    border-radius: 7px;
+}
+:where(body.page-files) .directory-node-row:hover {
+    background: var(--surface-hover);
+}
+:where(body.page-files) .directory-toggle {
+    width: 26px;
+    height: 32px;
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 18px;
+    transition: transform 100ms ease;
+}
+:where(body.page-files) .directory-toggle.expanded {
+    transform: rotate(90deg);
+}
+:where(body.page-files) .directory-toggle.empty {
+    visibility: hidden;
+}
+:where(body.page-files) .directory-toggle.loading {
+    opacity: 0.45;
+}
+:where(body.page-files) .directory-name {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    flex: 1;
+    gap: 8px;
+    padding: 7px 8px 7px 2px;
+    font-size: 13px;
+    text-align: left;
+    white-space: nowrap;
+}
+:where(body.page-files) .directory-name > span:first-child {
+    color: #e5b94f;
+    font-size: 12px;
+}
+:where(body.page-files) .directory-name.active {
+    color: #8ab4ff;
+    font-weight: 600;
+}
+:where(body.page-files) .file-panel {
+    min-width: 0;
+}
 :where(body.page-files) .file-toolbar {
     display: flex;
     align-items: center;
@@ -1336,6 +1435,22 @@ body:where(.page-files) {
 :where(body.page-files) tbody tr:hover {
     background: var(--surface-hover);
 }
+:where(body.page-files) .directory-row {
+    background: rgba(229, 185, 79, 0.035);
+}
+:where(body.page-files) .directory-row td:first-child {
+    color: #f0ca6a;
+    font-weight: 600;
+}
+:where(body.page-files) .file-entry-icon {
+    display: inline-block;
+    width: 20px;
+    color: var(--muted);
+    font-size: 12px;
+}
+:where(body.page-files) .directory-row .file-entry-icon {
+    color: #e5b94f;
+}
 :where(body.page-files) tbody tr:last-child td {
     border-bottom: 0;
 }
@@ -1404,6 +1519,12 @@ body:where(.page-files) {
     text-align: center;
 }
 @media (max-width: 700px) {
+    :where(body.page-files) .files-browser {
+        grid-template-columns: 1fr;
+    }
+    :where(body.page-files) .directory-tree {
+        max-height: 260px;
+    }
     :where(body.page-files) .header-content {
         align-items: flex-start;
         flex-direction: column;
@@ -1787,9 +1908,11 @@ body:where(.page-logger) {
 }
 :where(body.page-logger) table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     white-space: nowrap;
     font: 12px "Cascadia Mono", Consolas, monospace;
+    font-variant-numeric: tabular-nums;
 }
 :where(body.page-logger) th {
     position: sticky;
@@ -1806,6 +1929,42 @@ body:where(.page-logger) {
 }
 :where(body.page-logger) td:first-child {
     color: #9fc7ff;
+}
+:where(body.page-logger) .identifier-table th:nth-child(1) {
+    width: 104px;
+}
+:where(body.page-logger) .identifier-table th:nth-child(2) {
+    width: 72px;
+}
+:where(body.page-logger) .identifier-table th:nth-child(4) {
+    width: 82px;
+}
+:where(body.page-logger) .identifier-table td:nth-child(2),
+:where(body.page-logger) .identifier-table td:nth-child(4) {
+    text-align: right;
+}
+:where(body.page-logger) .event-table th:nth-child(1) {
+    width: 76px;
+}
+:where(body.page-logger) .event-table th:nth-child(2) {
+    width: 148px;
+}
+:where(body.page-logger) .event-table th:nth-child(3) {
+    width: 86px;
+}
+:where(body.page-logger) .event-table th:nth-child(4) {
+    width: 88px;
+}
+:where(body.page-logger) .event-table th:nth-child(6) {
+    width: 112px;
+}
+:where(body.page-logger) .data-cell,
+:where(body.page-logger) .text-cell {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+:where(body.page-logger) .text-cell {
+    color: #b8c4d1;
 }
 :where(body.page-logger) tr:hover td {
     background: #19232e;
@@ -2106,9 +2265,11 @@ body:where(.page-analyzer) {
 }
 :where(body.page-analyzer) table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     white-space: nowrap;
     font: 12px "Cascadia Mono", Consolas, monospace;
+    font-variant-numeric: tabular-nums;
 }
 :where(body.page-analyzer) th {
     position: sticky;
@@ -2125,6 +2286,48 @@ body:where(.page-analyzer) {
 }
 :where(body.page-analyzer) td:first-child {
     color: #9fc7ff;
+}
+:where(body.page-analyzer) .identifier-table th:nth-child(1) {
+    width: 58px;
+}
+:where(body.page-analyzer) .identifier-table th:nth-child(2) {
+    width: 148px;
+}
+:where(body.page-analyzer) .identifier-table th:nth-child(3) {
+    width: 76px;
+}
+:where(body.page-analyzer) .identifier-table th:nth-child(4) {
+    width: 190px;
+}
+:where(body.page-analyzer) .identifier-table td:nth-child(3),
+:where(body.page-analyzer) .identifier-table td:nth-child(4) {
+    text-align: right;
+}
+:where(body.page-analyzer) .event-table th:nth-child(1) {
+    width: 68px;
+}
+:where(body.page-analyzer) .event-table th:nth-child(2) {
+    width: 46px;
+}
+:where(body.page-analyzer) .event-table th:nth-child(3) {
+    width: 132px;
+}
+:where(body.page-analyzer) .event-table th:nth-child(4) {
+    width: 84px;
+}
+:where(body.page-analyzer) .event-table th:nth-child(5) {
+    width: 88px;
+}
+:where(body.page-analyzer) .event-table th:nth-child(7) {
+    width: 112px;
+}
+:where(body.page-analyzer) .data-cell,
+:where(body.page-analyzer) .text-cell {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+:where(body.page-analyzer) .text-cell {
+    color: #b8c4d1;
 }
 :where(body.page-analyzer) tr:hover td {
     background: #19232e;
