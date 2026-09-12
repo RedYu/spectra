@@ -6,6 +6,8 @@
 #include "web_uds_api.h"
 
 #include <ctype.h>
+#include <inttypes.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +24,7 @@
 #include "uds_client.h"
 #include "uds_download.h"
 #include "storage_sd_service.h"
+#include "time_service.h"
 #include "web_api_common.h"
 
 #define WEB_UDS_BUFFER_SIZE       (1024U)
@@ -30,6 +33,9 @@
 #define WEB_UDS_DOWNLOAD_TASK_STACK_SIZE (4096U)
 #define WEB_UDS_FIRMWARE_DIRECTORY       "/firmwares/"
 #define WEB_UDS_FIRMWARE_MAX_SIZE        (64U * 1024U * 1024U)
+#define WEB_UDS_JOURNAL_DIRECTORY        "/logs/firmware"
+#define WEB_UDS_JOURNAL_PATH_MAX_SIZE    (128U)
+#define WEB_UDS_JOURNAL_LINE_MAX_SIZE    (384U)
 
 static SemaphoreHandle_t s_lock = NULL;
 static uint8_t *s_receive_buffer = NULL;
@@ -42,7 +48,14 @@ static bool s_client_config_valid = false;
 static uds_download_t s_download;
 static bool s_download_active = false;
 static FILE *s_download_file = NULL;
+static FILE *s_download_journal = NULL;
 static uint64_t s_download_file_offset = 0U;
+static uint64_t s_download_started_at_us = 0U;
+static uint32_t s_download_logged_retries = 0U;
+static bool s_download_journal_finalized = false;
+static char s_download_journal_path[
+    WEB_UDS_JOURNAL_PATH_MAX_SIZE
+] = {0};
 static uint8_t *s_download_transfer_buffer = NULL;
 static TaskHandle_t s_download_task = NULL;
 static uint32_t s_sequence = 0U;
@@ -115,6 +128,27 @@ static esp_err_t web_uds_download_read(
 );
 
 static void web_uds_download_close_file(void);
+
+static esp_err_t web_uds_download_open_journal(
+    const char *firmware_path,
+    uint64_t firmware_size,
+    uint64_t memory_address,
+    uint8_t data_format_identifier
+);
+
+static esp_err_t web_uds_download_write_journal(
+    const char *format,
+    ...
+);
+
+static void web_uds_download_log_progress(
+    const uds_download_progress_t *progress
+);
+
+static void web_uds_download_finalize_journal(
+    const uds_download_progress_t *progress,
+    const char *outcome
+);
 
 static esp_err_t web_uds_download_start(
     const cJSON *root
@@ -946,6 +980,233 @@ static void web_uds_download_close_file(void)
     }
 }
 
+static esp_err_t web_uds_download_write_journal(
+    const char *format,
+    ...
+)
+{
+    if ((s_download_journal == NULL) || (format == NULL)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char line[WEB_UDS_JOURNAL_LINE_MAX_SIZE];
+    va_list arguments;
+    va_start(arguments, format);
+    const int length =
+        vsnprintf(
+            line,
+            sizeof(line),
+            format,
+            arguments
+        );
+    va_end(arguments);
+
+    if ((length < 0) || ((size_t)length >= sizeof(line))) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    size_t written = 0U;
+    const esp_err_t result =
+        storage_sd_service_write(
+            s_download_journal,
+            line,
+            (size_t)length,
+            &written
+        );
+
+    if ((result == ESP_OK) && (written != (size_t)length)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    return result;
+}
+
+static esp_err_t web_uds_download_open_journal(
+    const char *firmware_path,
+    uint64_t firmware_size,
+    uint64_t memory_address,
+    uint8_t data_format_identifier
+)
+{
+    esp_err_t result =
+        storage_sd_service_ensure_directory(
+            WEB_UDS_JOURNAL_DIRECTORY
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    char filename[64];
+    result =
+        time_service_format_filename(
+            "uds",
+            "log",
+            filename,
+            sizeof(filename)
+        );
+
+    if (result != ESP_OK) {
+        const int length =
+            snprintf(
+                filename,
+                sizeof(filename),
+                "uds-boot-%" PRIu64 ".log",
+                (uint64_t)esp_timer_get_time()
+            );
+
+        if ((length < 0) ||
+            ((size_t)length >= sizeof(filename))) {
+
+            return ESP_ERR_INVALID_SIZE;
+        }
+    } else {
+        char *extension = strrchr(filename, '.');
+
+        if (extension == NULL) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+
+        const size_t prefix_length =
+            (size_t)(extension - filename);
+        const int length =
+            snprintf(
+                &filename[prefix_length],
+                sizeof(filename) - prefix_length,
+                "-%" PRIu64 ".log",
+                (uint64_t)esp_timer_get_time()
+            );
+
+        if ((length < 0) ||
+            ((size_t)length >=
+             (sizeof(filename) - prefix_length))) {
+
+            return ESP_ERR_INVALID_SIZE;
+        }
+    }
+
+    const int path_length =
+        snprintf(
+            s_download_journal_path,
+            sizeof(s_download_journal_path),
+            "%s/%s",
+            WEB_UDS_JOURNAL_DIRECTORY,
+            filename
+        );
+
+    if ((path_length < 0) ||
+        ((size_t)path_length >=
+         sizeof(s_download_journal_path))) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    result =
+        storage_sd_service_open(
+            s_download_journal_path,
+            "w",
+            &s_download_journal
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    s_download_started_at_us =
+        (uint64_t)esp_timer_get_time();
+    s_download_logged_retries = 0U;
+    s_download_journal_finalized = false;
+
+    result =
+        web_uds_download_write_journal(
+            "event=start time_us=%" PRIu64
+            " firmware=\"%s\" size=%" PRIu64
+            " address=0x%" PRIX64 " data_format=0x%02X\n",
+            s_download_started_at_us,
+            firmware_path,
+            firmware_size,
+            memory_address,
+            (unsigned int)data_format_identifier
+        );
+
+    if (result == ESP_OK) {
+        result = storage_sd_service_flush(s_download_journal);
+    }
+
+    if (result != ESP_OK) {
+        (void)storage_sd_service_close(&s_download_journal);
+        s_download_journal_path[0] = '\0';
+    }
+
+    return result;
+}
+
+static void web_uds_download_log_progress(
+    const uds_download_progress_t *progress
+)
+{
+    if ((progress == NULL) ||
+        (progress->retry_count == s_download_logged_retries)) {
+
+        return;
+    }
+
+    if (web_uds_download_write_journal(
+            "event=retry time_us=%" PRIu64
+            " block=%" PRIu32 " sequence=%u"
+            " retry=%u total_retries=%" PRIu32
+            " nrc=0x%02X\n",
+            (uint64_t)esp_timer_get_time(),
+            progress->acknowledged_blocks + 1U,
+            (unsigned int)progress->block_sequence_counter,
+            (unsigned int)progress->current_block_retry,
+            progress->retry_count,
+            (unsigned int)progress->last_negative_response_code
+        ) == ESP_OK) {
+
+        s_download_logged_retries = progress->retry_count;
+    }
+}
+
+static void web_uds_download_finalize_journal(
+    const uds_download_progress_t *progress,
+    const char *outcome
+)
+{
+    if ((s_download_journal == NULL) ||
+        s_download_journal_finalized ||
+        (progress == NULL) ||
+        (outcome == NULL)) {
+
+        return;
+    }
+
+    s_download_journal_finalized = true;
+    const uint64_t now_us =
+        (uint64_t)esp_timer_get_time();
+
+    (void)web_uds_download_write_journal(
+        "event=finish time_us=%" PRIu64
+        " outcome=%s duration_us=%" PRIu64
+        " transferred=%" PRIu64 " total=%" PRIu64
+        " blocks=%" PRIu32 " retries=%" PRIu32
+        " nrc=0x%02X result=%d\n",
+        now_us,
+        outcome,
+        now_us - s_download_started_at_us,
+        progress->transferred_size,
+        progress->total_size,
+        progress->acknowledged_blocks,
+        progress->retry_count,
+        (unsigned int)progress->last_negative_response_code,
+        (int)progress->last_result
+    );
+
+    (void)storage_sd_service_flush(s_download_journal);
+    (void)storage_sd_service_sync(s_download_journal);
+    (void)storage_sd_service_close(&s_download_journal);
+}
+
 static void web_uds_download_task(
     void *context
 )
@@ -975,11 +1236,23 @@ static void web_uds_download_task(
                 &s_download,
                 &progress
             );
+            web_uds_download_log_progress(&progress);
 
             if ((progress.state == UDS_DOWNLOAD_COMPLETE) ||
                 (progress.state == UDS_DOWNLOAD_CANCELLED) ||
                 (progress.state == UDS_DOWNLOAD_ERROR)) {
 
+                const char *outcome =
+                    (progress.state == UDS_DOWNLOAD_COMPLETE)
+                        ? "completed"
+                        : (progress.state == UDS_DOWNLOAD_CANCELLED)
+                            ? "cancelled"
+                            : "failed";
+
+                web_uds_download_finalize_journal(
+                    &progress,
+                    outcome
+                );
                 web_uds_download_close_file();
                 s_download_task = NULL;
             }
@@ -1046,6 +1319,18 @@ static esp_err_t web_uds_download_start(
     }
 
     result =
+        web_uds_download_open_journal(
+            path->valuestring,
+            (uint64_t)information.st_size,
+            address,
+            (uint8_t)data_format
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
         storage_sd_service_open(
             path->valuestring,
             "rb",
@@ -1053,6 +1338,16 @@ static esp_err_t web_uds_download_start(
         );
 
     if (result != ESP_OK) {
+        uds_download_progress_t progress = {
+            .state = UDS_DOWNLOAD_ERROR,
+            .total_size = (uint64_t)information.st_size,
+            .last_result = result,
+        };
+
+        web_uds_download_finalize_journal(
+            &progress,
+            "failed"
+        );
         return result;
     }
 
@@ -1103,10 +1398,30 @@ static esp_err_t web_uds_download_start(
             s_download_active = false;
             result = ESP_ERR_NO_MEM;
             (void)uds_download_close(&s_download);
+            uds_download_progress_t progress = {0};
+            (void)uds_download_get_progress(
+                &s_download,
+                &progress
+            );
+            progress.last_result = result;
+            web_uds_download_finalize_journal(
+                &progress,
+                "failed"
+            );
             web_uds_download_close_file();
             (void)uds_client_open(&s_client, &s_client_config);
         }
     } else {
+        uds_download_progress_t progress = {0};
+        (void)uds_download_get_progress(
+            &s_download,
+            &progress
+        );
+        progress.last_result = result;
+        web_uds_download_finalize_journal(
+            &progress,
+            "failed"
+        );
         web_uds_download_close_file();
         (void)uds_client_open(&s_client, &s_client_config);
     }
@@ -1172,6 +1487,16 @@ static esp_err_t web_uds_get_handler(
             (download_progress.state == UDS_DOWNLOAD_ERROR)) {
 
             web_uds_download_close_file();
+            web_uds_download_finalize_journal(
+                &download_progress,
+                (download_progress.state ==
+                 UDS_DOWNLOAD_COMPLETE)
+                    ? "completed"
+                    : (download_progress.state ==
+                       UDS_DOWNLOAD_CANCELLED)
+                        ? "cancelled"
+                        : "failed"
+            );
         }
     } else if (s_client.state != UDS_CLIENT_CLOSED) {
         (void)uds_client_poll(
@@ -1312,6 +1637,11 @@ static esp_err_t web_uds_get_handler(
             response,
             "download_nrc",
             download_progress.last_negative_response_code
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            response,
+            "download_journal",
+            s_download_journal_path
         ) != NULL);
 
     free(payload);
@@ -1385,6 +1715,15 @@ static esp_err_t web_uds_post_handler(
         }
     } else if (strcmp(action->valuestring, "close") == 0) {
         if (s_download_active) {
+            uds_download_progress_t progress = {0};
+            (void)uds_download_get_progress(
+                &s_download,
+                &progress
+            );
+            web_uds_download_finalize_journal(
+                &progress,
+                "cancelled"
+            );
             web_uds_download_close_file();
             result = uds_download_close(&s_download);
             s_download_active = false;

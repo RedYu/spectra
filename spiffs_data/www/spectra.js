@@ -5864,6 +5864,9 @@
                       `result ${data.download_result}` +
                       (data.download_nrc
                           ? ` · NRC 0x${data.download_nrc.toString(16).toUpperCase()}`
+                          : '') +
+                      (data.download_journal
+                          ? ` · ${data.download_journal}`
                           : '')
                     : 'No automatic download';
 

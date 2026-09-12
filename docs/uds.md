@@ -95,6 +95,13 @@ timeout, `busyRepeatRequest` (`0x21`), or `wrongBlockSequenceCounter` (`0x73`).
 The complete automatic transfer is limited to ten minutes. Progress reports the
 acknowledged block count, total retry count, current block retry, and last NRC.
 
+Each automatic programming attempt creates a text journal in
+`/logs/firmware`. Its filename uses local synchronized time when available and
+falls back to monotonic boot time. The journal records the firmware path and
+size, target address, data format, retry events, transferred bytes, block and
+retry counters, final NRC, result, duration, and the final outcome. The journal
+is flushed when opened and synchronized to the SD card before it is closed.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
