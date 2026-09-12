@@ -15,140 +15,156 @@
 
 <body class="page-test">
     <header class="spectra-header">
-        <a class="spectra-brand" href="/"><span aria-hidden="true">▧</span> Spectra</a>
-        <nav class="spectra-nav" aria-label="Main navigation">
+        <a
+            class="spectra-brand"
+            href="/"
+        >
+            <span aria-hidden="true">▧</span>
+            Spectra
+        </a>
+
+        <nav
+            class="spectra-nav"
+            aria-label="Main navigation"
+        >
             <a href="/">Overview</a>
             <a href="/can_logger">CAN Logger</a>
             <a href="/can_analyzer">CAN Analyzer</a>
             <a href="/files">Files</a>
             <a href="/settings">Settings</a>
-            <a href="/can_test" aria-current="page">Diagnostics</a>
+
+            <a
+                href="/can_test"
+                aria-current="page"
+            >
+                Diagnostics
+            </a>
         </nav>
     </header>
+
     <main class="spectra-page">
-    <div class="page-header">
-        <div class="page-header-main">
-            <h1 class="page-title">
-                CAN WebSocket Test
-            </h1>
+        <div class="page-header">
+            <div class="page-header-main">
+                <h1 class="page-title">
+                    CAN WebSocket Test
+                </h1>
 
-            <div class="connection-toolbar">
-                <div id="status">
-                    Disconnected
-                </div>
+                <div class="connection-toolbar">
+                    <div id="status">
+                        Disconnected
+                    </div>
 
-                <div class="connection-actions">
-                    <button id="connect">
-                        Connect
-                    </button>
+                    <div class="connection-actions">
+                        <button id="connect">
+                            Connect
+                        </button>
 
-                    <button id="disconnect">
-                        Disconnect
-                    </button>
+                        <button id="disconnect">
+                            Disconnect
+                        </button>
 
-                    <button id="clear">
-                        Clear
-                    </button>
+                        <button id="clear">
+                            Clear
+                        </button>
+                    </div>
                 </div>
             </div>
+
+            <section class="statistics-panel">
+                <h2 class="statistics-title">
+                    Stream statistics
+                </h2>
+
+                <div class="statistics-grid">
+                    <span class="statistics-label">Queued events</span>
+                    <span
+                        id="statistics-queued"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Sent events</span>
+                    <span
+                        id="statistics-sent"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Dropped events</span>
+                    <span
+                        id="statistics-dropped"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Send failures</span>
+                    <span
+                        id="statistics-failures"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Queue</span>
+                    <span
+                        id="statistics-queue"
+                        class="statistics-value"
+                    >0 / 64</span>
+
+                    <span class="statistics-label">Queue peak</span>
+                    <span
+                        id="statistics-queue-peak"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Sent batches</span>
+                    <span
+                        id="statistics-sent-batches"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Binary payload</span>
+                    <span
+                        id="statistics-binary-bytes"
+                        class="statistics-value"
+                    >0 B</span>
+
+                    <span class="statistics-label">Batch events total</span>
+                    <span
+                        id="statistics-batch-events-total"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Batch average</span>
+                    <span
+                        id="statistics-batch-average"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Batch peak</span>
+                    <span
+                        id="statistics-batch-peak"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Received batches</span>
+                    <span
+                        id="statistics-batches"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Received events</span>
+                    <span
+                        id="statistics-events"
+                        class="statistics-value"
+                    >0</span>
+
+                    <span class="statistics-label">Filtered events</span>
+                    <span
+                        id="statistics-filtered"
+                        class="statistics-value"
+                    >0</span>
+                </div>
+            </section>
         </div>
 
-        <section class="statistics-panel">
-            <h2 class="statistics-title">
-                Stream statistics
-            </h2>
-
-            <div class="statistics-grid">
-                <span class="statistics-label">Queued events</span>
-                <span
-                    id="statistics-queued"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Sent events</span>
-                <span
-                    id="statistics-sent"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Dropped events</span>
-                <span
-                    id="statistics-dropped"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Send failures</span>
-                <span
-                    id="statistics-failures"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Queue</span>
-                <span
-                    id="statistics-queue"
-                    class="statistics-value"
-                >0 / 64</span>
-
-                <span class="statistics-label">Queue peak</span>
-                <span
-                    id="statistics-queue-peak"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Sent batches</span>
-                <span
-                    id="statistics-sent-batches"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Binary payload</span>
-                <span
-                    id="statistics-binary-bytes"
-                    class="statistics-value"
-                >0 B</span>
-
-                <span class="statistics-label">Batch events total</span>
-                <span
-                    id="statistics-batch-events-total"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Batch average</span>
-                <span
-                    id="statistics-batch-average"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Batch peak</span>
-                <span
-                    id="statistics-batch-peak"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Received batches</span>
-                <span
-                    id="statistics-batches"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Received events</span>
-                <span
-                    id="statistics-events"
-                    class="statistics-value"
-                >0</span>
-
-                <span class="statistics-label">Filtered events</span>
-                <span
-                    id="statistics-filtered"
-                    class="statistics-value"
-                >0</span>
-            </div>
-        </section>
-    </div>
-
-    <div id="log"></div>
-
+        <div id="log"></div>
     </main>
 
-    </body>
+</body>
 </html>
