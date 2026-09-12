@@ -171,3 +171,30 @@ esp_err_t uds_request_encode_read_dtc_information(
         encoded_size
     );
 }
+
+esp_err_t uds_request_encode_clear_diagnostic_information(
+    uint32_t group_of_dtc,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (group_of_dtc > 0xFFFFFFU) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint8_t parameters[3] = {
+        (uint8_t)(group_of_dtc >> 16U),
+        (uint8_t)(group_of_dtc >> 8U),
+        (uint8_t)group_of_dtc,
+    };
+
+    return uds_protocol_encode_request(
+        UDS_SERVICE_CLEAR_DIAGNOSTIC_INFORMATION,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}

@@ -255,3 +255,29 @@ esp_err_t uds_protocol_get_dtc_record(
 
     return ESP_OK;
 }
+
+void uds_protocol_decode_dtc_status(
+    uint8_t status_byte,
+    uds_dtc_status_t *status
+)
+{
+    if (status == NULL) {
+        return;
+    }
+
+    *status = (uds_dtc_status_t) {
+        .test_failed = (status_byte & (1U << 0U)) != 0U,
+        .test_failed_this_operation_cycle =
+            (status_byte & (1U << 1U)) != 0U,
+        .pending = (status_byte & (1U << 2U)) != 0U,
+        .confirmed = (status_byte & (1U << 3U)) != 0U,
+        .test_not_completed_since_last_clear =
+            (status_byte & (1U << 4U)) != 0U,
+        .test_failed_since_last_clear =
+            (status_byte & (1U << 5U)) != 0U,
+        .test_not_completed_this_operation_cycle =
+            (status_byte & (1U << 6U)) != 0U,
+        .warning_indicator_requested =
+            (status_byte & (1U << 7U)) != 0U,
+    };
+}

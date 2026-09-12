@@ -353,6 +353,35 @@ esp_err_t uds_client_read_dtc_information(
     );
 }
 
+esp_err_t uds_client_clear_diagnostic_information(
+    uds_client_t *client,
+    uint32_t group_of_dtc,
+    uint64_t now_us
+)
+{
+    uint8_t request[4] = {0};
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_clear_diagnostic_information(
+            group_of_dtc,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        now_us
+    );
+}
+
 bool uds_client_busy(
     const uds_client_t *client
 )

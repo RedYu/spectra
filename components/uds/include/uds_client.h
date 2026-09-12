@@ -134,6 +134,12 @@ esp_err_t uds_client_read_dtc_information(
     uint64_t now_us
 );
 
+esp_err_t uds_client_clear_diagnostic_information(
+    uds_client_t *client,
+    uint32_t group_of_dtc,
+    uint64_t now_us
+);
+
 esp_err_t uds_client_poll(
     uds_client_t *client,
     uint64_t now_us

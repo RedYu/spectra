@@ -106,6 +106,19 @@ typedef struct
 
 typedef struct
 {
+    bool test_failed;
+    bool test_failed_this_operation_cycle;
+    bool pending;
+    bool confirmed;
+    bool test_not_completed_since_last_clear;
+    bool test_failed_since_last_clear;
+    bool test_not_completed_this_operation_cycle;
+    bool warning_indicator_requested;
+
+} uds_dtc_status_t;
+
+typedef struct
+{
     uint8_t subfunction;
     uint8_t status_availability_mask;
     uint8_t format_identifier;
@@ -144,6 +157,11 @@ esp_err_t uds_protocol_get_dtc_record(
     const uds_dtc_response_t *response,
     size_t index,
     uds_dtc_record_t *record
+);
+
+void uds_protocol_decode_dtc_status(
+    uint8_t status_byte,
+    uds_dtc_status_t *status
 );
 
 #ifdef __cplusplus

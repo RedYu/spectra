@@ -22,7 +22,12 @@ The ReadDTCInformation implementation supports reporting the DTC count by
 status mask (`0x19 0x01`), reporting DTC records by status mask (`0x19 0x02`),
 and reporting supported DTCs (`0x19 0x0A`). Positive responses expose the
 status-availability mask, DTC format identifier, 24-bit DTC values, and status
-bytes through allocation-free views of the ISO-TP response buffer.
+bytes through allocation-free views of the ISO-TP response buffer. The status
+byte can also be decoded into the eight ISO 14229 DTC status flags.
+
+ClearDiagnosticInformation (`0x14`) accepts a 24-bit group-of-DTC value. The
+web diagnostics page asks for confirmation before submitting this destructive
+request.
 
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
@@ -34,9 +39,9 @@ payload memory.
 - physical addressing only through the selected ISO-TP channel;
 - no periodic Tester Present scheduler;
 - no security-access algorithm integration;
-- no typed DID, DTC, routine, download, or transfer decoders yet;
-- no UDS Web API yet.
+- no typed DID, routine, download, or transfer decoders yet;
+- no authentication or role-based protection for destructive UDS requests.
 
-The next layer should add typed request builders for Diagnostic Session Control,
-Tester Present, ECU Reset, and Read Data By Identifier before exposing UDS in
-the web interface.
+The next layer should add WriteDataByIdentifier and RoutineControl with explicit
+confirmation and request validation before adding download and transfer
+services.

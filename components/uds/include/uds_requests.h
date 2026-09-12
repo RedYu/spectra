@@ -73,6 +73,13 @@ esp_err_t uds_request_encode_read_dtc_information(
     size_t *encoded_size
 );
 
+esp_err_t uds_request_encode_clear_diagnostic_information(
+    uint32_t group_of_dtc,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
 #ifdef __cplusplus
 }
 #endif

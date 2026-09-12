@@ -325,3 +325,65 @@ TEST_CASE(
         sizeof(expected)
     );
 }
+
+TEST_CASE(
+    "UDS request helper encodes Clear Diagnostic Information",
+    "[uds]"
+)
+{
+    uint8_t buffer[4] = {0};
+    size_t encoded_size = 0U;
+    const uint8_t expected[] = {
+        0x14U,
+        0xFFU,
+        0xFFU,
+        0xFFU,
+    };
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_clear_diagnostic_information(
+            0xFFFFFFU,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(sizeof(expected), encoded_size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        expected,
+        buffer,
+        sizeof(expected)
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_request_encode_clear_diagnostic_information(
+            0x1000000U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+}
+
+TEST_CASE(
+    "UDS protocol decodes DTC status bits",
+    "[uds]"
+)
+{
+    uds_dtc_status_t status = {0};
+
+    uds_protocol_decode_dtc_status(
+        0x8DU,
+        &status
+    );
+
+    TEST_ASSERT_TRUE(status.test_failed);
+    TEST_ASSERT_FALSE(status.test_failed_this_operation_cycle);
+    TEST_ASSERT_TRUE(status.pending);
+    TEST_ASSERT_TRUE(status.confirmed);
+    TEST_ASSERT_FALSE(status.test_not_completed_since_last_clear);
+    TEST_ASSERT_FALSE(status.test_failed_since_last_clear);
+    TEST_ASSERT_FALSE(status.test_not_completed_this_operation_cycle);
+    TEST_ASSERT_TRUE(status.warning_indicator_requested);
+}

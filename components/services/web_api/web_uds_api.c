@@ -482,6 +482,24 @@ static esp_err_t web_uds_request(
         );
     }
 
+    if (strcmp(kind->valuestring, "clear_dtc") == 0) {
+        if (!web_uds_number(
+                root,
+                "group",
+                0xFFFFFFU,
+                &value
+            )) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        return uds_client_clear_diagnostic_information(
+            &s_client,
+            value,
+            now_us
+        );
+    }
+
     if (strcmp(kind->valuestring, "session") == 0) {
         if (!web_uds_number(root, "value", 0x7FU, &value) ||
             !web_uds_boolean(root, "suppress", false, &suppress)) {

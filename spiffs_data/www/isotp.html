@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=19">
-    <script src="spectra.js?v=19" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=20">
+    <script src="spectra.js?v=20" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -269,6 +269,7 @@
                         <select id="uds-service">
                             <option value="read_did">Read Data By Identifier</option>
                             <option value="read_dtc">Read DTC Information</option>
+                            <option value="clear_dtc">Clear Diagnostic Information</option>
                             <option value="session">Diagnostic Session Control</option>
                             <option value="tester_present">Tester Present</option>
                             <option value="reset">ECU Reset</option>
@@ -298,6 +299,11 @@
                     <label id="uds-dtc-mask-field" hidden>
                         DTC status mask
                         <input id="uds-dtc-mask" value="FF" spellcheck="false">
+                    </label>
+
+                    <label id="uds-dtc-group-field" hidden>
+                        Group of DTC
+                        <input id="uds-dtc-group" value="FFFFFF" spellcheck="false">
                     </label>
 
                     <label id="uds-raw-sid-field" hidden>

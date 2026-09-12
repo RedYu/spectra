@@ -5578,6 +5578,8 @@
             element('uds-dtc-mask-field').hidden =
                 selected !== 'read_dtc' ||
                 element('uds-dtc-subfunction').value === '0A';
+            element('uds-dtc-group-field').hidden =
+                selected !== 'clear_dtc';
             element('uds-subfunction-field').hidden =
                 selected !== 'session' && selected !== 'reset';
             element('uds-raw-sid-field').hidden = selected !== 'raw';
@@ -5623,7 +5625,8 @@
                         bytes[offset + 2];
 
                     lines.push(
-                        `0x${hex(code, 6)}  status 0x${hex(bytes[offset + 3], 2)}`
+                        `0x${hex(code, 6)}  status 0x${hex(bytes[offset + 3], 2)}` +
+                        `  ${decodeDtcStatus(bytes[offset + 3])}`
                     );
                 }
 
@@ -5634,6 +5637,24 @@
             }
 
             return null;
+        }
+
+        function decodeDtcStatus(status) {
+            const names = [
+                'test failed',
+                'failed this cycle',
+                'pending',
+                'confirmed',
+                'not completed since clear',
+                'failed since clear',
+                'not completed this cycle',
+                'warning indicator requested'
+            ];
+            const active = names.filter(
+                (_, bit) => (status & (1 << bit)) !== 0
+            );
+
+            return active.length ? active.join(', ') : 'no status flags';
         }
 
         async function refresh() {
@@ -5755,6 +5776,20 @@
                             element('uds-dtc-mask'),
                             0xff,
                             'DTC status mask'
+                        );
+                } else if (kind === 'clear_dtc') {
+                    const confirmed = window.confirm(
+                        'Clear diagnostic information in the selected ECU?'
+                    );
+
+                    if (!confirmed)
+                        return;
+
+                    request.group =
+                        parseHexNumber(
+                            element('uds-dtc-group'),
+                            0xffffff,
+                            'Group of DTC'
                         );
                 } else if (kind === 'session' || kind === 'reset') {
                     request.value =
