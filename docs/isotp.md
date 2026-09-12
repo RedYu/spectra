@@ -4,13 +4,18 @@ Spectra implements ISO-TP in layers. The protocol codec in `components/isotp`
 validates and encodes Protocol Control Information without owning tasks,
 queues, CAN interfaces, or payload buffers.
 
-The codec currently supports normal addressing for Classical CAN and CAN FD:
+The codec and session layers support normal, extended, and mixed addressing
+for Classical CAN and CAN FD:
 
 - Single Frame, including the CAN FD escape length;
 - First Frame with 12-bit and 32-bit message lengths;
 - Consecutive Frame and its four-bit sequence number;
 - Flow Control statuses, Block Size, and STmin;
 - STmin conversion for milliseconds and 100–900 microseconds.
+- configurable transmit padding;
+- Flow Control overflow responses when a message exceeds the RX buffer.
+- functional transmissions restricted to a Single Frame, as required by
+  ISO-TP.
 
 Malformed received headers return `ESP_ERR_INVALID_RESPONSE`. Invalid local
 arguments return `ESP_ERR_INVALID_ARG`; a message that does not fit the selected
@@ -55,6 +60,7 @@ Protocol processing and calls to `can_router_transmit()` run in the dedicated
 ISO-TP task. Successful router TX confirmations advance the state machine;
 failed and aborted confirmations terminate the current transfer.
 
-The current transport implementation uses normal addressing and one half-duplex
-operation per channel. Extended and mixed ISO-TP addressing are not implemented
-yet.
+The transport implementation supports normal, extended, and mixed addressing
+and one half-duplex operation per channel. Extended and mixed addressing use a
+configured address byte before the PCI. CAN identifier width remains an
+independent channel setting.

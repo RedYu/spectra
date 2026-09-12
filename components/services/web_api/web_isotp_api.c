@@ -51,6 +51,14 @@ static bool web_isotp_get_u32(
     uint32_t *value
 );
 
+static bool web_isotp_get_optional_u32(
+    const cJSON *root,
+    const char *name,
+    uint32_t maximum,
+    uint32_t default_value,
+    uint32_t *value
+);
+
 static bool web_isotp_get_bool(
     const cJSON *root,
     const char *name,
@@ -120,6 +128,33 @@ static bool web_isotp_get_u32(
 
     *value = (uint32_t)item->valuedouble;
     return true;
+}
+
+static bool web_isotp_get_optional_u32(
+    const cJSON *root,
+    const char *name,
+    uint32_t maximum,
+    uint32_t default_value,
+    uint32_t *value
+)
+{
+    const cJSON *item =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            name
+        );
+
+    if (item == NULL) {
+        *value = default_value;
+        return true;
+    }
+
+    return web_isotp_get_u32(
+        root,
+        name,
+        maximum,
+        value
+    );
 }
 
 static bool web_isotp_get_bool(
@@ -352,6 +387,10 @@ static esp_err_t web_isotp_configure(
     uint32_t bus = 0U;
     uint32_t receive_identifier = 0U;
     uint32_t transmit_identifier = 0U;
+    uint32_t addressing_mode = 0U;
+    uint32_t receive_address = 0U;
+    uint32_t transmit_address = 0U;
+    uint32_t padding_byte = 0U;
     uint32_t link_data_length = 0U;
     uint32_t block_size = 0U;
     uint32_t st_min = 0U;
@@ -359,6 +398,7 @@ static esp_err_t web_isotp_configure(
     bool extended = false;
     bool can_fd = false;
     bool brs = false;
+    bool functional = false;
 
     if (!web_isotp_get_u32(root, "bus", 1U, &bus) ||
         !web_isotp_get_u32(
@@ -378,6 +418,34 @@ static esp_err_t web_isotp_configure(
             "link_data_length",
             CAN_FRAME_FD_DATA_MAX_LENGTH,
             &link_data_length
+        ) ||
+        !web_isotp_get_optional_u32(
+            root,
+            "addressing_mode",
+            ISOTP_ADDRESSING_MIXED,
+            ISOTP_ADDRESSING_NORMAL,
+            &addressing_mode
+        ) ||
+        !web_isotp_get_optional_u32(
+            root,
+            "rx_address",
+            UINT8_MAX,
+            0U,
+            &receive_address
+        ) ||
+        !web_isotp_get_optional_u32(
+            root,
+            "tx_address",
+            UINT8_MAX,
+            0U,
+            &transmit_address
+        ) ||
+        !web_isotp_get_optional_u32(
+            root,
+            "padding_byte",
+            UINT8_MAX,
+            0U,
+            &padding_byte
         ) ||
         !web_isotp_get_u32(
             root,
@@ -400,6 +468,12 @@ static esp_err_t web_isotp_configure(
         !web_isotp_get_bool(root, "extended", false, &extended) ||
         !web_isotp_get_bool(root, "fd", false, &can_fd) ||
         !web_isotp_get_bool(root, "brs", false, &brs) ||
+        !web_isotp_get_bool(
+            root,
+            "functional",
+            false,
+            &functional
+        ) ||
         (timeout_ms == 0U)) {
 
         return ESP_ERR_INVALID_ARG;
@@ -424,7 +498,13 @@ static esp_err_t web_isotp_configure(
         .can_fd = can_fd,
         .bit_rate_switch = brs,
         .session = {
+            .addressing_mode =
+                (isotp_addressing_mode_t)addressing_mode,
+            .transmit_address = (uint8_t)transmit_address,
+            .receive_address = (uint8_t)receive_address,
             .link_data_length = (uint8_t)link_data_length,
+            .padding_byte = (uint8_t)padding_byte,
+            .functional_transmit = functional,
             .receive_block_size = (uint8_t)block_size,
             .receive_st_min = (uint8_t)st_min,
             .maximum_wait_frames = 3U,

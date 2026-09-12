@@ -103,6 +103,40 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "ISO-TP uses the escape Single Frame format for CAN FD",
+    "[isotp]"
+)
+{
+    uint8_t frame[64] = {0};
+    uint8_t offset = 0U;
+    isotp_pci_t pci = {0};
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        isotp_protocol_encode_single_frame(
+            3U,
+            sizeof(frame),
+            frame,
+            &offset
+        )
+    );
+    TEST_ASSERT_EQUAL_UINT8(2U, offset);
+    TEST_ASSERT_EQUAL_HEX8(0x00U, frame[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x03U, frame[1]);
+
+    frame[0] = 0x03U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_RESPONSE,
+        isotp_protocol_decode(
+            frame,
+            sizeof(frame),
+            &pci
+        )
+    );
+}
+
+TEST_CASE(
     "ISO-TP decodes Consecutive and Flow Control frames",
     "[isotp]"
 )

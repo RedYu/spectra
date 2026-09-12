@@ -21,12 +21,24 @@ extern "C" {
 #define ISOTP_SESSION_DEFAULT_MAX_WAIT    (3U)
 
 /**
+ * @brief ISO-TP network-addressing format.
+ */
+typedef enum
+{
+    ISOTP_ADDRESSING_NORMAL = 0,
+    ISOTP_ADDRESSING_EXTENDED,
+    ISOTP_ADDRESSING_MIXED,
+
+} isotp_addressing_mode_t;
+
+/**
  * @brief ISO-TP session state.
  */
 typedef enum
 {
     ISOTP_SESSION_IDLE = 0,
     ISOTP_SESSION_RX_SENDING_FLOW_CONTROL,
+    ISOTP_SESSION_RX_SENDING_OVERFLOW,
     ISOTP_SESSION_RX_WAIT_CONSECUTIVE_FRAME,
     ISOTP_SESSION_RX_COMPLETE,
     ISOTP_SESSION_TX_SENDING_SINGLE_FRAME,
@@ -91,8 +103,23 @@ typedef struct
  */
 typedef struct
 {
+    /** Network-addressing format used before the PCI bytes. */
+    isotp_addressing_mode_t addressing_mode;
+
+    /** Address byte placed before PCI in transmitted frames. */
+    uint8_t transmit_address;
+
+    /** Address byte required before PCI in received frames. */
+    uint8_t receive_address;
+
     /** Maximum CAN payload length: 8 for Classical CAN, up to 64 for CAN FD. */
     uint8_t link_data_length;
+
+    /** Padding value used for unused CAN payload bytes. */
+    uint8_t padding_byte;
+
+    /** Restrict transmission to a functional-addressing Single Frame. */
+    bool functional_transmit;
 
     /** Flow Control Block Size advertised by this receiver; zero is unlimited. */
     uint8_t receive_block_size;

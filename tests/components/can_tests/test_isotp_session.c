@@ -397,6 +397,189 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "ISO-TP session supports extended addressing and padding",
+    "[isotp]"
+)
+{
+    uint8_t receive_buffer[32] = {0};
+    isotp_session_t session = {0};
+    isotp_session_config_t config =
+        isotp_session_test_config();
+    isotp_session_action_t action = {0};
+    const uint8_t payload[3] = {
+        0x22U,
+        0xF1U,
+        0x90U,
+    };
+
+    config.addressing_mode = ISOTP_ADDRESSING_EXTENDED;
+    config.transmit_address = 0xDAU;
+    config.receive_address = 0xF1U;
+    config.padding_byte = 0xAAU;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        isotp_session_init(
+            &session,
+            &config,
+            receive_buffer,
+            sizeof(receive_buffer)
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        isotp_session_start_transmit(
+            &session,
+            payload,
+            sizeof(payload),
+            0U,
+            &action
+        )
+    );
+    TEST_ASSERT_EQUAL_HEX8(0xDAU, action.frame_data[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x03U, action.frame_data[1]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        payload,
+        &action.frame_data[2],
+        sizeof(payload)
+    );
+    TEST_ASSERT_EQUAL_HEX8(0xAAU, action.frame_data[7]);
+
+    isotp_session_reset(&session);
+
+    const uint8_t received_frame[8] = {
+        0xF1U,
+        0x03U,
+        0x62U,
+        0xF1U,
+        0x90U,
+        0xAAU,
+        0xAAU,
+        0xAAU,
+    };
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        isotp_session_receive_frame(
+            &session,
+            received_frame,
+            sizeof(received_frame),
+            0U,
+            &action
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ISOTP_SESSION_ACTION_RECEIVE_COMPLETE,
+        action.type
+    );
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        &received_frame[2],
+        receive_buffer,
+        3U
+    );
+}
+
+TEST_CASE(
+    "ISO-TP receiver sends overflow Flow Control",
+    "[isotp]"
+)
+{
+    uint8_t receive_buffer[8] = {0};
+    isotp_session_t session = {0};
+    const isotp_session_config_t config =
+        isotp_session_test_config();
+    isotp_session_action_t action = {0};
+    const uint8_t first_frame[8] = {
+        0x10U,
+        0x10U,
+        1U,
+        2U,
+        3U,
+        4U,
+        5U,
+        6U,
+    };
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        isotp_session_init(
+            &session,
+            &config,
+            receive_buffer,
+            sizeof(receive_buffer)
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        isotp_session_receive_frame(
+            &session,
+            first_frame,
+            sizeof(first_frame),
+            0U,
+            &action
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ISOTP_SESSION_ACTION_SEND_FRAME,
+        action.type
+    );
+    TEST_ASSERT_EQUAL_HEX8(0x32U, action.frame_data[0]);
+    TEST_ASSERT_EQUAL(
+        ISOTP_SESSION_RX_SENDING_OVERFLOW,
+        session.state
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_NO_MEM,
+        isotp_session_frame_transmitted(
+            &session,
+            10U,
+            &action
+        )
+    );
+    TEST_ASSERT_EQUAL(ISOTP_SESSION_ACTION_ERROR, action.type);
+    TEST_ASSERT_EQUAL(
+        ISOTP_SESSION_ERROR_BUFFER_OVERFLOW,
+        action.error
+    );
+}
+
+TEST_CASE(
+    "ISO-TP functional transmission is limited to a Single Frame",
+    "[isotp]"
+)
+{
+    uint8_t receive_buffer[32] = {0};
+    isotp_session_t session = {0};
+    isotp_session_config_t config =
+        isotp_session_test_config();
+    isotp_session_action_t action = {0};
+    const uint8_t payload[8] = {0};
+
+    config.functional_transmit = true;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        isotp_session_init(
+            &session,
+            &config,
+            receive_buffer,
+            sizeof(receive_buffer)
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_SIZE,
+        isotp_session_start_transmit(
+            &session,
+            payload,
+            sizeof(payload),
+            0U,
+            &action
+        )
+    );
+    TEST_ASSERT_EQUAL(ISOTP_SESSION_IDLE, session.state);
+}
+
+TEST_CASE(
     "ISO-TP session reports a Flow Control timeout",
     "[isotp]"
 )

@@ -86,6 +86,11 @@ static bool isotp_service_event_relevant(
     const can_event_t *event
 );
 
+static bool isotp_service_frame_matches_channel(
+    const can_frame_t *frame,
+    const isotp_service_channel_t *channel
+);
+
 static void isotp_service_task(
     void *context
 );
@@ -616,20 +621,10 @@ static bool isotp_service_event_relevant(
         }
 
         if (event->type == CAN_EVENT_RX) {
-            const bool extended =
-                (event->frame.flags &
-                 CAN_FRAME_FLAG_EXTENDED_ID) != 0U;
-            const bool can_fd =
-                (event->frame.flags &
-                 CAN_FRAME_FLAG_FD) != 0U;
-
-            if ((event->frame.identifier ==
-                 channel->config.receive_identifier) &&
-                (extended ==
-                 channel->config.extended_identifier) &&
-                (can_fd == channel->config.can_fd) &&
-                ((event->frame.flags &
-                  CAN_FRAME_FLAG_REMOTE) == 0U)) {
+            if (isotp_service_frame_matches_channel(
+                    &event->frame,
+                    channel
+                )) {
 
                 return true;
             }
@@ -643,6 +638,38 @@ static bool isotp_service_event_relevant(
     }
 
     return false;
+}
+
+static bool isotp_service_frame_matches_channel(
+    const can_frame_t *frame,
+    const isotp_service_channel_t *channel
+)
+{
+    const bool extended =
+        (frame->flags & CAN_FRAME_FLAG_EXTENDED_ID) != 0U;
+    const bool can_fd =
+        (frame->flags & CAN_FRAME_FLAG_FD) != 0U;
+
+    if ((frame->bus != channel->config.bus) ||
+        (frame->identifier !=
+         channel->config.receive_identifier) ||
+        (extended != channel->config.extended_identifier) ||
+        (can_fd != channel->config.can_fd) ||
+        ((frame->flags & CAN_FRAME_FLAG_REMOTE) != 0U)) {
+
+        return false;
+    }
+
+    if (channel->config.session.addressing_mode ==
+        ISOTP_ADDRESSING_NORMAL) {
+
+        return true;
+    }
+
+    return
+        (frame->data_length > 0U) &&
+        (frame->data[0] ==
+         channel->config.session.receive_address);
 }
 
 static void isotp_service_task(
@@ -743,19 +770,10 @@ static void isotp_service_process_can_event(
         }
 
         if (event->type == CAN_EVENT_RX) {
-            const bool extended =
-                (event->frame.flags &
-                 CAN_FRAME_FLAG_EXTENDED_ID) != 0U;
-            const bool can_fd =
-                (event->frame.flags &
-                 CAN_FRAME_FLAG_FD) != 0U;
-
-            if ((event->frame.identifier !=
-                 channel->config.receive_identifier) ||
-                (extended !=
-                 channel->config.extended_identifier) ||
-                (can_fd != channel->config.can_fd) ||
-                ((event->frame.flags & CAN_FRAME_FLAG_REMOTE) != 0U)) {
+            if (!isotp_service_frame_matches_channel(
+                    &event->frame,
+                    channel
+                )) {
 
                 continue;
             }

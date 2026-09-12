@@ -65,6 +65,13 @@ esp_err_t isotp_protocol_decode(
                 frame_data[0] & ISOTP_PCI_VALUE_MASK;
             uint8_t payload_offset = 1U;
 
+            if ((frame_data_length >
+                 ISOTP_CLASSIC_FRAME_DATA_LENGTH) &&
+                (payload_length != 0U)) {
+
+                return ESP_ERR_INVALID_RESPONSE;
+            }
+
             if (payload_length == 0U) {
                 if (frame_data_length < 2U) {
                     return ESP_ERR_INVALID_RESPONSE;
@@ -220,6 +227,8 @@ esp_err_t isotp_protocol_encode_single_frame(
     if ((payload_length > 0U) &&
         (payload_length <=
          ISOTP_SINGLE_FRAME_CLASSIC_MAX_LENGTH) &&
+        (frame_capacity <=
+         ISOTP_CLASSIC_FRAME_DATA_LENGTH) &&
         (payload_length + 1U <= frame_capacity)) {
 
         frame_data[0] = (uint8_t)payload_length;
@@ -230,8 +239,7 @@ esp_err_t isotp_protocol_encode_single_frame(
 
     if ((frame_capacity <=
          ISOTP_CLASSIC_FRAME_DATA_LENGTH) ||
-        (payload_length <=
-         ISOTP_SINGLE_FRAME_CLASSIC_MAX_LENGTH) ||
+        (payload_length == 0U) ||
         (payload_length >
          ISOTP_SINGLE_FRAME_FD_MAX_LENGTH) ||
         (payload_length + 2U > frame_capacity)) {

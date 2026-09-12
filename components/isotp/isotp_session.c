@@ -12,6 +12,10 @@ static bool isotp_session_link_data_length_valid(
     uint8_t link_data_length
 );
 
+static size_t isotp_session_address_size(
+    const isotp_session_t *session
+);
+
 static void isotp_session_clear_action(
     isotp_session_action_t *action
 );
@@ -76,9 +80,12 @@ esp_err_t isotp_session_init(
         (config == NULL) ||
         (receive_buffer == NULL) ||
         (receive_capacity == 0U) ||
+        (config->addressing_mode > ISOTP_ADDRESSING_MIXED) ||
         !isotp_session_link_data_length_valid(
             config->link_data_length
-        )) {
+        ) ||
+        ((config->addressing_mode != ISOTP_ADDRESSING_NORMAL) &&
+         (config->link_data_length <= 3U))) {
 
         return ESP_ERR_INVALID_ARG;
     }
@@ -179,18 +186,28 @@ esp_err_t isotp_session_start_transmit(
 
     memset(
         action->frame_data,
-        0,
+        session->config.padding_byte,
         session->config.link_data_length
     );
+
+    const size_t address_size =
+        isotp_session_address_size(session);
+
+    if (address_size != 0U) {
+        action->frame_data[0] =
+            session->config.transmit_address;
+    }
 
     uint8_t payload_offset = 0U;
     esp_err_t result =
         isotp_protocol_encode_single_frame(
             payload_length,
-            session->config.link_data_length,
-            action->frame_data,
+            session->config.link_data_length - address_size,
+            &action->frame_data[address_size],
             &payload_offset
         );
+
+    payload_offset += (uint8_t)address_size;
 
     if (result == ESP_OK) {
         memcpy(
@@ -208,6 +225,7 @@ esp_err_t isotp_session_start_transmit(
     }
 
     if ((result != ESP_ERR_INVALID_SIZE) ||
+        session->config.functional_transmit ||
         (payload_length > UINT32_MAX)) {
 
         isotp_session_reset(session);
@@ -217,10 +235,12 @@ esp_err_t isotp_session_start_transmit(
     result =
         isotp_protocol_encode_first_frame(
             (uint32_t)payload_length,
-            session->config.link_data_length,
-            action->frame_data,
+            session->config.link_data_length - address_size,
+            &action->frame_data[address_size],
             &payload_offset
         );
+
+    payload_offset += (uint8_t)address_size;
 
     if (result != ESP_OK) {
         isotp_session_reset(session);
@@ -261,11 +281,26 @@ esp_err_t isotp_session_receive_frame(
 
     isotp_session_clear_action(action);
 
+    const size_t address_size =
+        isotp_session_address_size(session);
+
+    if ((frame_data_length <= address_size) ||
+        ((address_size != 0U) &&
+         (frame_data[0] != session->config.receive_address))) {
+
+        return isotp_session_fail(
+            session,
+            ISOTP_SESSION_ERROR_PROTOCOL,
+            ESP_ERR_INVALID_RESPONSE,
+            action
+        );
+    }
+
     isotp_pci_t pci = {0};
     const esp_err_t result =
         isotp_protocol_decode(
-            frame_data,
-            frame_data_length,
+            &frame_data[address_size],
+            frame_data_length - address_size,
             &pci
         );
 
@@ -277,6 +312,8 @@ esp_err_t isotp_session_receive_frame(
             action
         );
     }
+
+    pci.payload_offset += (uint8_t)address_size;
 
     switch (pci.type) {
         case ISOTP_PCI_SINGLE_FRAME:
@@ -346,6 +383,14 @@ esp_err_t isotp_session_frame_transmitted(
                 now_us +
                 session->config.consecutive_frame_timeout_us;
             return ESP_OK;
+
+        case ISOTP_SESSION_RX_SENDING_OVERFLOW:
+            return isotp_session_fail(
+                session,
+                ISOTP_SESSION_ERROR_BUFFER_OVERFLOW,
+                ESP_ERR_NO_MEM,
+                action
+            );
 
         case ISOTP_SESSION_TX_SENDING_SINGLE_FRAME:
             session->transmit_offset = session->transmit_size;
@@ -468,6 +513,14 @@ static bool isotp_session_link_data_length_valid(
     }
 }
 
+static size_t isotp_session_address_size(
+    const isotp_session_t *session
+)
+{
+    return session->config.addressing_mode ==
+        ISOTP_ADDRESSING_NORMAL ? 0U : 1U;
+}
+
 static void isotp_session_clear_action(
     isotp_session_action_t *action
 )
@@ -502,9 +555,17 @@ static esp_err_t isotp_session_create_flow_control(
 {
     memset(
         action->frame_data,
-        0,
+        session->config.padding_byte,
         session->config.link_data_length
     );
+
+    const size_t address_size =
+        isotp_session_address_size(session);
+
+    if (address_size != 0U) {
+        action->frame_data[0] =
+            session->config.transmit_address;
+    }
 
     uint8_t payload_offset = 0U;
     const esp_err_t result =
@@ -512,7 +573,7 @@ static esp_err_t isotp_session_create_flow_control(
             status,
             session->config.receive_block_size,
             session->config.receive_st_min,
-            action->frame_data,
+            &action->frame_data[address_size],
             &payload_offset
         );
 
@@ -527,7 +588,10 @@ static esp_err_t isotp_session_create_flow_control(
         );
     }
 
-    session->state = ISOTP_SESSION_RX_SENDING_FLOW_CONTROL;
+    session->state =
+        status == ISOTP_FLOW_STATUS_OVERFLOW
+            ? ISOTP_SESSION_RX_SENDING_OVERFLOW
+            : ISOTP_SESSION_RX_SENDING_FLOW_CONTROL;
     action->type = ISOTP_SESSION_ACTION_SEND_FRAME;
     action->frame_data_length = session->config.link_data_length;
 
@@ -541,17 +605,27 @@ static esp_err_t isotp_session_create_consecutive_frame(
 {
     memset(
         action->frame_data,
-        0,
+        session->config.padding_byte,
         session->config.link_data_length
     );
+
+    const size_t address_size =
+        isotp_session_address_size(session);
+
+    if (address_size != 0U) {
+        action->frame_data[0] =
+            session->config.transmit_address;
+    }
 
     uint8_t payload_offset = 0U;
     const esp_err_t result =
         isotp_protocol_encode_consecutive_frame(
             session->transmit_sequence_number,
-            action->frame_data,
+            &action->frame_data[address_size],
             &payload_offset
         );
+
+    payload_offset += (uint8_t)address_size;
 
     if (result != ESP_OK) {
         return isotp_session_fail(
@@ -642,10 +716,9 @@ static esp_err_t isotp_session_receive_first_frame(
     }
 
     if (pci->payload_length > session->receive_capacity) {
-        return isotp_session_fail(
+        return isotp_session_create_flow_control(
             session,
-            ISOTP_SESSION_ERROR_BUFFER_OVERFLOW,
-            ESP_ERR_NO_MEM,
+            ISOTP_FLOW_STATUS_OVERFLOW,
             action
         );
     }
