@@ -21,6 +21,7 @@ extern "C" {
 
 #define UDS_CLIENT_DEFAULT_P2_TIMEOUT_US       (1000000ULL)
 #define UDS_CLIENT_DEFAULT_P2_STAR_TIMEOUT_US  (5000000ULL)
+#define UDS_CLIENT_WRITE_DATA_MAX_LENGTH       (256U)
 
 typedef enum
 {
@@ -124,6 +125,14 @@ esp_err_t uds_client_tester_present(
 esp_err_t uds_client_read_data_by_identifier(
     uds_client_t *client,
     uint16_t identifier,
+    uint64_t now_us
+);
+
+esp_err_t uds_client_write_data_by_identifier(
+    uds_client_t *client,
+    uint16_t identifier,
+    const uint8_t *data,
+    size_t data_length,
     uint64_t now_us
 );
 

@@ -65,6 +65,15 @@ esp_err_t uds_request_encode_read_data_by_identifier(
     size_t *encoded_size
 );
 
+esp_err_t uds_request_encode_write_data_by_identifier(
+    uint16_t identifier,
+    const uint8_t *data,
+    size_t data_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
 esp_err_t uds_request_encode_read_dtc_information(
     uint8_t subfunction,
     uint8_t status_mask,

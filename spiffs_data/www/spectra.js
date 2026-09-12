@@ -5572,7 +5572,11 @@
 
         function updateService() {
             const selected = service.value;
-            element('uds-did-field').hidden = selected !== 'read_did';
+            element('uds-did-field').hidden =
+                selected !== 'read_did' &&
+                selected !== 'write_did';
+            element('uds-write-data-field').hidden =
+                selected !== 'write_did';
             element('uds-dtc-subfunction-field').hidden =
                 selected !== 'read_dtc';
             element('uds-dtc-mask-field').hidden =
@@ -5586,6 +5590,7 @@
             element('uds-raw-data-field').hidden = selected !== 'raw';
             element('uds-suppress').disabled =
                 selected === 'read_did' ||
+                selected === 'write_did' ||
                 selected === 'read_dtc' ||
                 selected === 'raw';
         }
@@ -5764,6 +5769,35 @@
                 if (kind === 'read_did') {
                     request.did =
                         parseHexNumber(element('uds-did'), 0xffff, 'Data identifier');
+                } else if (kind === 'write_did') {
+                    const confirmed = window.confirm(
+                        'Write data to the selected ECU data identifier?'
+                    );
+
+                    if (!confirmed)
+                        return;
+
+                    request.did =
+                        parseHexNumber(
+                            element('uds-did'),
+                            0xffff,
+                            'Data identifier'
+                        );
+                    request.data =
+                        normalizeHex(
+                            element('uds-write-data').value,
+                            false
+                        );
+
+                    if (request.data === null)
+                        throw new Error(
+                            'Write Data payload must contain at least one byte.'
+                        );
+
+                    if (request.data.split(' ').length > 256)
+                        throw new Error(
+                            'Write Data payload exceeds the 256-byte limit.'
+                        );
                 } else if (kind === 'read_dtc') {
                     request.value =
                         parseHexNumber(

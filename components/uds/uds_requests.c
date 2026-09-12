@@ -5,6 +5,8 @@
 
 #include "uds_requests.h"
 
+#include <string.h>
+
 #include "uds_protocol.h"
 
 static esp_err_t uds_request_encode_subfunction(
@@ -133,6 +135,44 @@ esp_err_t uds_request_encode_read_data_by_identifier(
         buffer[offset + 1U] =
             (uint8_t)identifiers[index];
     }
+
+    *encoded_size = required_size;
+    return ESP_OK;
+}
+
+esp_err_t uds_request_encode_write_data_by_identifier(
+    uint16_t identifier,
+    const uint8_t *data,
+    size_t data_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((data == NULL) ||
+        (data_length == 0U) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL) ||
+        (data_length > (SIZE_MAX - 3U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size = 3U + data_length;
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_WRITE_DATA_BY_IDENTIFIER;
+    buffer[1] = (uint8_t)(identifier >> 8U);
+    buffer[2] = (uint8_t)identifier;
+
+    memcpy(
+        &buffer[3],
+        data,
+        data_length
+    );
 
     *encoded_size = required_size;
     return ESP_OK;

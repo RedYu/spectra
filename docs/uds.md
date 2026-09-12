@@ -29,6 +29,10 @@ ClearDiagnosticInformation (`0x14`) accepts a 24-bit group-of-DTC value. The
 web diagnostics page asks for confirmation before submitting this destructive
 request.
 
+WriteDataByIdentifier (`0x2E`) accepts one 16-bit DID and between 1 and 256
+data bytes. The client validates the payload before transmission and the web
+diagnostics page asks for confirmation before writing to the ECU.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
@@ -39,9 +43,8 @@ payload memory.
 - physical addressing only through the selected ISO-TP channel;
 - no periodic Tester Present scheduler;
 - no security-access algorithm integration;
-- no typed DID, routine, download, or transfer decoders yet;
+- no typed DID value, routine, download, or transfer decoders yet;
 - no authentication or role-based protection for destructive UDS requests.
 
-The next layer should add WriteDataByIdentifier and RoutineControl with explicit
-confirmation and request validation before adding download and transfer
-services.
+The next layer should add RoutineControl with explicit confirmation and request
+validation before adding download and transfer services.

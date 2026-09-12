@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=20">
-    <script src="spectra.js?v=20" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=21">
+    <script src="spectra.js?v=21" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -268,6 +268,7 @@
                         Service
                         <select id="uds-service">
                             <option value="read_did">Read Data By Identifier</option>
+                            <option value="write_did">Write Data By Identifier</option>
                             <option value="read_dtc">Read DTC Information</option>
                             <option value="clear_dtc">Clear Diagnostic Information</option>
                             <option value="session">Diagnostic Session Control</option>
@@ -280,6 +281,11 @@
                     <label id="uds-did-field">
                         Data identifier
                         <input id="uds-did" value="F190" spellcheck="false">
+                    </label>
+
+                    <label id="uds-write-data-field" hidden>
+                        Data to write (HEX bytes)
+                        <textarea id="uds-write-data" rows="4" spellcheck="false"></textarea>
                     </label>
 
                     <label id="uds-subfunction-field" hidden>

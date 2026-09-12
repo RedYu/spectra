@@ -322,6 +322,41 @@ esp_err_t uds_client_read_data_by_identifier(
     );
 }
 
+esp_err_t uds_client_write_data_by_identifier(
+    uds_client_t *client,
+    uint16_t identifier,
+    const uint8_t *data,
+    size_t data_length,
+    uint64_t now_us
+)
+{
+    if ((data == NULL) ||
+        (data_length == 0U) ||
+        (data_length > UDS_CLIENT_WRITE_DATA_MAX_LENGTH)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t parameters[2U + UDS_CLIENT_WRITE_DATA_MAX_LENGTH];
+
+    parameters[0] = (uint8_t)(identifier >> 8U);
+    parameters[1] = (uint8_t)identifier;
+
+    memcpy(
+        &parameters[2],
+        data,
+        data_length
+    );
+
+    return uds_client_request(
+        client,
+        UDS_SERVICE_WRITE_DATA_BY_IDENTIFIER,
+        parameters,
+        2U + data_length,
+        now_us
+    );
+}
+
 esp_err_t uds_client_read_dtc_information(
     uds_client_t *client,
     uint8_t subfunction,

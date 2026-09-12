@@ -460,6 +460,43 @@ static esp_err_t web_uds_request(
         );
     }
 
+    if (strcmp(kind->valuestring, "write_did") == 0) {
+        const cJSON *data =
+            cJSON_GetObjectItemCaseSensitive(root, "data");
+
+        if (!web_uds_number(root, "did", UINT16_MAX, &value) ||
+            !cJSON_IsString(data)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        uint8_t payload[UDS_CLIENT_WRITE_DATA_MAX_LENGTH];
+        size_t payload_size = 0U;
+        const esp_err_t parse_result =
+            web_uds_parse_hex(
+                data->valuestring,
+                payload,
+                sizeof(payload),
+                &payload_size
+            );
+
+        if ((parse_result != ESP_OK) ||
+            (payload_size == 0U)) {
+
+            return (parse_result != ESP_OK)
+                ? parse_result
+                : ESP_ERR_INVALID_ARG;
+        }
+
+        return uds_client_write_data_by_identifier(
+            &s_client,
+            (uint16_t)value,
+            payload,
+            payload_size,
+            now_us
+        );
+    }
+
     if (strcmp(kind->valuestring, "read_dtc") == 0) {
         uint32_t status_mask = 0U;
 

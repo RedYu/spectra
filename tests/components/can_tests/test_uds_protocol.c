@@ -367,6 +367,68 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "UDS request helper encodes Write Data By Identifier",
+    "[uds]"
+)
+{
+    const uint8_t data[] = {
+        0x12U,
+        0x34U,
+        0x56U,
+    };
+    uint8_t buffer[6] = {0};
+    size_t encoded_size = 0U;
+    const uint8_t expected[] = {
+        0x2EU,
+        0xF1U,
+        0x90U,
+        0x12U,
+        0x34U,
+        0x56U,
+    };
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_write_data_by_identifier(
+            0xF190U,
+            data,
+            sizeof(data),
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(sizeof(expected), encoded_size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        expected,
+        buffer,
+        sizeof(expected)
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_request_encode_write_data_by_identifier(
+            0xF190U,
+            data,
+            0U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_SIZE,
+        uds_request_encode_write_data_by_identifier(
+            0xF190U,
+            data,
+            sizeof(data),
+            buffer,
+            sizeof(buffer) - 1U,
+            &encoded_size
+        )
+    );
+}
+
+TEST_CASE(
     "UDS protocol decodes DTC status bits",
     "[uds]"
 )
