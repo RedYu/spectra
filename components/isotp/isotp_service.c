@@ -442,11 +442,13 @@ esp_err_t isotp_service_send(
         return ESP_ERR_INVALID_STATE;
     }
 
-    memcpy(
-        channel->config.transmit_buffer,
-        payload,
-        payload_length
-    );
+    if (payload != channel->config.transmit_buffer) {
+        memcpy(
+            channel->config.transmit_buffer,
+            payload,
+            payload_length
+        );
+    }
 
     channel->requested_transmit_size = payload_length;
     channel->transmit_reserved = true;

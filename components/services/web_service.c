@@ -19,6 +19,7 @@
 #include "web_can_transmit_api.h"
 #include "web_can_filters_api.h"
 #include "web_isotp_api.h"
+#include "web_uds_api.h"
 #include "web_can_stream_service.h"
 #include "isotp_service.h"
 
@@ -162,6 +163,15 @@ esp_err_t web_service_start(void)
     if (isotp_service_is_running()) {
         result =
             web_isotp_api_register(
+                s_server
+            );
+
+        if (result != ESP_OK) {
+            goto registration_failed;
+        }
+
+        result =
+            web_uds_api_register(
                 s_server
             );
 

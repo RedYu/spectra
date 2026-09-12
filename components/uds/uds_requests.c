@@ -1,0 +1,139 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright (C) 2026 Yurii Ridkovets
+ */
+
+#include "uds_requests.h"
+
+#include "uds_protocol.h"
+
+static esp_err_t uds_request_encode_subfunction(
+    uint8_t service_id,
+    uint8_t subfunction,
+    bool suppress_positive_response,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((subfunction == 0U) ||
+        ((subfunction & UDS_SUPPRESS_POSITIVE_RESPONSE) != 0U)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint8_t parameter =
+        subfunction |
+        (suppress_positive_response
+            ? UDS_SUPPRESS_POSITIVE_RESPONSE
+            : 0U);
+
+    return uds_protocol_encode_request(
+        service_id,
+        &parameter,
+        sizeof(parameter),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t uds_request_encode_diagnostic_session_control(
+    uint8_t session_type,
+    bool suppress_positive_response,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    return uds_request_encode_subfunction(
+        UDS_SERVICE_DIAGNOSTIC_SESSION_CONTROL,
+        session_type,
+        suppress_positive_response,
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t uds_request_encode_ecu_reset(
+    uint8_t reset_type,
+    bool suppress_positive_response,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    return uds_request_encode_subfunction(
+        UDS_SERVICE_ECU_RESET,
+        reset_type,
+        suppress_positive_response,
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t uds_request_encode_tester_present(
+    bool suppress_positive_response,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    const uint8_t subfunction =
+        suppress_positive_response
+            ? UDS_SUPPRESS_POSITIVE_RESPONSE
+            : 0U;
+
+    return uds_protocol_encode_request(
+        UDS_SERVICE_TESTER_PRESENT,
+        &subfunction,
+        sizeof(subfunction),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t uds_request_encode_read_data_by_identifier(
+    const uint16_t *identifiers,
+    size_t identifier_count,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((identifiers == NULL) ||
+        (identifier_count == 0U) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL) ||
+        (identifier_count > ((SIZE_MAX - 1U) / 2U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size =
+        1U + (identifier_count * 2U);
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_READ_DATA_BY_IDENTIFIER;
+
+    for (size_t index = 0U;
+         index < identifier_count;
+         ++index) {
+
+        const size_t offset = 1U + (index * 2U);
+
+        buffer[offset] =
+            (uint8_t)(identifiers[index] >> 8U);
+        buffer[offset + 1U] =
+            (uint8_t)identifiers[index];
+    }
+
+    *encoded_size = required_size;
+    return ESP_OK;
+}

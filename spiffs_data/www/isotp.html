@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=10">
-    <script src="spectra.js?v=10" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=11">
+    <script src="spectra.js?v=11" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -162,6 +162,132 @@
             <section class="card isotp-events">
                 <h2>Activity</h2>
                 <div id="isotp-message" role="status">Configure a channel to begin.</div>
+            </section>
+
+            <section class="card uds-configuration">
+                <div class="panel-title">
+                    <h2>UDS channel</h2>
+                    <span id="uds-status" role="status">Closed</span>
+                </div>
+
+                <div class="isotp-form-grid">
+                    <label>
+                        CAN bus
+                        <select id="uds-bus">
+                            <option value="0">Primary · TWAI</option>
+                            <option value="1">Secondary · MCP2518FD</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Frame format
+                        <select id="uds-format">
+                            <option value="classic">Classical CAN</option>
+                            <option value="fd">CAN FD</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Request ID
+                        <input id="uds-tx-id" value="7E0" spellcheck="false">
+                    </label>
+
+                    <label>
+                        Response ID
+                        <input id="uds-rx-id" value="7E8" spellcheck="false">
+                    </label>
+
+                    <label>
+                        P2 timeout
+                        <span class="input-with-unit">
+                            <input id="uds-p2" type="number" min="10" max="60000" value="1000">
+                            <span>ms</span>
+                        </span>
+                    </label>
+
+                    <label>
+                        P2* timeout
+                        <span class="input-with-unit">
+                            <input id="uds-p2-star" type="number" min="10" max="60000" value="5000">
+                            <span>ms</span>
+                        </span>
+                    </label>
+
+                    <label>
+                        Block size
+                        <input id="uds-block-size" type="number" min="0" max="255" value="0">
+                    </label>
+
+                    <label>
+                        STmin
+                        <input id="uds-st-min" type="number" min="0" max="255" value="0">
+                    </label>
+                </div>
+
+                <div class="isotp-options">
+                    <label><input id="uds-extended" type="checkbox">29-bit identifiers</label>
+                    <label><input id="uds-brs" type="checkbox" disabled>CAN FD bit-rate switch</label>
+                </div>
+
+                <div class="isotp-actions">
+                    <button id="uds-open" class="primary">Apply UDS channel</button>
+                    <button id="uds-close">Close UDS channel</button>
+                </div>
+            </section>
+
+            <section class="card uds-request">
+                <h2>UDS request</h2>
+
+                <div class="isotp-form-grid">
+                    <label>
+                        Service
+                        <select id="uds-service">
+                            <option value="read_did">Read Data By Identifier</option>
+                            <option value="session">Diagnostic Session Control</option>
+                            <option value="tester_present">Tester Present</option>
+                            <option value="reset">ECU Reset</option>
+                            <option value="raw">Raw service</option>
+                        </select>
+                    </label>
+
+                    <label id="uds-did-field">
+                        Data identifier
+                        <input id="uds-did" value="F190" spellcheck="false">
+                    </label>
+
+                    <label id="uds-subfunction-field" hidden>
+                        Sub-function
+                        <input id="uds-subfunction" value="03" spellcheck="false">
+                    </label>
+
+                    <label id="uds-raw-sid-field" hidden>
+                        Service ID
+                        <input id="uds-raw-sid" value="22" spellcheck="false">
+                    </label>
+                </div>
+
+                <label id="uds-raw-data-field" hidden>
+                    Parameters (HEX bytes)
+                    <textarea id="uds-raw-data" rows="4" spellcheck="false">F1 90</textarea>
+                </label>
+
+                <div class="isotp-options">
+                    <label><input id="uds-suppress" type="checkbox">Suppress positive response</label>
+                </div>
+
+                <button id="uds-send" class="primary" disabled>
+                    Send UDS request
+                </button>
+            </section>
+
+            <section class="card uds-response">
+                <div class="panel-title">
+                    <h2>UDS response</h2>
+                    <span id="uds-response-summary">No response</span>
+                </div>
+
+                <pre id="uds-response-data">No response received.</pre>
+                <div id="uds-message" role="status">Configure the UDS channel to begin.</div>
             </section>
         </div>
     </main>

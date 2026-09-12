@@ -5084,6 +5084,225 @@
         setInterval(refresh, 300);
     }
 
+    function init_uds() {
+        const element = id => document.getElementById(id);
+        const status = element('uds-status');
+        const message = element('uds-message');
+        const sendButton = element('uds-send');
+        const format = element('uds-format');
+        const service = element('uds-service');
+        const response = element('uds-response-data');
+        const summary = element('uds-response-summary');
+        const brs = element('uds-brs');
+        let lastSequence = -1;
+
+        const stateNames = [
+            'Closed',
+            'Ready',
+            'Transmitting',
+            'Waiting for response',
+            'Response pending',
+            'Complete',
+            'Negative response',
+            'Error'
+        ];
+
+        function parseIdentifier(input, extended) {
+            const text = input.value.trim();
+            const maximum = extended ? 0x1fffffff : 0x7ff;
+
+            if (!/^[0-9a-f]+$/i.test(text) || parseInt(text, 16) > maximum)
+                throw new Error(
+                    `CAN ID must fit the selected ${extended ? 29 : 11}-bit format.`);
+
+            return parseInt(text, 16);
+        }
+
+        function parseHexNumber(input, maximum, name) {
+            const text = input.value.trim();
+
+            if (!/^[0-9a-f]+$/i.test(text) || parseInt(text, 16) > maximum)
+                throw new Error(`${name} is not a valid hexadecimal value.`);
+
+            return parseInt(text, 16);
+        }
+
+        function normalizeHex(text, allowEmpty) {
+            const compact = text.replace(/[\s,:-]+/g, '');
+
+            if (!compact.length)
+                return allowEmpty ? '' : null;
+
+            if (!/^[0-9a-f]+$/i.test(compact) || compact.length % 2)
+                throw new Error('Parameters must contain complete hexadecimal bytes.');
+
+            if (compact.length / 2 > 1023)
+                throw new Error('Parameters exceed the 1023-byte web limit.');
+
+            return compact.match(/../g).join(' ').toUpperCase();
+        }
+
+        async function command(body) {
+            const reply = await fetch('/api/uds', {
+                method : 'POST',
+                headers : {'Content-Type' : 'application/json'},
+                body : JSON.stringify(body)
+            });
+            const result = await reply.json();
+
+            if (!reply.ok || !result.success)
+                throw new Error(result.message || `HTTP ${reply.status}`);
+
+            return result;
+        }
+
+        function updateFormat() {
+            const fd = format.value === 'fd';
+            brs.disabled = !fd;
+        }
+
+        function updateService() {
+            const selected = service.value;
+            element('uds-did-field').hidden = selected !== 'read_did';
+            element('uds-subfunction-field').hidden =
+                selected !== 'session' && selected !== 'reset';
+            element('uds-raw-sid-field').hidden = selected !== 'raw';
+            element('uds-raw-data-field').hidden = selected !== 'raw';
+            element('uds-suppress').disabled = selected === 'read_did' || selected === 'raw';
+        }
+
+        async function refresh() {
+            try {
+                const reply = await fetch('/api/uds', {cache : 'no-store'});
+                const data = await reply.json();
+
+                if (!reply.ok)
+                    throw new Error(`HTTP ${reply.status}`);
+
+                status.textContent = stateNames[data.state] || 'Unknown';
+                status.classList.toggle(
+                    'error',
+                    data.state === 6 || data.state === 7
+                );
+                sendButton.disabled =
+                    !data.open ||
+                    data.state === 2 ||
+                    data.state === 3 ||
+                    data.state === 4;
+
+                if (data.sequence === lastSequence)
+                    return;
+
+                lastSequence = data.sequence;
+                summary.classList.toggle('error', !data.positive && data.nrc !== 0);
+
+                if (data.nrc !== 0) {
+                    summary.textContent =
+                        `NRC 0x${data.nrc.toString(16).padStart(2, '0').toUpperCase()}`;
+                    response.textContent = data.payload || 'No response payload.';
+                    message.textContent =
+                        `${data.nrc_name} · request SID 0x${data.request_sid
+                            .toString(16).padStart(2, '0').toUpperCase()}.`;
+                } else if (data.positive) {
+                    summary.textContent =
+                        `Positive · SID 0x${data.response_sid
+                            .toString(16).padStart(2, '0').toUpperCase()}`;
+                    response.textContent = data.payload || 'Positive response without parameters.';
+                    message.textContent = 'A complete UDS response was received.';
+                } else if (data.state === 4) {
+                    summary.textContent = 'Response pending';
+                    message.textContent = 'ECU requested additional response time.';
+                } else if (data.state === 7) {
+                    summary.textContent = 'Request failed';
+                    message.textContent =
+                        `UDS result ${data.result}; transport error ${data.transport_error}.`;
+                } else if (data.open) {
+                    summary.textContent = 'No response';
+                    message.textContent = stateNames[data.state] || 'UDS channel is ready.';
+                }
+            } catch (error) {
+                status.textContent = 'Unavailable';
+                status.classList.add('error');
+                sendButton.disabled = true;
+                message.textContent = error.message;
+            }
+        }
+
+        element('uds-open').addEventListener('click', async () => {
+            try {
+                const extended = element('uds-extended').checked;
+                const fd = format.value === 'fd';
+
+                await command({
+                    action : 'configure',
+                    bus : Number(element('uds-bus').value),
+                    tx_id : parseIdentifier(element('uds-tx-id'), extended),
+                    rx_id : parseIdentifier(element('uds-rx-id'), extended),
+                    extended,
+                    fd,
+                    brs : fd && brs.checked,
+                    link_data_length : fd ? 64 : 8,
+                    block_size : Number(element('uds-block-size').value),
+                    st_min : Number(element('uds-st-min').value),
+                    p2_ms : Number(element('uds-p2').value),
+                    p2_star_ms : Number(element('uds-p2-star').value)
+                });
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('uds-close').addEventListener('click', async () => {
+            try {
+                await command({action : 'close'});
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        sendButton.addEventListener('click', async () => {
+            try {
+                const kind = service.value;
+                const request = {action : 'request', kind};
+
+                if (kind === 'read_did') {
+                    request.did =
+                        parseHexNumber(element('uds-did'), 0xffff, 'Data identifier');
+                } else if (kind === 'session' || kind === 'reset') {
+                    request.value =
+                        parseHexNumber(element('uds-subfunction'), 0x7f, 'Sub-function');
+                    request.suppress = element('uds-suppress').checked;
+                } else if (kind === 'tester_present') {
+                    request.suppress = element('uds-suppress').checked;
+                } else {
+                    request.sid =
+                        parseHexNumber(element('uds-raw-sid'), 0xbf, 'Service ID');
+                    request.data = normalizeHex(element('uds-raw-data').value, true);
+                }
+
+                await command(request);
+                message.textContent = 'UDS request submitted.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        format.addEventListener('change', updateFormat);
+        service.addEventListener('change', updateService);
+        updateFormat();
+        updateService();
+        refresh();
+        setInterval(refresh, 300);
+    }
+
+    function init_diagnostics_transport() {
+        init_isotp();
+        init_uds();
+    }
+
     function init_isotp_navigation() {
         for (const navigation of document.querySelectorAll('.spectra-nav')) {
             if (navigation.querySelector('a[href="/isotp"]'))
@@ -5106,7 +5325,7 @@
         'page-test' : init_test,
         'page-logger' : init_logger,
         'page-analyzer' : init_analyzer,
-        'page-isotp' : init_isotp
+        'page-isotp' : init_diagnostics_transport
     };
 
     for (const [page, initialize] of Object.entries(pages)) {

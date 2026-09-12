@@ -1116,7 +1116,8 @@ body:where(.page-settings) {
 }
 
 .isotp-form-grid label,
-.isotp-transfer > label {
+.isotp-transfer > label,
+.uds-request > label {
     display: grid;
     gap: 6px;
     color: var(--muted);
@@ -1125,7 +1126,8 @@ body:where(.page-settings) {
 
 .isotp-form-grid input,
 .isotp-form-grid select,
-.isotp-transfer textarea {
+.isotp-transfer textarea,
+.uds-request textarea {
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
@@ -1152,7 +1154,9 @@ body:where(.page-settings) {
 }
 
 .isotp-transfer textarea,
-.isotp-response pre {
+.isotp-response pre,
+.uds-response pre,
+.uds-request textarea {
     font: 13px/1.65 Consolas, "Courier New", monospace;
 }
 
@@ -1174,7 +1178,26 @@ body:where(.page-settings) {
     grid-column: 1 / -1;
 }
 
-.isotp-response pre {
+.uds-configuration {
+    grid-column: 1 / -1;
+}
+
+.uds-request textarea {
+    width: 100%;
+    margin-top: 6px;
+    resize: vertical;
+}
+
+.uds-request > button {
+    margin-top: 14px;
+}
+
+.uds-response {
+    grid-column: 1 / -1;
+}
+
+.isotp-response pre,
+.uds-response pre {
     min-height: 100px;
     max-height: 300px;
     margin: 12px 0 0;
@@ -1194,7 +1217,10 @@ body:where(.page-settings) {
 
 #isotp-status.error,
 #isotp-message.error,
-#isotp-byte-count.error {
+#isotp-byte-count.error,
+#uds-status.error,
+#uds-message.error,
+#uds-response-summary.error {
     color: var(--danger);
 }
 
@@ -1204,7 +1230,9 @@ body:where(.page-settings) {
     }
 
     .isotp-response,
-    .isotp-events {
+    .isotp-events,
+    .uds-configuration,
+    .uds-response {
         grid-column: auto;
     }
 }

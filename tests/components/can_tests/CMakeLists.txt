@@ -4,6 +4,7 @@ idf_component_register(
         "test_can_hardware_filters.c"
         "test_isotp_protocol.c"
         "test_isotp_session.c"
+        "test_uds_protocol.c"
 
     INCLUDE_DIRS
         "."
@@ -14,6 +15,7 @@ idf_component_register(
         can
         drivers
         isotp
+        uds
     
     WHOLE_ARCHIVE
 )
