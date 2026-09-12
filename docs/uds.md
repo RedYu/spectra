@@ -79,6 +79,14 @@ code execute only from `uds_download_poll()`, not from the ISO-TP callback. The
 adapter allocates neither heap memory nor a task and provides progress and
 cancellation APIs.
 
+The UDS Web API connects this state machine to an SD-card file. Starting an
+automatic download reuses the configured diagnostic transport, closes the
+manual client to prevent duplicate ISO-TP channels, and creates a temporary
+worker task. The worker continues programming when the browser is not polling;
+HTTP requests only read progress or request cancellation. The 512-byte transfer
+buffer is allocated in PSRAM and the SD file is closed on completion,
+cancellation, or error.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.

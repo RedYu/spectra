@@ -6,21 +6,28 @@
 #include "web_uds_api.h"
 
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
+#include "app_task_priorities.h"
 #include "uds_client.h"
+#include "uds_download.h"
+#include "storage_sd_service.h"
 #include "web_api_common.h"
 
 #define WEB_UDS_BUFFER_SIZE       (1024U)
 #define WEB_UDS_BODY_MAX_SIZE     (4096U)
 #define WEB_UDS_LOCK_TIMEOUT_MS   (100U)
+#define WEB_UDS_DOWNLOAD_TASK_STACK_SIZE (4096U)
 
 static SemaphoreHandle_t s_lock = NULL;
 static uint8_t *s_receive_buffer = NULL;
@@ -28,6 +35,14 @@ static uint8_t *s_transmit_buffer = NULL;
 static uint8_t *s_response_buffer = NULL;
 static size_t s_response_size = 0U;
 static uds_client_t s_client;
+static uds_client_config_t s_client_config;
+static bool s_client_config_valid = false;
+static uds_download_t s_download;
+static bool s_download_active = false;
+static FILE *s_download_file = NULL;
+static uint64_t s_download_file_offset = 0U;
+static uint8_t *s_download_transfer_buffer = NULL;
+static TaskHandle_t s_download_task = NULL;
 static uint32_t s_sequence = 0U;
 static uds_client_event_type_t s_last_event =
     UDS_CLIENT_EVENT_TRANSMITTED;
@@ -87,6 +102,24 @@ static esp_err_t web_uds_configure(
 
 static esp_err_t web_uds_request(
     const cJSON *root
+);
+
+static esp_err_t web_uds_download_read(
+    uint64_t offset,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *read_size,
+    void *context
+);
+
+static void web_uds_download_close_file(void);
+
+static esp_err_t web_uds_download_start(
+    const cJSON *root
+);
+
+static void web_uds_download_task(
+    void *context
 );
 
 static esp_err_t web_uds_get_handler(
@@ -472,6 +505,8 @@ static esp_err_t web_uds_configure(
         uds_client_open(&s_client, &config);
 
     if (result == ESP_OK) {
+        s_client_config = config;
+        s_client_config_valid = true;
         s_last_result = ESP_OK;
         s_response_size = 0U;
         s_negative_response_code = 0U;
@@ -867,6 +902,209 @@ static esp_err_t web_uds_request(
     return ESP_ERR_INVALID_ARG;
 }
 
+static esp_err_t web_uds_download_read(
+    uint64_t offset,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *read_size,
+    void *context
+)
+{
+    (void)context;
+
+    if ((s_download_file == NULL) ||
+        (offset != s_download_file_offset)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const esp_err_t result =
+        storage_sd_service_read(
+            s_download_file,
+            buffer,
+            capacity,
+            read_size
+        );
+
+    if (result == ESP_OK) {
+        s_download_file_offset += *read_size;
+    }
+
+    return result;
+}
+
+static void web_uds_download_close_file(void)
+{
+    if (s_download_file != NULL) {
+        (void)storage_sd_service_close(&s_download_file);
+    }
+}
+
+static void web_uds_download_task(
+    void *context
+)
+{
+    (void)context;
+
+    while (true) {
+        if (xSemaphoreTakeRecursive(
+                s_lock,
+                pdMS_TO_TICKS(WEB_UDS_LOCK_TIMEOUT_MS)
+            ) != pdTRUE) {
+
+            vTaskDelay(1U);
+            continue;
+        }
+
+        const bool running = s_download_active;
+
+        if (running) {
+            (void)uds_download_poll(
+                &s_download,
+                esp_timer_get_time()
+            );
+
+            uds_download_progress_t progress = {0};
+            (void)uds_download_get_progress(
+                &s_download,
+                &progress
+            );
+
+            if ((progress.state == UDS_DOWNLOAD_COMPLETE) ||
+                (progress.state == UDS_DOWNLOAD_CANCELLED) ||
+                (progress.state == UDS_DOWNLOAD_ERROR)) {
+
+                web_uds_download_close_file();
+                s_download_task = NULL;
+            }
+        }
+
+        const bool finished =
+            !running || (s_download_task == NULL);
+
+        if (finished) {
+            s_download_task = NULL;
+        }
+
+        xSemaphoreGiveRecursive(s_lock);
+
+        if (finished) {
+            break;
+        }
+
+        vTaskDelay(1U);
+    }
+
+    vTaskDelete(NULL);
+}
+
+static esp_err_t web_uds_download_start(
+    const cJSON *root
+)
+{
+    const cJSON *path =
+        cJSON_GetObjectItemCaseSensitive(root, "path");
+    uint32_t data_format = 0U;
+    uint32_t address_length = 0U;
+    uint32_t size_length = 0U;
+    uint64_t address = 0U;
+
+    if (!s_client_config_valid ||
+        s_download_active ||
+        !cJSON_IsString(path) ||
+        (path->valuestring[0] == '\0') ||
+        (strstr(path->valuestring, "..") != NULL) ||
+        !web_uds_number(root, "data_format", UINT8_MAX, &data_format) ||
+        !web_uds_number(root, "address_length", 8U, &address_length) ||
+        !web_uds_number(root, "size_length", 8U, &size_length) ||
+        !web_uds_hex_uint64(root, "address", &address)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    struct stat information = {0};
+    esp_err_t result =
+        storage_sd_service_stat(
+            path->valuestring,
+            &information
+        );
+
+    if ((result != ESP_OK) ||
+        !S_ISREG(information.st_mode) ||
+        (information.st_size <= 0)) {
+
+        return (result != ESP_OK)
+            ? result
+            : ESP_ERR_INVALID_ARG;
+    }
+
+    result =
+        storage_sd_service_open(
+            path->valuestring,
+            "rb",
+            &s_download_file
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (s_client.state != UDS_CLIENT_CLOSED) {
+        result = uds_client_close(&s_client);
+    }
+
+    if (result == ESP_OK) {
+        const uds_download_config_t config = {
+            .client = s_client_config,
+            .read = web_uds_download_read,
+            .transfer_buffer = s_download_transfer_buffer,
+            .transfer_capacity = UDS_CLIENT_TRANSFER_DATA_MAX_LENGTH,
+            .data_format_identifier = (uint8_t)data_format,
+            .memory_address = address,
+            .memory_address_length = (uint8_t)address_length,
+            .memory_size = (uint64_t)information.st_size,
+            .memory_size_length = (uint8_t)size_length,
+        };
+
+        result = uds_download_open(&s_download, &config);
+    }
+
+    if (result == ESP_OK) {
+        s_download_file_offset = 0U;
+        result =
+            uds_download_start(
+                &s_download,
+                esp_timer_get_time()
+            );
+    }
+
+    if (result == ESP_OK) {
+        s_download_active = true;
+        const BaseType_t task_result =
+            xTaskCreate(
+                web_uds_download_task,
+                "uds_download",
+                WEB_UDS_DOWNLOAD_TASK_STACK_SIZE,
+                NULL,
+                APP_TASK_PRIORITY_WEB_CAN,
+                &s_download_task
+            );
+
+        if (task_result != pdPASS) {
+            s_download_active = false;
+            result = ESP_ERR_NO_MEM;
+            (void)uds_download_close(&s_download);
+            web_uds_download_close_file();
+            (void)uds_client_open(&s_client, &s_client_config);
+        }
+    } else {
+        web_uds_download_close_file();
+        (void)uds_client_open(&s_client, &s_client_config);
+    }
+
+    return result;
+}
+
 static esp_err_t web_uds_get_handler(
     httpd_req_t *request
 )
@@ -884,7 +1122,21 @@ static esp_err_t web_uds_get_handler(
         );
     }
 
-    if (s_client.state != UDS_CLIENT_CLOSED) {
+    uds_download_progress_t download_progress = {0};
+
+    if (s_download_active) {
+        (void)uds_download_get_progress(
+            &s_download,
+            &download_progress
+        );
+
+        if ((download_progress.state == UDS_DOWNLOAD_COMPLETE) ||
+            (download_progress.state == UDS_DOWNLOAD_CANCELLED) ||
+            (download_progress.state == UDS_DOWNLOAD_ERROR)) {
+
+            web_uds_download_close_file();
+        }
+    } else if (s_client.state != UDS_CLIENT_CLOSED) {
         (void)uds_client_poll(
             &s_client,
             esp_timer_get_time()
@@ -901,6 +1153,10 @@ static esp_err_t web_uds_get_handler(
             s_negative_response_code
         );
     cJSON *response = cJSON_CreateObject();
+    uds_client_t *active_client =
+        s_download_active
+            ? uds_download_client(&s_download)
+            : &s_client;
 
     const bool valid =
         (payload != NULL) &&
@@ -908,12 +1164,12 @@ static esp_err_t web_uds_get_handler(
         (cJSON_AddBoolToObject(
             response,
             "open",
-            s_client.state != UDS_CLIENT_CLOSED
+            active_client->state != UDS_CLIENT_CLOSED
         ) != NULL) &&
         (cJSON_AddNumberToObject(
             response,
             "state",
-            s_client.state
+            active_client->state
         ) != NULL) &&
         (cJSON_AddNumberToObject(
             response,
@@ -969,6 +1225,36 @@ static esp_err_t web_uds_get_handler(
             response,
             "payload",
             payload
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "download_active",
+            s_download_active
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_state",
+            download_progress.state
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_transferred",
+            (double)download_progress.transferred_size
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_total",
+            (double)download_progress.total_size
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_block_size",
+            download_progress.block_data_capacity
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_result",
+            download_progress.last_result
         ) != NULL);
 
     free(payload);
@@ -1023,14 +1309,34 @@ static esp_err_t web_uds_post_handler(
     if (!cJSON_IsString(action)) {
         result = ESP_ERR_INVALID_ARG;
     } else if (strcmp(action->valuestring, "configure") == 0) {
-        result = web_uds_configure(root);
+        result = s_download_active
+            ? ESP_ERR_INVALID_STATE
+            : web_uds_configure(root);
     } else if (strcmp(action->valuestring, "request") == 0) {
-        result = web_uds_request(root);
+        result = s_download_active
+            ? ESP_ERR_INVALID_STATE
+            : web_uds_request(root);
+    } else if (strcmp(action->valuestring, "download_start") == 0) {
+        result = web_uds_download_start(root);
+    } else if (strcmp(action->valuestring, "download_cancel") == 0) {
+        result = s_download_active
+            ? uds_download_cancel(&s_download)
+            : ESP_ERR_INVALID_STATE;
+
+        if (result == ESP_OK) {
+            web_uds_download_close_file();
+        }
     } else if (strcmp(action->valuestring, "close") == 0) {
-        result =
-            (s_client.state == UDS_CLIENT_CLOSED)
-                ? ESP_OK
-                : uds_client_close(&s_client);
+        if (s_download_active) {
+            web_uds_download_close_file();
+            result = uds_download_close(&s_download);
+            s_download_active = false;
+        } else {
+            result =
+                (s_client.state == UDS_CLIENT_CLOSED)
+                    ? ESP_OK
+                    : uds_client_close(&s_client);
+        }
 
         if (result == ESP_OK) {
             s_sequence++;
@@ -1081,18 +1387,25 @@ esp_err_t web_uds_api_register(
             WEB_UDS_BUFFER_SIZE,
             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
         );
+        s_download_transfer_buffer = heap_caps_malloc(
+            UDS_CLIENT_TRANSFER_DATA_MAX_LENGTH,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+        );
 
         if ((s_lock == NULL) ||
             (s_receive_buffer == NULL) ||
             (s_transmit_buffer == NULL) ||
-            (s_response_buffer == NULL)) {
+            (s_response_buffer == NULL) ||
+            (s_download_transfer_buffer == NULL)) {
 
             heap_caps_free(s_receive_buffer);
             heap_caps_free(s_transmit_buffer);
             heap_caps_free(s_response_buffer);
+            heap_caps_free(s_download_transfer_buffer);
             s_receive_buffer = NULL;
             s_transmit_buffer = NULL;
             s_response_buffer = NULL;
+            s_download_transfer_buffer = NULL;
 
             if (s_lock != NULL) {
                 vSemaphoreDelete(s_lock);

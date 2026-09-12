@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=24">
-    <script src="spectra.js?v=24" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=25">
+    <script src="spectra.js?v=25" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -412,6 +412,21 @@
                 <button id="uds-send" class="primary" disabled>
                     Send UDS request
                 </button>
+
+                <div class="isotp-options">
+                    <label>
+                        SD firmware path
+                        <input id="uds-download-path" value="/firmware/firmware.bin" spellcheck="false">
+                    </label>
+                </div>
+
+                <div class="isotp-actions">
+                    <button id="uds-download-start" disabled>Program SD file</button>
+                    <button id="uds-download-cancel" disabled>Cancel programming</button>
+                </div>
+
+                <progress id="uds-download-progress" value="0" max="1"></progress>
+                <span id="uds-download-progress-text">No automatic download</span>
             </section>
 
             <section class="card uds-response isotp-card">

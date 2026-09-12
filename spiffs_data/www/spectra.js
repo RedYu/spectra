@@ -5503,6 +5503,10 @@
         const response = element('uds-response-data');
         const summary = element('uds-response-summary');
         const brs = element('uds-brs');
+        const downloadStart = element('uds-download-start');
+        const downloadCancel = element('uds-download-cancel');
+        const downloadProgress = element('uds-download-progress');
+        const downloadProgressText = element('uds-download-progress-text');
         let lastSequence = -1;
 
         const stateNames = [
@@ -5846,6 +5850,16 @@
                     data.state === 2 ||
                     data.state === 3 ||
                     data.state === 4;
+                downloadStart.disabled =
+                    !data.open || data.download_active;
+                downloadCancel.disabled = !data.download_active;
+                downloadProgress.max = data.download_total || 1;
+                downloadProgress.value = data.download_transferred || 0;
+                downloadProgressText.textContent = data.download_active
+                    ? `${data.download_transferred} / ${data.download_total} bytes · ` +
+                      `block ${data.download_block_size || 0} · ` +
+                      `state ${data.download_state} · result ${data.download_result}`
+                    : 'No automatic download';
 
                 if (data.sequence === lastSequence)
                     return;
@@ -5929,6 +5943,52 @@
         element('uds-close').addEventListener('click', async () => {
             try {
                 await command({action : 'close'});
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        downloadStart.addEventListener('click', async () => {
+            try {
+                const addressLength =
+                    Number(element('uds-download-address-length').value);
+                const sizeLength =
+                    Number(element('uds-download-size-length').value);
+
+                if (!window.confirm(
+                        'Program the selected SD-card file into the ECU?'
+                    )) {
+
+                    return;
+                }
+
+                await command({
+                    action : 'download_start',
+                    path : element('uds-download-path').value.trim(),
+                    data_format : parseHexNumber(
+                        element('uds-download-format'),
+                        0xff,
+                        'Data format identifier'
+                    ),
+                    address : parseHexIntegerText(
+                        element('uds-download-address'),
+                        addressLength,
+                        'Memory address',
+                        true
+                    ),
+                    address_length : addressLength,
+                    size_length : sizeLength
+                });
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        downloadCancel.addEventListener('click', async () => {
+            try {
+                await command({action : 'download_cancel'});
                 await refresh();
             } catch (error) {
                 message.textContent = error.message;
