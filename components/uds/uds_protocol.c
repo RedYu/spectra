@@ -281,3 +281,131 @@ void uds_protocol_decode_dtc_status(
             (status_byte & (1U << 7U)) != 0U,
     };
 }
+
+esp_err_t uds_protocol_decode_request_download_response(
+    const uds_response_t *response,
+    uds_request_download_response_t *download_response
+)
+{
+    if ((response == NULL) ||
+        (download_response == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        download_response,
+        0,
+        sizeof(*download_response)
+    );
+
+    if (!response->positive ||
+        (response->request_service_id !=
+         UDS_SERVICE_REQUEST_DOWNLOAD) ||
+        (response->payload == NULL) ||
+        (response->payload_length < 2U)) {
+
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    const uint8_t length = response->payload[0] >> 4U;
+
+    if ((length == 0U) ||
+        (length > sizeof(uint64_t)) ||
+        ((response->payload[0] & 0x0FU) != 0U) ||
+        (response->payload_length != (size_t)(1U + length))) {
+
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    uint64_t maximum_block_length = 0U;
+
+    for (uint8_t index = 0U; index < length; ++index) {
+        maximum_block_length =
+            (maximum_block_length << 8U) |
+            response->payload[1U + index];
+    }
+
+    if (maximum_block_length < 2U) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    download_response->length_format_identifier =
+        response->payload[0];
+    download_response->maximum_block_length_size = length;
+    download_response->maximum_block_length =
+        maximum_block_length;
+
+    return ESP_OK;
+}
+
+esp_err_t uds_protocol_decode_transfer_data_response(
+    const uds_response_t *response,
+    uds_transfer_data_response_t *transfer_response
+)
+{
+    if ((response == NULL) ||
+        (transfer_response == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        transfer_response,
+        0,
+        sizeof(*transfer_response)
+    );
+
+    if (!response->positive ||
+        (response->request_service_id !=
+         UDS_SERVICE_TRANSFER_DATA) ||
+        (response->payload == NULL) ||
+        (response->payload_length < 1U)) {
+
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    transfer_response->block_sequence_counter =
+        response->payload[0];
+    transfer_response->parameter_record =
+        (response->payload_length > 1U)
+            ? &response->payload[1]
+            : NULL;
+    transfer_response->parameter_record_length =
+        response->payload_length - 1U;
+
+    return ESP_OK;
+}
+
+esp_err_t uds_protocol_decode_transfer_exit_response(
+    const uds_response_t *response,
+    uds_transfer_exit_response_t *transfer_response
+)
+{
+    if ((response == NULL) ||
+        (transfer_response == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        transfer_response,
+        0,
+        sizeof(*transfer_response)
+    );
+
+    if (!response->positive ||
+        (response->request_service_id !=
+         UDS_SERVICE_REQUEST_TRANSFER_EXIT) ||
+        ((response->payload == NULL) &&
+         (response->payload_length != 0U))) {
+
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    transfer_response->parameter_record = response->payload;
+    transfer_response->parameter_record_length =
+        response->payload_length;
+
+    return ESP_OK;
+}

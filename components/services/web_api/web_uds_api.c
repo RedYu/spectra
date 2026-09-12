@@ -53,6 +53,12 @@ static bool web_uds_boolean(
     bool *value
 );
 
+static bool web_uds_hex_uint64(
+    const cJSON *root,
+    const char *name,
+    uint64_t *value
+);
+
 static esp_err_t web_uds_receive_json(
     httpd_req_t *request,
     cJSON **root
@@ -134,6 +140,50 @@ static bool web_uds_boolean(
     }
 
     *value = cJSON_IsTrue(item);
+    return true;
+}
+
+static bool web_uds_hex_uint64(
+    const cJSON *root,
+    const char *name,
+    uint64_t *value
+)
+{
+    const cJSON *item =
+        cJSON_GetObjectItemCaseSensitive(root, name);
+
+    if (!cJSON_IsString(item) ||
+        (item->valuestring[0] == '\0')) {
+
+        return false;
+    }
+
+    uint64_t parsed = 0U;
+
+    for (const char *cursor = item->valuestring;
+         *cursor != '\0';
+         ++cursor) {
+
+        uint8_t digit = 0U;
+
+        if ((*cursor >= '0') && (*cursor <= '9')) {
+            digit = (uint8_t)(*cursor - '0');
+        } else if ((*cursor >= 'A') && (*cursor <= 'F')) {
+            digit = (uint8_t)(*cursor - 'A' + 10);
+        } else if ((*cursor >= 'a') && (*cursor <= 'f')) {
+            digit = (uint8_t)(*cursor - 'a' + 10);
+        } else {
+            return false;
+        }
+
+        if (parsed > ((UINT64_MAX - digit) >> 4U)) {
+            return false;
+        }
+
+        parsed = (parsed << 4U) | digit;
+    }
+
+    *value = parsed;
     return true;
 }
 
@@ -632,6 +682,109 @@ static esp_err_t web_uds_request(
             (uint8_t)value,
             security_data,
             security_data_length,
+            now_us
+        );
+    }
+
+    if (strcmp(kind->valuestring, "request_download") == 0) {
+        uint32_t data_format_identifier = 0U;
+        uint32_t address_length = 0U;
+        uint32_t size_length = 0U;
+        uint64_t memory_address = 0U;
+        uint64_t memory_size = 0U;
+
+        if (!web_uds_number(
+                root,
+                "data_format",
+                UINT8_MAX,
+                &data_format_identifier
+            ) ||
+            !web_uds_number(root, "address_length", 8U, &address_length) ||
+            !web_uds_number(root, "size_length", 8U, &size_length) ||
+            !web_uds_hex_uint64(root, "address", &memory_address) ||
+            !web_uds_hex_uint64(root, "size", &memory_size)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        return uds_client_request_download(
+            &s_client,
+            (uint8_t)data_format_identifier,
+            memory_address,
+            (uint8_t)address_length,
+            memory_size,
+            (uint8_t)size_length,
+            now_us
+        );
+    }
+
+    if (strcmp(kind->valuestring, "transfer_data") == 0) {
+        const cJSON *data =
+            cJSON_GetObjectItemCaseSensitive(root, "data");
+
+        if (!web_uds_number(root, "counter", UINT8_MAX, &value) ||
+            !cJSON_IsString(data)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        uint8_t transfer_data[
+            UDS_CLIENT_TRANSFER_DATA_MAX_LENGTH
+        ];
+        size_t transfer_data_length = 0U;
+        const esp_err_t parse_result =
+            web_uds_parse_hex(
+                data->valuestring,
+                transfer_data,
+                sizeof(transfer_data),
+                &transfer_data_length
+            );
+
+        if ((parse_result != ESP_OK) ||
+            (transfer_data_length == 0U)) {
+
+            return (parse_result != ESP_OK)
+                ? parse_result
+                : ESP_ERR_INVALID_ARG;
+        }
+
+        return uds_client_transfer_data(
+            &s_client,
+            (uint8_t)value,
+            transfer_data,
+            transfer_data_length,
+            now_us
+        );
+    }
+
+    if (strcmp(kind->valuestring, "transfer_exit") == 0) {
+        const cJSON *data =
+            cJSON_GetObjectItemCaseSensitive(root, "data");
+
+        if (!cJSON_IsString(data)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        uint8_t parameter_record[
+            UDS_CLIENT_TRANSFER_EXIT_MAX_LENGTH
+        ];
+        size_t parameter_record_length = 0U;
+        const esp_err_t parse_result =
+            web_uds_parse_hex(
+                data->valuestring,
+                parameter_record,
+                sizeof(parameter_record),
+                &parameter_record_length
+            );
+
+        if (parse_result != ESP_OK) {
+            return parse_result;
+        }
+
+        return uds_client_request_transfer_exit(
+            &s_client,
+            parameter_record,
+            parameter_record_length,
             now_us
         );
     }

@@ -613,3 +613,184 @@ TEST_CASE(
         )
     );
 }
+
+TEST_CASE(
+    "UDS request helper encodes Request Download",
+    "[uds]"
+)
+{
+    uint8_t buffer[11] = {0};
+    size_t encoded_size = 0U;
+    const uint8_t expected[] = {
+        0x34U,
+        0x00U,
+        0x44U,
+        0x12U,
+        0x34U,
+        0x56U,
+        0x78U,
+        0x00U,
+        0x01U,
+        0x00U,
+        0x00U,
+    };
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_request_download(
+            0x00U,
+            0x12345678U,
+            4U,
+            0x00010000U,
+            4U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(sizeof(expected), encoded_size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        expected,
+        buffer,
+        sizeof(expected)
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_request_encode_request_download(
+            0x00U,
+            0x100U,
+            1U,
+            1U,
+            1U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+}
+
+TEST_CASE(
+    "UDS protocol decodes Request Download response",
+    "[uds]"
+)
+{
+    const uint8_t payload[] = {
+        0x20U,
+        0x04U,
+        0x02U,
+    };
+    const uds_response_t response = {
+        .positive = true,
+        .service_id = 0x74U,
+        .request_service_id = UDS_SERVICE_REQUEST_DOWNLOAD,
+        .payload = payload,
+        .payload_length = sizeof(payload),
+    };
+    uds_request_download_response_t download = {0};
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_protocol_decode_request_download_response(
+            &response,
+            &download
+        )
+    );
+    TEST_ASSERT_EQUAL(2U, download.maximum_block_length_size);
+    TEST_ASSERT_EQUAL_UINT64(0x0402U, download.maximum_block_length);
+}
+
+TEST_CASE(
+    "UDS request helpers encode transfer data and exit",
+    "[uds]"
+)
+{
+    const uint8_t data[] = {
+        0xAAU,
+        0x55U,
+    };
+    uint8_t buffer[4] = {0};
+    size_t encoded_size = 0U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_transfer_data(
+            0x01U,
+            data,
+            sizeof(data),
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(4U, encoded_size);
+    TEST_ASSERT_EQUAL_HEX8(0x36U, buffer[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x01U, buffer[1]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(data, &buffer[2], sizeof(data));
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_request_transfer_exit(
+            NULL,
+            0U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(1U, encoded_size);
+    TEST_ASSERT_EQUAL_HEX8(0x37U, buffer[0]);
+}
+
+TEST_CASE(
+    "UDS protocol decodes transfer responses",
+    "[uds]"
+)
+{
+    const uint8_t block_payload[] = {
+        0x7FU,
+        0x12U,
+        0x34U,
+    };
+    const uds_response_t block_response = {
+        .positive = true,
+        .service_id = 0x76U,
+        .request_service_id = UDS_SERVICE_TRANSFER_DATA,
+        .payload = block_payload,
+        .payload_length = sizeof(block_payload),
+    };
+    uds_transfer_data_response_t block = {0};
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_protocol_decode_transfer_data_response(
+            &block_response,
+            &block
+        )
+    );
+    TEST_ASSERT_EQUAL_HEX8(0x7FU, block.block_sequence_counter);
+    TEST_ASSERT_EQUAL(2U, block.parameter_record_length);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        &block_payload[1],
+        block.parameter_record,
+        block.parameter_record_length
+    );
+
+    const uds_response_t exit_response = {
+        .positive = true,
+        .service_id = 0x77U,
+        .request_service_id = UDS_SERVICE_REQUEST_TRANSFER_EXIT,
+        .payload = NULL,
+        .payload_length = 0U,
+    };
+    uds_transfer_exit_response_t transfer_exit = {0};
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_protocol_decode_transfer_exit_response(
+            &exit_response,
+            &transfer_exit
+        )
+    );
+    TEST_ASSERT_NULL(transfer_exit.parameter_record);
+    TEST_ASSERT_EQUAL(0U, transfer_exit.parameter_record_length);
+}

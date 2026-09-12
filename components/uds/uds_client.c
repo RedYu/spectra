@@ -545,6 +545,123 @@ esp_err_t uds_client_security_access_send_key(
     );
 }
 
+esp_err_t uds_client_request_download(
+    uds_client_t *client,
+    uint8_t data_format_identifier,
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    uint64_t now_us
+)
+{
+    uint8_t request[19] = {0};
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_request_download(
+            data_format_identifier,
+            memory_address,
+            memory_address_length,
+            memory_size,
+            memory_size_length,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        now_us
+    );
+}
+
+esp_err_t uds_client_transfer_data(
+    uds_client_t *client,
+    uint8_t block_sequence_counter,
+    const uint8_t *data,
+    size_t data_length,
+    uint64_t now_us
+)
+{
+    if (data_length > UDS_CLIENT_TRANSFER_DATA_MAX_LENGTH) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t request[
+        2U + UDS_CLIENT_TRANSFER_DATA_MAX_LENGTH
+    ];
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_transfer_data(
+            block_sequence_counter,
+            data,
+            data_length,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        now_us
+    );
+}
+
+esp_err_t uds_client_request_transfer_exit(
+    uds_client_t *client,
+    const uint8_t *parameter_record,
+    size_t parameter_record_length,
+    uint64_t now_us
+)
+{
+    if (parameter_record_length >
+        UDS_CLIENT_TRANSFER_EXIT_MAX_LENGTH) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t request[
+        1U + UDS_CLIENT_TRANSFER_EXIT_MAX_LENGTH
+    ];
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_request_transfer_exit(
+            parameter_record,
+            parameter_record_length,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_request(
+        client,
+        request[0],
+        (request_size > 1U)
+            ? &request[1]
+            : NULL,
+        request_size - 1U,
+        now_us
+    );
+}
+
 bool uds_client_busy(
     const uds_client_t *client
 )

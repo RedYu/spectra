@@ -129,6 +129,34 @@ esp_err_t uds_request_encode_security_access_send_key(
     size_t *encoded_size
 );
 
+esp_err_t uds_request_encode_request_download(
+    uint8_t data_format_identifier,
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_transfer_data(
+    uint8_t block_sequence_counter,
+    const uint8_t *data,
+    size_t data_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_request_transfer_exit(
+    const uint8_t *parameter_record,
+    size_t parameter_record_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
 #ifdef __cplusplus
 }
 #endif

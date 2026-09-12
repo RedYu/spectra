@@ -59,6 +59,15 @@ buffers must remain valid and must not overlap for the lifetime of the adapter.
 The original UDS client event callback is preserved and receives both stages of
 the exchange.
 
+The programming transport includes RequestDownload (`0x34`), TransferData
+(`0x36`), and RequestTransferExit (`0x37`). RequestDownload supports one- to
+eight-byte memory addresses and sizes and parses the ECU maximum block length
+from response `0x74`. TransferData preserves the caller-provided block sequence
+counter and supports up to 512 data bytes per request. TransferExit accepts an
+optional parameter record of up to 256 bytes. The web diagnostics page exposes
+all three primitives for controlled manual testing, using hexadecimal strings
+for 64-bit addresses and sizes to avoid JavaScript number precision loss.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
@@ -69,8 +78,9 @@ payload memory.
 - physical addressing only through the selected ISO-TP channel;
 - no periodic Tester Present scheduler;
 - no built-in OEM security-access algorithms;
-- no typed DID value, routine-result, download, or transfer decoders yet;
+- no typed DID value or routine-result decoders yet;
+- no automatic file-to-ECU download state machine yet;
 - no authentication or role-based protection for destructive UDS requests.
 
-The next layer should add RequestDownload, TransferData, and RequestTransferExit
-on top of an unlocked programming session.
+The next layer should add an automatic file-to-ECU download state machine with
+block-size negotiation, sequence handling, progress reporting, and cancellation.

@@ -24,6 +24,8 @@ extern "C" {
 #define UDS_CLIENT_WRITE_DATA_MAX_LENGTH       (256U)
 #define UDS_CLIENT_ROUTINE_OPTION_MAX_LENGTH   (256U)
 #define UDS_CLIENT_SECURITY_DATA_MAX_LENGTH    (256U)
+#define UDS_CLIENT_TRANSFER_DATA_MAX_LENGTH    (512U)
+#define UDS_CLIENT_TRANSFER_EXIT_MAX_LENGTH    (256U)
 
 typedef enum
 {
@@ -174,6 +176,31 @@ esp_err_t uds_client_security_access_send_key(
     uint8_t security_level,
     const uint8_t *key,
     size_t key_length,
+    uint64_t now_us
+);
+
+esp_err_t uds_client_request_download(
+    uds_client_t *client,
+    uint8_t data_format_identifier,
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    uint64_t now_us
+);
+
+esp_err_t uds_client_transfer_data(
+    uds_client_t *client,
+    uint8_t block_sequence_counter,
+    const uint8_t *data,
+    size_t data_length,
+    uint64_t now_us
+);
+
+esp_err_t uds_client_request_transfer_exit(
+    uds_client_t *client,
+    const uint8_t *parameter_record,
+    size_t parameter_record_length,
     uint64_t now_us
 );
 

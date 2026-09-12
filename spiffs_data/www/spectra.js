@@ -5536,6 +5536,24 @@
             return parseInt(text, 16);
         }
 
+        function parseHexIntegerText(input, byteLength, name, allowZero) {
+            const text = input.value.trim();
+
+            if (!/^[0-9a-f]+$/i.test(text) ||
+                text.length > 16 ||
+                text.length > byteLength * 2) {
+
+                throw new Error(
+                    `${name} does not fit the selected ${byteLength}-byte length.`
+                );
+            }
+
+            if (!allowZero && BigInt(`0x${text}`) === 0n)
+                throw new Error(`${name} must be greater than zero.`);
+
+            return text.toUpperCase();
+        }
+
         function normalizeHex(text, allowEmpty) {
             const compact = text.replace(/[\s,:-]+/g, '');
 
@@ -5599,6 +5617,22 @@
                 selected === 'security_key'
                     ? 'Calculated key (HEX bytes)'
                     : 'Seed request data record (HEX bytes, optional)';
+            const download = selected === 'request_download';
+            element('uds-download-format-field').hidden = !download;
+            element('uds-download-address-field').hidden = !download;
+            element('uds-download-address-length-field').hidden = !download;
+            element('uds-download-size-field').hidden = !download;
+            element('uds-download-size-length-field').hidden = !download;
+            element('uds-transfer-counter-field').hidden =
+                selected !== 'transfer_data';
+            const transfer =
+                selected === 'transfer_data' ||
+                selected === 'transfer_exit';
+            element('uds-transfer-data-field').hidden = !transfer;
+            element('uds-transfer-data-label').textContent =
+                selected === 'transfer_exit'
+                    ? 'Transfer exit parameter record (HEX bytes, optional)'
+                    : 'Transfer data (HEX bytes)';
             element('uds-subfunction-field').hidden =
                 selected !== 'session' && selected !== 'reset';
             element('uds-raw-sid-field').hidden = selected !== 'raw';
@@ -5608,6 +5642,8 @@
                 selected === 'write_did' ||
                 selected === 'read_dtc' ||
                 security ||
+                download ||
+                transfer ||
                 selected === 'raw';
         }
 
@@ -5747,6 +5783,51 @@
             return lines.join('\n');
         }
 
+        function decodeDownloadResponse(payloadText) {
+            const bytes = payloadText
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .map(value => parseInt(value, 16));
+
+            if (bytes.length < 2)
+                return null;
+
+            const length = bytes[0] >> 4;
+
+            if (!length || length > 8 || bytes.length !== 1 + length)
+                return null;
+
+            let maximumBlockLength = 0n;
+
+            for (let index = 0; index < length; ++index)
+                maximumBlockLength =
+                    (maximumBlockLength << 8n) |
+                    BigInt(bytes[1 + index]);
+
+            return `Download accepted\nMaximum block length: ${maximumBlockLength}`;
+        }
+
+        function decodeTransferDataResponse(payloadText) {
+            const bytes = payloadText
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .map(value => parseInt(value, 16));
+
+            if (!bytes.length)
+                return null;
+
+            const counter =
+                bytes[0].toString(16).padStart(2, '0').toUpperCase();
+            const record = bytes.slice(1)
+                .map(value => value.toString(16).padStart(2, '0').toUpperCase())
+                .join(' ');
+
+            return `Block 0x${counter} accepted` +
+                (record ? `\nResponse record: ${record}` : '');
+        }
+
         async function refresh() {
             try {
                 const reply = await fetch('/api/uds', {cache : 'no-store'});
@@ -5790,7 +5871,11 @@
                                 ? decodeRoutineResponse(data.payload || '')
                                 : data.response_sid === 0x67
                                     ? decodeSecurityAccessResponse(data.payload || '')
-                                    : null;
+                                    : data.response_sid === 0x74
+                                        ? decodeDownloadResponse(data.payload || '')
+                                        : data.response_sid === 0x76
+                                            ? decodeTransferDataResponse(data.payload || '')
+                                            : null;
 
                     response.textContent =
                         decoded ||
@@ -5992,6 +6077,84 @@
                     if (kind === 'security_key' &&
                         !window.confirm(
                             'Send this calculated security key to the selected ECU?'
+                        )) {
+
+                        return;
+                    }
+                } else if (kind === 'request_download') {
+                    const addressLength =
+                        Number(element('uds-download-address-length').value);
+                    const sizeLength =
+                        Number(element('uds-download-size-length').value);
+
+                    request.data_format =
+                        parseHexNumber(
+                            element('uds-download-format'),
+                            0xff,
+                            'Data format identifier'
+                        );
+                    request.address_length = addressLength;
+                    request.size_length = sizeLength;
+                    request.address =
+                        parseHexIntegerText(
+                            element('uds-download-address'),
+                            addressLength,
+                            'Memory address',
+                            true
+                        );
+                    request.size =
+                        parseHexIntegerText(
+                            element('uds-download-size'),
+                            sizeLength,
+                            'Memory size',
+                            false
+                        );
+
+                    if (!window.confirm(
+                            'Request permission to program the selected ECU memory region?'
+                        )) {
+
+                        return;
+                    }
+                } else if (kind === 'transfer_data') {
+                    request.counter =
+                        parseHexNumber(
+                            element('uds-transfer-counter'),
+                            0xff,
+                            'Block sequence counter'
+                        );
+                    request.data =
+                        normalizeHex(
+                            element('uds-transfer-data').value,
+                            false
+                        );
+
+                    if (request.data === null)
+                        throw new Error(
+                            'Transfer Data requires at least one data byte.'
+                        );
+
+                    if (request.data.split(' ').length > 512)
+                        throw new Error(
+                            'Transfer Data exceeds the 512-byte web limit.'
+                        );
+                } else if (kind === 'transfer_exit') {
+                    request.data =
+                        normalizeHex(
+                            element('uds-transfer-data').value,
+                            true
+                        );
+
+                    if (request.data &&
+                        request.data.split(' ').length > 256) {
+
+                        throw new Error(
+                            'Transfer exit record exceeds the 256-byte limit.'
+                        );
+                    }
+
+                    if (!window.confirm(
+                            'Finish the current ECU download transfer?'
                         )) {
 
                         return;

@@ -128,6 +128,29 @@ typedef struct
 
 } uds_dtc_response_t;
 
+typedef struct
+{
+    uint8_t length_format_identifier;
+    uint8_t maximum_block_length_size;
+    uint64_t maximum_block_length;
+
+} uds_request_download_response_t;
+
+typedef struct
+{
+    uint8_t block_sequence_counter;
+    const uint8_t *parameter_record;
+    size_t parameter_record_length;
+
+} uds_transfer_data_response_t;
+
+typedef struct
+{
+    const uint8_t *parameter_record;
+    size_t parameter_record_length;
+
+} uds_transfer_exit_response_t;
+
 esp_err_t uds_protocol_encode_request(
     uint8_t service_id,
     const uint8_t *parameters,
@@ -162,6 +185,21 @@ esp_err_t uds_protocol_get_dtc_record(
 void uds_protocol_decode_dtc_status(
     uint8_t status_byte,
     uds_dtc_status_t *status
+);
+
+esp_err_t uds_protocol_decode_request_download_response(
+    const uds_response_t *response,
+    uds_request_download_response_t *download_response
+);
+
+esp_err_t uds_protocol_decode_transfer_data_response(
+    const uds_response_t *response,
+    uds_transfer_data_response_t *transfer_response
+);
+
+esp_err_t uds_protocol_decode_transfer_exit_response(
+    const uds_response_t *response,
+    uds_transfer_exit_response_t *transfer_response
 );
 
 #ifdef __cplusplus

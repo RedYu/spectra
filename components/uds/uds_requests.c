@@ -372,3 +372,159 @@ esp_err_t uds_request_encode_security_access_send_key(
     *encoded_size = required_size;
     return ESP_OK;
 }
+
+static bool uds_request_value_fits_length(
+    uint64_t value,
+    uint8_t length
+)
+{
+    if ((length == 0U) || (length > sizeof(uint64_t))) {
+        return false;
+    }
+
+    return (length == sizeof(uint64_t)) ||
+           (value < (1ULL << (length * 8U)));
+}
+
+static void uds_request_write_big_endian(
+    uint8_t *destination,
+    uint64_t value,
+    uint8_t length
+)
+{
+    for (uint8_t index = 0U; index < length; ++index) {
+        destination[index] =
+            (uint8_t)(value >>
+                      ((length - index - 1U) * 8U));
+    }
+}
+
+esp_err_t uds_request_encode_request_download(
+    uint8_t data_format_identifier,
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((memory_size == 0U) ||
+        !uds_request_value_fits_length(
+            memory_address,
+            memory_address_length
+        ) ||
+        !uds_request_value_fits_length(
+            memory_size,
+            memory_size_length
+        ) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size =
+        3U +
+        memory_address_length +
+        memory_size_length;
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_REQUEST_DOWNLOAD;
+    buffer[1] = data_format_identifier;
+    buffer[2] =
+        (uint8_t)((memory_size_length << 4U) |
+                  memory_address_length);
+
+    uds_request_write_big_endian(
+        &buffer[3],
+        memory_address,
+        memory_address_length
+    );
+    uds_request_write_big_endian(
+        &buffer[3U + memory_address_length],
+        memory_size,
+        memory_size_length
+    );
+
+    *encoded_size = required_size;
+    return ESP_OK;
+}
+
+esp_err_t uds_request_encode_transfer_data(
+    uint8_t block_sequence_counter,
+    const uint8_t *data,
+    size_t data_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((data == NULL) ||
+        (data_length == 0U) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL) ||
+        (data_length > (SIZE_MAX - 2U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size = 2U + data_length;
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_TRANSFER_DATA;
+    buffer[1] = block_sequence_counter;
+
+    memcpy(
+        &buffer[2],
+        data,
+        data_length
+    );
+
+    *encoded_size = required_size;
+    return ESP_OK;
+}
+
+esp_err_t uds_request_encode_request_transfer_exit(
+    const uint8_t *parameter_record,
+    size_t parameter_record_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (((parameter_record == NULL) &&
+         (parameter_record_length != 0U)) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL) ||
+        (parameter_record_length > (SIZE_MAX - 1U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size = 1U + parameter_record_length;
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_REQUEST_TRANSFER_EXIT;
+
+    if (parameter_record_length != 0U) {
+        memcpy(
+            &buffer[1],
+            parameter_record,
+            parameter_record_length
+        );
+    }
+
+    *encoded_size = required_size;
+    return ESP_OK;
+}
