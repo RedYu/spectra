@@ -3481,6 +3481,80 @@
     
     }
 
+    function initResizableCanTables(root = document) {
+        const tables = root.querySelectorAll(
+            ".resizable-can-row[data-resize-key]"
+        );
+
+        for (const table of tables) {
+            const storageKey =
+                `spectra:can-table-height:${table.dataset.resizeKey}`;
+
+            try {
+                const storedHeight =
+                    Number(
+                        localStorage.getItem(storageKey)
+                    );
+
+                if (Number.isFinite(storedHeight) &&
+                    (storedHeight >= 210)) {
+
+                    table.style.height = `${storedHeight}px`;
+                }
+            } catch (_) {
+                /*
+                 * Resizing remains available without browser storage.
+                 */
+            }
+        }
+
+        if (!("ResizeObserver" in window)) {
+            return;
+        }
+
+        const timers = new WeakMap();
+        const observer = new ResizeObserver(entries => {
+            for (const entry of entries) {
+                const height =
+                    Math.round(
+                        entry.target.getBoundingClientRect().height
+                    );
+                const resizeKey =
+                    entry.target.dataset.resizeKey;
+
+                clearTimeout(
+                    timers.get(entry.target)
+                );
+
+                timers.set(
+                    entry.target,
+                    setTimeout(
+                        () => {
+                            try {
+                                localStorage.setItem(
+                                    `spectra:can-table-height:${resizeKey}`,
+                                    String(
+                                        height
+                                    )
+                                );
+                            } catch (_) {
+                                /*
+                                 * The height still applies to this page
+                                 * session.
+                                 */
+                            }
+                        },
+                        150
+                    )
+                );
+            }
+        });
+
+        for (const table of tables) {
+            observer.observe(table);
+        }
+    }
+
     // ===== can_logger.html =====
     function init_logger() {
 
@@ -3519,13 +3593,17 @@
             section.innerHTML = '<div class="channel-title"><span class="tag">CH ' + (bus + 1) +
                 '</span><h2>' + (bus ? "Secondary CAN" : "Primary CAN") +
                 '</h2><span class="rate" id="rate' + bus + '">RX 0/s · TX 0/s</span></div>' +
-                '<div class="tables"><div class="panel"><div class="panel-title">Identifiers<span id="ids' + bus +
+                '<div class="tables resizable-can-row" data-resize-key="logger-' + bus + '-tables"><div class="panel"><div class="panel-title">Identifiers<span id="ids' + bus +
                 '">0 IDs</span></div><div class="scroll"><table class="identifier-table"><thead><tr><th>ID / type</th><th>Count</th><th>Data</th><th>Δ ms</th></tr></thead><tbody id="idrows' + bus +
                 '"></tbody></table></div></div><div class="panel"><div class="panel-title">Event buffer<span id="buffer' + bus +
                 '">0 events</span></div><div class="scroll"><table class="event-table"><thead><tr><th>No.</th><th>Time / source</th><th>Event</th><th>ID</th><th>Data</th><th>Text</th></tr></thead><tbody id="history' + bus +
                 '"></tbody></table></div></div></div>';
             element("channels").append(section);
         }
+
+        initResizableCanTables(
+            element("channels")
+        );
 
         function hex(value, width = 2) {
             return value.toString(16).toUpperCase().padStart(width, "0");
@@ -4005,6 +4083,8 @@
     function init_analyzer() {
 
         "use strict";
+        initResizableCanTables();
+
         const $ = id => document.getElementById(id);
         const PAGE = 100;
         const analyzerLimits = [10000, 50000, 100000, 250000, 500000, 1000000];
@@ -5204,6 +5284,7 @@
         const sendButton = element('isotp-send');
         const format = element('isotp-format');
         const linkLength = element('isotp-link-length');
+        const addressing = element('isotp-addressing');
         const brs = element('isotp-brs');
         const payload = element('isotp-payload');
         const response = element('isotp-response-data');
@@ -5244,6 +5325,22 @@
                     `CAN ID must fit the selected ${extended ? 29 : 11}-bit format.`);
 
             return parseInt(text, 16);
+        }
+
+        function parseByte(input) {
+            const text = input.value.trim();
+
+            if (!/^[0-9a-f]{1,2}$/i.test(text))
+                throw new Error('Address and padding values must be HEX bytes.');
+
+            return parseInt(text, 16);
+        }
+
+        function updateAddressing() {
+            const addressed = addressing.value !== '0';
+
+            for (const field of document.querySelectorAll('.isotp-address-field'))
+                field.hidden = !addressed;
         }
 
         async function command(body) {
@@ -5332,7 +5429,12 @@
                     extended,
                     fd,
                     brs : fd && brs.checked,
+                    functional : element('isotp-functional').checked,
                     link_data_length : Number(linkLength.value),
+                    addressing_mode : Number(addressing.value),
+                    tx_address : parseByte(element('isotp-tx-address')),
+                    rx_address : parseByte(element('isotp-rx-address')),
+                    padding_byte : parseByte(element('isotp-padding')),
                     block_size : Number(element('isotp-block-size').value),
                     st_min : Number(element('isotp-st-min').value),
                     timeout_ms : Number(element('isotp-timeout').value)
@@ -5382,8 +5484,10 @@
         });
 
         format.addEventListener('change', updateFormat);
+        addressing.addEventListener('change', updateAddressing);
         payload.addEventListener('input', updateByteCount);
         updateFormat();
+        updateAddressing();
         updateByteCount();
         refresh();
         setInterval(refresh, 300);

@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=11">
-    <script src="spectra.js?v=11" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=18">
+    <script src="spectra.js?v=18" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -37,7 +37,7 @@
     </header>
 
     <main class="spectra-page">
-        <div class="heading">
+        <div class="page-header isotp-page-header">
             <div>
                 <h1>ISO-TP Diagnostics</h1>
 
@@ -49,7 +49,7 @@
         </div>
 
         <div class="isotp-layout">
-            <section class="card isotp-configuration">
+            <section class="card isotp-configuration isotp-card">
                 <h2>Channel</h2>
 
                 <div class="isotp-form-grid">
@@ -94,6 +94,30 @@
                     </label>
 
                     <label>
+                        Addressing
+                        <select id="isotp-addressing">
+                            <option value="0">Normal</option>
+                            <option value="1">Extended</option>
+                            <option value="2">Mixed</option>
+                        </select>
+                    </label>
+
+                    <label class="isotp-address-field" hidden>
+                        TX address byte
+                        <input id="isotp-tx-address" value="00" spellcheck="false">
+                    </label>
+
+                    <label class="isotp-address-field" hidden>
+                        RX address byte
+                        <input id="isotp-rx-address" value="00" spellcheck="false">
+                    </label>
+
+                    <label>
+                        Padding byte
+                        <input id="isotp-padding" value="00" spellcheck="false">
+                    </label>
+
+                    <label>
                         Timeout
                         <span class="input-with-unit">
                             <input id="isotp-timeout" type="number" min="10" max="60000" value="1000">
@@ -115,6 +139,7 @@
                 <div class="isotp-options">
                     <label><input id="isotp-extended" type="checkbox">29-bit identifiers</label>
                     <label><input id="isotp-brs" type="checkbox" disabled>CAN FD bit-rate switch</label>
+                    <label><input id="isotp-functional" type="checkbox">Functional request</label>
                 </div>
 
                 <div class="isotp-actions">
@@ -123,7 +148,7 @@
                 </div>
             </section>
 
-            <section class="card isotp-transfer">
+            <section class="card isotp-transfer isotp-card">
                 <h2>Payload</h2>
 
                 <label for="isotp-payload">HEX bytes</label>
@@ -145,7 +170,7 @@
                 </button>
             </section>
 
-            <section class="card isotp-response">
+            <section class="card isotp-response isotp-card">
                 <div class="panel-title">
                     <h2>Latest response</h2>
                     <span id="isotp-response-size">0 bytes</span>
@@ -159,12 +184,12 @@
                 </div>
             </section>
 
-            <section class="card isotp-events">
+            <section class="card isotp-events isotp-card">
                 <h2>Activity</h2>
                 <div id="isotp-message" role="status">Configure a channel to begin.</div>
             </section>
 
-            <section class="card uds-configuration">
+            <section class="card uds-configuration isotp-card">
                 <div class="panel-title">
                     <h2>UDS channel</h2>
                     <span id="uds-status" role="status">Closed</span>
@@ -235,7 +260,7 @@
                 </div>
             </section>
 
-            <section class="card uds-request">
+            <section class="card uds-request isotp-card">
                 <h2>UDS request</h2>
 
                 <div class="isotp-form-grid">
@@ -280,7 +305,7 @@
                 </button>
             </section>
 
-            <section class="card uds-response">
+            <section class="card uds-response isotp-card">
                 <div class="panel-title">
                     <h2>UDS response</h2>
                     <span id="uds-response-summary">No response</span>
