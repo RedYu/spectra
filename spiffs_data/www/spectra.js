@@ -3489,7 +3489,7 @@
         const element = id => document.getElementById(id);
         const eventNames = ["RX", "TX queued", "TX done", "TX failed", "TX aborted"];
         const channels = [0, 1].map(() => ({
-            identifiers: new Map(), history: [], rx: 0, tx: 0,
+            identifiers: new Map(), history: [], historyOffset: 0, rx: 0, tx: 0,
             previousRx: 0, previousTx: 0, dirty: true
         }));
         let socket = null;
@@ -3498,6 +3498,20 @@
         let received = 0;
         let previousRateTime = performance.now();
         let subscriptionTimer = null;
+        const loggerLimits = [500, 1000, 5000, 10000, 25000, 50000];
+        let historyLimit = 500;
+
+        try {
+            historyLimit =
+                Number(localStorage.getItem("spectra:logger-buffer-limit"));
+        } catch (_) {
+            /* The default remains available when browser storage is disabled. */
+        }
+
+        if (!loggerLimits.includes(historyLimit))
+            historyLimit = 500;
+
+        element("logger-buffer-limit").value = String(historyLimit);
 
         for (let bus = 0; bus < 2; bus++) {
             const section = document.createElement("section");
@@ -3570,8 +3584,14 @@
             const channel = channels[event.bus];
             received++;
             channel.history.push(event);
-            if (channel.history.length > 500)
-                channel.history.shift();
+
+            if ((channel.history.length - channel.historyOffset) > historyLimit)
+                channel.historyOffset++;
+
+            if (channel.historyOffset >= 1024) {
+                channel.history.splice(0, channel.historyOffset);
+                channel.historyOffset = 0;
+            }
             // Count actual RX and completed TX, not every TX lifecycle event.
             if (event.type === 0 || event.type === 2) {
                 if (event.type === 0)
@@ -3633,8 +3653,10 @@
                     "</td><td>" + row.count + "</td><td class=\"data-cell\">" + payload(row.event, row) +
                     "</td><td>" + (row.delta === null ? "—" : row.delta.toFixed(1)) + "</td></tr>"
                 ).join("") || '<tr><td class="empty" colspan="4">No matching frames received</td></tr>';
-                const history = channel.history.filter(event => identifier(event).includes(query));
-                element("history" + bus).innerHTML = history.slice().reverse().map(event =>
+                const history = channel.history
+                    .slice(channel.historyOffset)
+                    .filter(event => identifier(event).includes(query));
+                element("history" + bus).innerHTML = history.slice(-500).reverse().map(event =>
                     "<tr><td>" + event.sequence + "</td><td>" + timeText(event) +
                     (event.source === 1 ? " SW" : event.source === 2 ? " HW" : "") +
                     "</td><td>" + eventNames[event.type] + "</td><td>" + identifier(event) +
@@ -3642,9 +3664,35 @@
                     payloadText(event) + "</td></tr>"
                 ).join("") || '<tr><td class="empty" colspan="6">Connect to start receiving CAN events</td></tr>';
                 element("ids" + bus).textContent = channel.identifiers.size + " IDs";
-                element("buffer" + bus).textContent = channel.history.length + " events";
+                element("buffer" + bus).textContent =
+                    (channel.history.length - channel.historyOffset) + " events";
             });
             element("received").textContent = received.toLocaleString();
+
+            const primarySize =
+                channels[0].history.length - channels[0].historyOffset;
+            const secondarySize =
+                channels[1].history.length - channels[1].historyOffset;
+            const totalSize = primarySize + secondarySize;
+            const totalCapacity = historyLimit * 2;
+            const progress = element("logger-buffer-progress");
+            const channelPeak = Math.max(primarySize, secondarySize);
+
+            element("logger-buffer-total").textContent =
+                `${totalSize.toLocaleString()} / ${totalCapacity.toLocaleString()}`;
+            element("logger-buffer-primary").textContent =
+                `P ${primarySize.toLocaleString()} / ${historyLimit.toLocaleString()}`;
+            element("logger-buffer-secondary").textContent =
+                `S ${secondarySize.toLocaleString()} / ${historyLimit.toLocaleString()}`;
+            element("logger-buffer-fill").style.width =
+                `${totalSize / totalCapacity * 100}%`;
+            progress.setAttribute("aria-valuenow", totalSize);
+            progress.setAttribute("aria-valuemax", totalCapacity);
+            progress.classList.toggle(
+                "warning",
+                channelPeak >= historyLimit * 0.8 && channelPeak < historyLimit
+            );
+            progress.classList.toggle("full", channelPeak >= historyLimit);
         }
 
         function updateControls() {
@@ -3721,9 +3769,33 @@
         element("apply").onclick = () => subscribe(paused);
         element("pause").onclick = () => subscribe(!paused);
         element("search").oninput = () => channels.forEach(channel => { channel.dirty = true; });
+        element("logger-buffer-limit").onchange = event => {
+            historyLimit = Number(event.target.value);
+
+            try {
+                localStorage.setItem(
+                    "spectra:logger-buffer-limit",
+                    String(historyLimit)
+                );
+            } catch (_) {
+                /* The selection still applies to the current page session. */
+            }
+
+            channels.forEach(channel => {
+                const retained =
+                    channel.history.length - channel.historyOffset;
+
+                if (retained > historyLimit)
+                    channel.historyOffset += retained - historyLimit;
+
+                channel.dirty = true;
+            });
+            render();
+        };
         element("clear").onclick = () => {
             channels.forEach(channel => {
                 channel.identifiers.clear(); channel.history.length = 0;
+                channel.historyOffset = 0;
                 channel.rx = channel.tx = channel.previousRx = channel.previousTx = 0;
                 channel.dirty = true;
             });
@@ -3732,7 +3804,7 @@
 
         function bufferedEvents() {
             return channels
-                .flatMap(channel => channel.history)
+                .flatMap(channel => channel.history.slice(channel.historyOffset))
                 .sort((left, right) => left.sequence - right.sequence);
         }
 
@@ -3806,6 +3878,91 @@
             return buffer;
         }
 
+        function encodeBufferedAsc(events) {
+            const eventLabels = [
+                "RX",
+                "TX_QUEUED",
+                "TX_COMPLETED",
+                "TX_FAILED",
+                "TX_ABORTED"
+            ];
+            const validTimestamps = events
+                .filter(event => event.source !== 0)
+                .map(event => event.timestamp);
+            const sessionStarted = validTimestamps.length
+                ? validTimestamps.reduce(
+                    (minimum, value) => value < minimum ? value : minimum
+                )
+                : 0n;
+            const now = new Date();
+            const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+            const months = [
+                "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+            ];
+            const twoDigits = value => String(value).padStart(2, "0");
+            const date =
+                `${days[now.getDay()]} ${months[now.getMonth()]} ` +
+                `${twoDigits(now.getDate())} ${twoDigits(now.getHours())}:` +
+                `${twoDigits(now.getMinutes())}:${twoDigits(now.getSeconds())} ` +
+                `${now.getFullYear()}`;
+            const lines = [
+                `date ${date}`,
+                "base hex  timestamps absolute",
+                "internal events logged",
+                "Begin Triggerblock"
+            ];
+
+            for (const event of events) {
+                const elapsed =
+                    event.source !== 0 && event.timestamp >= sessionStarted
+                        ? event.timestamp - sessionStarted
+                        : 0n;
+                const timestamp =
+                    `${elapsed / 1000000n}.` +
+                    `${elapsed % 1000000n}`.padStart(6, "0");
+                const channel = event.bus === 0 ? 1 : 2;
+                const extended = (event.flags & 1) !== 0;
+                const remote = (event.flags & 2) !== 0;
+                const fd = (event.flags & 4) !== 0;
+                const direction = event.direction === 0 ? "Rx" : "Tx";
+                const identifierText =
+                    event.id.toString(16).toUpperCase() + (extended ? "x" : "");
+                const lifecycleOnly =
+                    event.type === 1 || event.type === 3 || event.type === 4;
+                let line;
+
+                if (lifecycleOnly) {
+                    line =
+                        `// ${timestamp} ${eventLabels[event.type]} bus=${channel} ` +
+                        `id=${identifierText} transaction=${event.transaction} ` +
+                        `native=${event.nativeSequence} result=${event.result | 0}`;
+                } else if (fd) {
+                    const brs = (event.flags & 8) !== 0 ? 1 : 0;
+                    const esi = (event.flags & 16) !== 0 ? 1 : 0;
+
+                    line =
+                        `${timestamp} CANFD ${channel} ${direction} ${identifierText} ` +
+                        `${brs} ${esi} ${event.dlc} ${event.data.length}`;
+                } else {
+                    line =
+                        `${timestamp} ${channel} ${identifierText} ${direction} ` +
+                        `${remote ? "r" : "d"} ${event.dlc}`;
+                }
+
+                if (!remote && !lifecycleOnly && event.data.length > 0) {
+                    line += " " + event.data
+                        .map(byte => byte.toString(16).toUpperCase().padStart(2, "0"))
+                        .join(" ");
+                }
+
+                lines.push(line);
+            }
+
+            lines.push("End TriggerBlock");
+            return lines.join("\r\n") + "\r\n";
+        }
+
         element("export-csv").onclick = () => {
             const rows = ["bus,sequence,timestamp_us,timestamp_source,event,id,flags,data"];
             bufferedEvents().forEach(event => rows.push([
@@ -3820,6 +3977,13 @@
                 encodeBufferedScl(bufferedEvents()),
                 "application/octet-stream",
                 "scl"
+            );
+        };
+        element("export-asc").onclick = () => {
+            downloadBufferedFile(
+                encodeBufferedAsc(bufferedEvents()),
+                "text/plain",
+                "asc"
             );
         };
         setInterval(() => { if (!document.hidden) render(); }, 250);
@@ -3842,7 +4006,21 @@
 
         "use strict";
         const $ = id => document.getElementById(id);
-        const LIMIT = 100000, PAGE = 100;
+        const PAGE = 100;
+        const analyzerLimits = [10000, 50000, 100000, 250000, 500000, 1000000];
+        let limit = 100000;
+
+        try {
+            limit =
+                Number(localStorage.getItem("spectra:analyzer-buffer-limit"));
+        } catch (_) {
+            /* The default remains available when browser storage is disabled. */
+        }
+
+        if (!analyzerLimits.includes(limit))
+            limit = 100000;
+
+        $("analyzer-buffer-limit").value = String(limit);
         const names = ["RX", "TX queued", "TX done", "TX failed", "TX aborted"];
         let records = [], selected = new Set(), groups = [], filtered = [];
         let socket = null, paused = false, pending = false, ackTimer = null;
@@ -3899,7 +4077,7 @@
                 v.getUint32(8, true) !== 0x12345678 || v.getUint32(12, true) !== 0)
                 throw new Error("Unsupported SCL header");
             let o = 32;
-            while (o < v.byteLength && result.length < LIMIT) {
+            while (o < v.byteLength && result.length < limit) {
                 if (o + 56 > v.byteLength)
                     throw new Error("Truncated SCL record at byte " + o);
                 const size = v.getUint16(o, true), n = v.getUint8(o + 8);
@@ -3934,7 +4112,7 @@
             $("connect").disabled = busy;
             $("file").disabled = busy;
             $("connect").textContent = socket ? "Disconnect" : "Connect live";
-            $("pause").disabled = !socket || socket.readyState !== 1 || pending || records.length >= LIMIT;
+            $("pause").disabled = !socket || socket.readyState !== 1 || pending || records.length >= limit;
             $("pause").textContent = paused ? "Resume stream" : "Pause stream";
             $("status").textContent = busy ? "Loading file…" : socket ?
                 (socket.readyState !== 1 ? "Connecting…" : pending ? "Applying…" : paused ? "Paused" : "Live") : "Offline";
@@ -3963,7 +4141,7 @@
                         const msg = JSON.parse(event.data);
                         if (msg.type === "subscription") {
                             clearTimeout(ackTimer); pending = false; paused = msg.paused; controls();
-                            if (records.length >= LIMIT && !paused) subscribe(true);
+                            if (records.length >= limit && !paused) subscribe(true);
                         } else if (msg.type === "error") {
                             closeLive(); $("message").textContent = msg.code || "Server command failed";
                         } else if (msg.type === "stream_statistics" && msg.dropped_events > 0) {
@@ -3972,11 +4150,12 @@
                         return;
                     }
                     const incoming = parseLive(event.data);
-                    for (const e of incoming) { if (records.length >= LIMIT) break; records.push(e); }
+                    for (const e of incoming) { if (records.length >= limit) break; records.push(e); }
                     dirty = true;
-                    if (records.length >= LIMIT) {
+                    if (records.length >= limit) {
                         subscribe(true);
-                        $("message").textContent = "100,000-event limit reached. Capture paused; later events are not retained.";
+                        $("message").textContent =
+                            `${limit.toLocaleString()}-event limit reached. Capture paused; later events are not retained.`;
                     }
                 } catch (error) { $("message").textContent = error.message; }
             };
@@ -3994,7 +4173,9 @@
                 records = parsed.records; selected.clear(); page = 0; source = file.name; dirty = true;
                 $("frame").textContent = "Select an event row to inspect its bytes.";
                 $("detail").textContent = "";
-                $("message").textContent = parsed.truncated ? "Only the first 100,000 events were imported; the remaining file was not analyzed." : "SCL file loaded.";
+                $("message").textContent = parsed.truncated
+                    ? `Only the first ${limit.toLocaleString()} events were imported; the remaining file was not analyzed.`
+                    : "SCL file loaded.";
             } catch (error) { $("message").textContent = error.message + ". Previous dataset retained."; }
             finally { busy = false; controls(); $("file").value = ""; }
         };
@@ -4005,6 +4186,19 @@
                 pattern.every((byte, i) => byte === null || byte === e.data[start + i]));
         }
         function rebuild() {
+            const progress = $("analyzer-buffer-progress");
+            const fill = Math.min(100, records.length / limit * 100);
+
+            $("analyzer-buffer-total").textContent =
+                `${records.length.toLocaleString()} / ${limit.toLocaleString()}`;
+            $("analyzer-buffer-fill").style.width = `${fill}%`;
+            progress.setAttribute("aria-valuenow", records.length);
+            progress.classList.toggle(
+                "warning",
+                records.length >= limit * 0.8 && records.length < limit
+            );
+            progress.classList.toggle("full", records.length >= limit);
+
             const query = $("id").value.trim().toUpperCase().replace(/^0X/, "");
             const tokens = $("bytes").value.trim().split(/\s+/).filter(Boolean);
             if (tokens.some(t => !/^(\?\?|[0-9a-fA-F]{2})$/.test(t))) {
@@ -4110,6 +4304,29 @@
         }
         $("all").onclick = () => { groups.slice(0, 1000).forEach(g => selected.add(g.key)); dirty = true; };
         $("none").onclick = () => { selected.clear(); dirty = true; };
+        $("analyzer-buffer-limit").onchange = event => {
+            limit = Number(event.target.value);
+
+            try {
+                localStorage.setItem(
+                    "spectra:analyzer-buffer-limit",
+                    String(limit)
+                );
+            } catch (_) {
+                /* The selection still applies to the current page session. */
+            }
+
+            if (records.length > limit) {
+                records = records.slice(records.length - limit);
+                selected.clear();
+                page = 0;
+                $("message").textContent =
+                    "The oldest events were removed to apply the smaller buffer limit.";
+            }
+
+            dirty = true;
+            controls();
+        };
         $("reset").onclick = () => {
             for (const id of ["id", "bytes", "bus", "event", "format"]) $(id).value = "";
             $("only").checked = false; selected.clear(); page = 0; dirty = true;

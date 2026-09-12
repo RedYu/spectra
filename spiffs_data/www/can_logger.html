@@ -15,8 +15,8 @@
 
     <title>CAN Logger · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=10">
-    <script src="spectra.js?v=10" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=12">
+    <script src="spectra.js?v=12" defer></script>
 </head>
 
 <body class="page-logger">
@@ -137,9 +137,53 @@
                     <button id="export-scl">
                         Export buffered SCL
                     </button>
+
+                    <button id="export-asc">
+                        Export buffered ASC
+                    </button>
                 </div>
 
                 <h2>Stream statistics</h2>
+
+                <label
+                    class="browser-buffer-limit"
+                    for="logger-buffer-limit"
+                >
+                    <span>Events retained per channel</span>
+
+                    <select id="logger-buffer-limit">
+                        <option value="500">500</option>
+                        <option value="1000">1,000</option>
+                        <option value="5000">5,000</option>
+                        <option value="10000">10,000</option>
+                        <option value="25000">25,000</option>
+                        <option value="50000">50,000</option>
+                    </select>
+                </label>
+
+                <div class="browser-buffer">
+                    <div class="browser-buffer-heading">
+                        <span>Browser buffer</span>
+                        <b id="logger-buffer-total">0 / 1,000</b>
+                    </div>
+
+                    <div
+                        class="browser-buffer-track"
+                        role="progressbar"
+                        aria-label="Combined browser buffer"
+                        aria-valuemin="0"
+                        aria-valuemax="1000"
+                        aria-valuenow="0"
+                        id="logger-buffer-progress"
+                    >
+                        <span id="logger-buffer-fill"></span>
+                    </div>
+
+                    <div class="browser-buffer-channels">
+                        <span id="logger-buffer-primary">P 0 / 500</span>
+                        <span id="logger-buffer-secondary">S 0 / 500</span>
+                    </div>
+                </div>
 
                 <div class="metric">
                     Events received
