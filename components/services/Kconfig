@@ -8,3 +8,32 @@ config SPECTRA_SD_BENCHMARK_ON_STARTUP
         the SD card. Intended only for development diagnostics.
 
 endmenu
+
+menu "Spectra web content"
+
+config SPECTRA_WEB_CONTENT_GZIP
+    bool "Serve precompressed web resources"
+    default n
+    help
+        Minify and gzip the HTML, CSS and JavaScript resources during
+        project configuration, then serve the generated gzip files.
+        The browser receives the Content-Encoding: gzip header.
+
+config SPECTRA_WEB_CONTENT_CACHE
+    bool "Enable browser caching for static web resources"
+    default n
+    help
+        Allow browsers to cache HTML, CSS, JavaScript and favicon
+        resources. When disabled, the server sends Cache-Control:
+        no-store.
+
+config SPECTRA_WEB_CONTENT_CACHE_MAX_AGE
+    int "Static resource cache lifetime in seconds"
+    depends on SPECTRA_WEB_CONTENT_CACHE
+    range 0 31536000
+    default 3600
+    help
+        Number of seconds for which a browser may reuse a static web
+        resource without requesting it again.
+
+endmenu

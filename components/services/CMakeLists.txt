@@ -90,6 +90,25 @@ idf_component_register(
 )
 
 if(NOT SPECTRA_TEST_BUILD)
+    if(CONFIG_SPECTRA_WEB_CONTENT_GZIP)
+        execute_process(
+            COMMAND
+                ${PYTHON}
+                ${PROJECT_DIR}/scripts/build_web.py
+            WORKING_DIRECTORY
+                ${PROJECT_DIR}
+            RESULT_VARIABLE
+                WEB_CONTENT_BUILD_RESULT
+        )
+
+        if(NOT WEB_CONTENT_BUILD_RESULT EQUAL 0)
+            message(
+                FATAL_ERROR
+                "Failed to build compressed Spectra web resources"
+            )
+        endif()
+    endif()
+
     spiffs_create_partition_image(
         storage
         ${PROJECT_DIR}/spiffs_data

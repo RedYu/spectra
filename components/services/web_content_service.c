@@ -11,8 +11,49 @@
 #include <errno.h>
 
 #include "esp_log.h"
+#include "sdkconfig.h"
 
 #include "storage_service.h"
+
+#define WEB_CONTENT_STRINGIFY_VALUE(value)  #value
+#define WEB_CONTENT_STRINGIFY(value) \
+    WEB_CONTENT_STRINGIFY_VALUE(value)
+
+#if CONFIG_SPECTRA_WEB_CONTENT_GZIP
+
+#define WEB_CONTENT_TEXT_DIRECTORY \
+    "/storage/www/dist/"
+#define WEB_CONTENT_TEXT_SUFFIX \
+    ".gz"
+#define WEB_CONTENT_TEXT_COMPRESSED  (true)
+#define WEB_CONTENT_FAVICON_PATH \
+    "/storage/www/dist/favicon.ico"
+
+#else
+
+#define WEB_CONTENT_TEXT_DIRECTORY \
+    "/storage/www/"
+#define WEB_CONTENT_TEXT_SUFFIX \
+    ""
+#define WEB_CONTENT_TEXT_COMPRESSED  (false)
+#define WEB_CONTENT_FAVICON_PATH \
+    "/storage/www/favicon.ico"
+
+#endif
+
+#if CONFIG_SPECTRA_WEB_CONTENT_CACHE
+
+#define WEB_CONTENT_CACHE_CONTROL \
+    "public, max-age=" \
+    WEB_CONTENT_STRINGIFY( \
+        CONFIG_SPECTRA_WEB_CONTENT_CACHE_MAX_AGE \
+    )
+
+#else
+
+#define WEB_CONTENT_CACHE_CONTROL  "no-store"
+
+#endif
 
 static const char *TAG =
     "web_content_service";
@@ -125,7 +166,8 @@ static esp_err_t web_content_send_text_error(
 static esp_err_t web_content_send_storage_file(
     httpd_req_t *request,
     const char *path,
-    const char *content_type
+    const char *content_type,
+    bool compressed
 )
 {
     if ((request == NULL) ||
@@ -149,11 +191,35 @@ static esp_err_t web_content_send_storage_file(
         httpd_resp_set_hdr(
             request,
             "Cache-Control",
-            "no-store"
+            WEB_CONTENT_CACHE_CONTROL
         );
 
     if (result != ESP_OK) {
         return result;
+    }
+
+    if (compressed) {
+        result =
+            httpd_resp_set_hdr(
+                request,
+                "Content-Encoding",
+                "gzip"
+            );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        result =
+            httpd_resp_set_hdr(
+                request,
+                "Vary",
+                "Accept-Encoding"
+            );
+
+        if (result != ESP_OK) {
+            return result;
+        }
     }
 
     /*
@@ -252,8 +318,11 @@ static esp_err_t web_content_root_handler(
 {
     return web_content_send_storage_file(
         request,
-        "/storage/www/index.html",
-        "text/html; charset=utf-8"
+        WEB_CONTENT_TEXT_DIRECTORY
+        "index.html"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/html; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
     );
 }
 
@@ -263,8 +332,11 @@ static esp_err_t web_content_settings_page_handler(
 {
     return web_content_send_storage_file(
         request,
-        "/storage/www/settings.html",
-        "text/html; charset=utf-8"
+        WEB_CONTENT_TEXT_DIRECTORY
+        "settings.html"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/html; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
     );
 }
 
@@ -274,8 +346,11 @@ static esp_err_t web_content_files_page_handler(
 {
     return web_content_send_storage_file(
         request,
-        "/storage/www/files.html",
-        "text/html; charset=utf-8"
+        WEB_CONTENT_TEXT_DIRECTORY
+        "files.html"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/html; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
     );
 }
 
@@ -285,8 +360,11 @@ static esp_err_t web_content_stylesheet_handler(
 {
     return web_content_send_storage_file(
         request,
-        "/storage/www/spectra.css",
-        "text/css; charset=utf-8"
+        WEB_CONTENT_TEXT_DIRECTORY
+        "spectra.css"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/css; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
     );
 }
 
@@ -296,8 +374,11 @@ static esp_err_t web_content_can_analyzer_page_handler(
 {
     return web_content_send_storage_file(
         request,
-        "/storage/www/can_analyzer.html",
-        "text/html; charset=utf-8"
+        WEB_CONTENT_TEXT_DIRECTORY
+        "can_analyzer.html"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/html; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
     );
 }
 
@@ -307,8 +388,11 @@ static esp_err_t web_content_can_logger_page_handler(
 {
     return web_content_send_storage_file(
         request,
-        "/storage/www/can_logger.html",
-        "text/html; charset=utf-8"
+        WEB_CONTENT_TEXT_DIRECTORY
+        "can_logger.html"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/html; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
     );
 }
 
@@ -318,8 +402,11 @@ static esp_err_t web_content_can_test_page_handler(
 {
     return web_content_send_storage_file(
         request,
-        "/storage/www/can_test.html",
-        "text/html; charset=utf-8"
+        WEB_CONTENT_TEXT_DIRECTORY
+        "can_test.html"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/html; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
     );
 }
 
@@ -329,8 +416,11 @@ static esp_err_t web_content_script_handler(
 {
     return web_content_send_storage_file(
         request,
-        "/storage/www/spectra.js",
-        "application/javascript; charset=utf-8"
+        WEB_CONTENT_TEXT_DIRECTORY
+        "spectra.js"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "application/javascript; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
     );
 }
 
@@ -340,8 +430,9 @@ static esp_err_t web_content_favicon_handler(
 {
     return web_content_send_storage_file(
         request,
-        "/storage/www/favicon.ico",
-        "image/x-icon"
+        WEB_CONTENT_FAVICON_PATH,
+        "image/x-icon",
+        false
     );
 }
 
