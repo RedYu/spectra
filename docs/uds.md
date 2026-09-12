@@ -49,6 +49,16 @@ callback, calculates the key, and submits it with
 `uds_client_security_access_send_key()`. The web page provides equivalent manual
 Request Seed and Send Key operations and decodes the `0x67` response.
 
+`uds_security_access` adds an optional non-blocking seed-to-key state machine.
+It owns a UDS client, requests the seed, copies it into an application-provided
+buffer, and defers the OEM algorithm until `uds_security_access_poll()` runs.
+After the algorithm returns a key, the adapter submits it and waits for the ECU
+confirmation. Seed and key storage is supplied by the application, so the
+adapter does not reserve fixed payload arrays or allocate heap memory. These
+buffers must remain valid and must not overlap for the lifetime of the adapter.
+The original UDS client event callback is preserved and receives both stages of
+the exchange.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
@@ -62,5 +72,5 @@ payload memory.
 - no typed DID value, routine-result, download, or transfer decoders yet;
 - no authentication or role-based protection for destructive UDS requests.
 
-The next layer should add an optional asynchronous seed-to-key adapter before
-adding download and transfer services.
+The next layer should add RequestDownload, TransferData, and RequestTransferExit
+on top of an unlocked programming session.

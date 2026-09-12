@@ -3,6 +3,7 @@ idf_component_register(
         "uds_protocol.c"
         "uds_requests.c"
         "uds_client.c"
+        "uds_security_access.c"
 
     INCLUDE_DIRS
         "include"
