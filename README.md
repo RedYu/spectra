@@ -19,7 +19,7 @@ A modular dual-channel CAN and CAN FD diagnostic platform built with ESP32-S3, E
 
 Spectra is a handheld automotive network analyzer based on the ESP32-S3. It combines a touch interface, two independent CAN channels, removable and internal storage, USB and Wi-Fi networking, power monitoring, and a layered firmware architecture.
 
-The primary channel uses the ESP32-S3 TWAI controller for Classical CAN. The secondary channel uses an external MCP2518FD controller and supports both Classical CAN and CAN FD. Traffic from both interfaces is normalized into a shared frame model and distributed through a central CAN router to monitoring, WebSocket streaming, and future logging and diagnostic services.
+The primary channel uses the ESP32-S3 TWAI controller for Classical CAN. The secondary channel uses an external MCP2518FD controller and supports both Classical CAN and CAN FD. Traffic from both interfaces is normalized into a shared frame model and distributed through a central CAN router to monitoring, recording, WebSocket streaming, transmission, and diagnostic protocol services.
 
 Spectra is under active development. It is intended for diagnostics, monitoring, and development workflows and is not a safety-certified automotive control device.
 
@@ -60,6 +60,9 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - TWAI and MCP2518FD frame adapters
 - Central CAN router for RX, TX, confirmations, and subscriber delivery
 - Queue, transmission, overflow, and drop statistics
+- Runtime hardware RX filters for both CAN controllers
+- Eight independent one-shot or periodic transmission jobs
+- Configurable ID, DLC, and masked DATA increments
 
 ### CAN monitoring and streaming
 
@@ -76,6 +79,32 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Pause and resume without disconnecting the socket
 - Stream queue, batch, payload, drop, and send statistics
 - Browser CAN stream test page
+- Browser CAN Logger with identifier and event tables
+- Browser CAN Analyzer for live traffic and SCL recordings
+
+### CAN recording
+
+- High-throughput CAN logger subscribed to the central router
+- PSRAM-backed queue and 16 KiB write buffering
+- ASC text and versioned Spectra CAN Log (`.scl`) binary recordings
+- Monotonic and synchronized wall-clock timestamps
+- Timestamped recordings under `/sdcard/logs/can`
+- Periodic buffered flush and full filesystem synchronization on stop
+- Queue, write failure, and dropped-event statistics
+- Sequential filesystem and raw SD-card read benchmarks
+
+### Diagnostic protocols
+
+- ISO-TP over Classical CAN and CAN FD
+- Single, First, Consecutive, and Flow Control frame processing
+- Configurable IDs, block size, STmin, timeouts, CAN FD, and BRS
+- UDS client with P2/P2* timing and NRC `0x78` handling
+- Diagnostic Session Control, ECU Reset, Tester Present, and Read Data By Identifier
+- Raw UDS service requests through the Web interface
+- XCP on CAN packet and command foundation
+- XCP RES, ERR, EV, SERV, and DAQ packet classification
+- CONNECT response and standard XCP error decoding
+- CONNECT, DISCONNECT, GET_STATUS, SYNCH, and SHORT_UPLOAD encoding
 
 ### Storage and configuration
 
@@ -89,6 +118,7 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Core-dump export from flash to SD card
 - Graceful service shutdown and SD-card unmounting
 - Browser-based internal-storage and SD-card file manager
+- Resumable HTTP Range downloads with asynchronous SD-card buffering
 
 ### Connectivity
 
@@ -101,6 +131,7 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Embedded Web UI and REST API
 - Internet connectivity checks through the Spectra backend
 - Human-readable Wi-Fi disconnection reasons
+- SNTP synchronization with a configurable POSIX timezone
 
 ## Hardware
 
@@ -127,6 +158,8 @@ The detailed firmware architecture is documented in
 [docs/architecture.md](docs/architecture.md).
 The shared CAN types and validation rules are documented in
 [docs/can-frame-model.md](docs/can-frame-model.md).
+The diagnostic protocol foundations are documented in
+[docs/uds.md](docs/uds.md) and [docs/xcp.md](docs/xcp.md).
 
 ```text
 CAN bus                     CAN FD bus
@@ -139,11 +172,12 @@ Primary CAN service      Secondary CAN service
           \                 /
            \               /
             v             v
-              CAN router
-             /     |      \
-            v      v       v
-      CAN Monitor  WebSocket  Future consumers
-                              Logger / UDS / XCP
+                         CAN router
+               /       /      \       \
+              v       v        v       v
+        CAN Monitor  Logger  WebSocket  Protocols
+                                      /    |    \
+                                   ISO-TP UDS   XCP
 ```
 
 Repository layout:
@@ -159,9 +193,12 @@ spectra/
 │   ├── can_monitor/            # CAN monitoring and identifier statistics
 │   ├── drivers/                # Hardware-specific drivers
 │   ├── gui/                    # Screens, widgets, themes, styles, and assets
+│   ├── isotp/                  # ISO-TP protocol, sessions, and channels
 │   ├── lvgl_port/              # LVGL display and input integration
 │   ├── models/                 # Thread-safe application state
-│   └── services/               # Application services and Web APIs
+│   ├── services/               # Application services and Web APIs
+│   ├── uds/                    # UDS protocol, requests, and client
+│   └── xcp/                    # XCP packet and command foundation
 ├── spiffs_data/                # Embedded Web UI and default configuration
 ├── partitions.csv
 └── sdkconfig.defaults
@@ -290,6 +327,15 @@ The development CAN stream page is available at:
 http://spectra.device/can_test
 ```
 
+The live CAN Logger, local CAN Analyzer, and ISO-TP/UDS diagnostics are
+available at:
+
+```text
+http://spectra.device/can_logger
+http://spectra.device/can_analyzer
+http://spectra.device/isotp
+```
+
 CAN events are sent in a compact versioned binary protocol using little-endian multibyte fields. JSON control commands configure subscriptions and pause or resume streaming without reconnecting.
 
 ### REST API
@@ -311,6 +357,10 @@ Detailed request and response documentation is available in
 | `DELETE` | `/api/settings/wifi/sta/credentials` | Remove stored Station credentials |
 | `GET` | `/api/files` | List internal-storage or SD-card entries |
 | `GET` | `/api/files/download` | Download a file |
+| `GET`, `POST` | `/api/can/transmit` | Read, start, and stop CAN transmission jobs |
+| `GET`, `POST` | `/api/can/filters` | Read and apply hardware CAN receive filters |
+| `GET`, `POST` | `/api/isotp` | Configure an ISO-TP channel and exchange payloads |
+| `GET`, `POST` | `/api/uds` | Configure the UDS client and execute diagnostic requests |
 
 ## Storage and configuration
 
@@ -394,7 +444,15 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] Transmission confirmations and queue statistics
 - [x] CAN monitor service
 - [x] Device CAN Monitor screen
+- [x] Hardware receive filters for TWAI and MCP2518FD
+- [x] One-shot and periodic CAN transmission jobs
 - [x] Binary CAN event WebSocket stream
+- [x] High-throughput ASC and SCL CAN logger
+- [x] Browser CAN Logger and CAN Analyzer
+- [x] Resumable SD-card downloads using HTTP Range
+- [x] ISO-TP transport over Classical CAN and CAN FD
+- [x] Initial UDS client and browser diagnostics
+- [x] XCP packet parser and basic CTO command encoders
 - [x] Embedded Web UI and REST API
 - [x] USB RNDIS, Wi-Fi, DNS, and mDNS connectivity
 - [x] Internal and SD-card storage services
@@ -402,12 +460,11 @@ To exit the serial monitor, press `Ctrl+]`.
 
 ### Planned
 
-- [ ] High-throughput CAN logger with PSRAM buffering
-- [ ] ASC and CSV export
+- [ ] CSV conversion and export for recorded CAN logs
 - [ ] BLF support
 - [ ] DBC parsing
-- [ ] UDS and OBD-II diagnostics
-- [ ] XCP support
+- [ ] Additional UDS services and OBD-II workflows
+- [ ] Stateful XCP master, DAQ/STIM, calibration, and programming support
 - [ ] CAN traffic replay
 - [ ] Live signal dashboards
 - [ ] OTA firmware updates
