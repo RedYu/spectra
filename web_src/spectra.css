@@ -1738,7 +1738,7 @@ body:where(.page-files) {
         padding-left: 9px;
     }
 }
-/* ===== can_test.html ===== */
+/* ===== legacy CAN WebSocket test ===== */
 body:where(.page-test) {
     margin: 0;
     padding: 20px;
@@ -1851,21 +1851,21 @@ body:where(.page-test) {
     }
 }
 
-/* Device diagnostics replaces the legacy WebSocket test layout. */
-:where(body.page-test) {
+/* ===== diagnostics.html ===== */
+:where(body.page-diagnostics) {
     padding: 0;
     color: var(--text, #f3f6f9);
     background: var(--background, #0b0f14);
     font-family: Inter, system-ui, sans-serif;
 }
-:where(body.page-test) #status {
+:where(body.page-diagnostics) #status {
     min-width: 0;
     padding: 0;
     color: #31c48d;
     background: transparent;
     border: 0;
 }
-:where(body.page-test) #status.warning {
+:where(body.page-diagnostics) #status.warning {
     color: #f6b73c;
 }
 .diagnostics-page {

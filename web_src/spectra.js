@@ -2811,7 +2811,7 @@
     
     }
 
-    // ===== can_test.html =====
+    // ===== legacy CAN WebSocket test =====
     function init_legacy_websocket_test() {
 
         const BATCH_HEADER_SIZE = 8;
@@ -3481,7 +3481,7 @@
     
     }
 
-    function init_test() {
+    function init_diagnostics() {
         const REFRESH_INTERVAL_MS = 5000;
 
         let refreshTimer = null;
@@ -6886,7 +6886,7 @@
         'page-overview' : init_overview,
         'page-settings' : init_settings,
         'page-files' : init_files,
-        'page-test' : init_test,
+        'page-diagnostics' : init_diagnostics,
         'page-logger' : init_logger,
         'page-analyzer' : init_analyzer,
         'page-isotp' : init_diagnostics_transport,

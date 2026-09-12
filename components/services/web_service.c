@@ -24,7 +24,7 @@
 #include "web_can_stream_service.h"
 #include "isotp_service.h"
 
-#define WEB_SERVICE_MAX_URI_HANDLERS  (32U)
+#define WEB_SERVICE_MAX_URI_HANDLERS  (40U)
 
 static const char *TAG = "web_service";
 

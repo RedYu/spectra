@@ -332,7 +332,7 @@ The complete wire format is described in
 The device diagnostics page is available at:
 
 ```text
-http://spectra.device/can_test
+http://spectra.device/diagnostics
 ```
 
 The live CAN Logger, local CAN Analyzer, and ISO-TP/UDS diagnostics are

@@ -396,14 +396,14 @@ static esp_err_t web_content_can_logger_page_handler(
     );
 }
 
-static esp_err_t web_content_can_test_page_handler(
+static esp_err_t web_content_diagnostics_page_handler(
     httpd_req_t *request
 )
 {
     return web_content_send_storage_file(
         request,
         WEB_CONTENT_TEXT_DIRECTORY
-        "can_test.html"
+        "diagnostics.html"
         WEB_CONTENT_TEXT_SUFFIX,
         "text/html; charset=utf-8",
         WEB_CONTENT_TEXT_COMPRESSED
@@ -570,15 +570,15 @@ esp_err_t web_content_service_register(
             NULL,
     };
 
-    static const httpd_uri_t can_test_page_uri = {
+    static const httpd_uri_t diagnostics_page_uri = {
         .uri =
-            "/can_test",
+            "/diagnostics",
 
         .method =
             HTTP_GET,
 
         .handler =
-            web_content_can_test_page_handler,
+            web_content_diagnostics_page_handler,
 
         .user_ctx =
             NULL,
@@ -709,13 +709,13 @@ esp_err_t web_content_service_register(
     result =
         httpd_register_uri_handler(
             server,
-            &can_test_page_uri
+            &diagnostics_page_uri
         );
 
     if (result != ESP_OK) {
         ESP_LOGE(
             TAG,
-            "Failed to register GET /can_test: %s",
+            "Failed to register GET /diagnostics: %s",
             esp_err_to_name(result)
         );
 
