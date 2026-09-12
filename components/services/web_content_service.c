@@ -22,12 +22,12 @@
 #if CONFIG_SPECTRA_WEB_CONTENT_GZIP
 
 #define WEB_CONTENT_TEXT_DIRECTORY \
-    "/storage/www/dist/"
+    "/storage/www/"
 #define WEB_CONTENT_TEXT_SUFFIX \
     ".gz"
 #define WEB_CONTENT_TEXT_COMPRESSED  (true)
 #define WEB_CONTENT_FAVICON_PATH \
-    "/storage/www/dist/favicon.ico"
+    "/storage/www/favicon.ico.gz"
 
 #else
 
@@ -460,7 +460,7 @@ static esp_err_t web_content_favicon_handler(
         request,
         WEB_CONTENT_FAVICON_PATH,
         "image/x-icon",
-        false
+        WEB_CONTENT_TEXT_COMPRESSED
     );
 }
 

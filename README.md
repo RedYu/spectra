@@ -199,7 +199,8 @@ spectra/
 │   ├── services/               # Application services and Web APIs
 │   ├── uds/                    # UDS protocol, requests, and client
 │   └── xcp/                    # XCP packet and command foundation
-├── spiffs_data/                # Embedded Web UI and default configuration
+├── web_src/                    # Developer Web UI sources
+├── spiffs_data/                # Generated SPIFFS content and default configuration
 ├── partitions.csv
 └── sdkconfig.defaults
 ```
@@ -213,6 +214,13 @@ The project separates responsibilities into layers:
 - **Models** hold synchronized application state.
 - **GUI** presents device state and sends actions to services.
 - **Web API and WebSocket** expose configuration, diagnostics, files, and live CAN events.
+
+Web UI files must be edited in `web_src/`. The build runs
+`scripts/build_web.py` automatically and recreates `spiffs_data/www/` before
+the SPIFFS image is generated. With `CONFIG_SPECTRA_WEB_CONTENT_GZIP=y`, the
+staging directory contains only `.gz` resources; otherwise it contains copies
+of the original developer files. Generated web resources are not tracked by
+Git.
 
 ## CAN interfaces
 

@@ -1,19 +1,16 @@
+from argparse import ArgumentParser
 from pathlib import Path
 import gzip
 import shutil
-
-import htmlmin
-import rcssmin
-import rjsmin
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent
 
-SRC_DIR = ROOT / "spiffs_data" / "www"
-DIST_DIR = SRC_DIR / "dist"
+SRC_DIR = ROOT / "web_src"
+DIST_DIR = ROOT / "spiffs_data" / "www"
 
-SUPPORTED_EXTENSIONS = {
+MINIFIED_EXTENSIONS = {
     ".html",
     ".css",
     ".js",
@@ -52,8 +49,9 @@ def minify_content(
     source: str,
     extension: str,
 ) -> str:
-
     if extension == ".html":
+        import htmlmin
+
         return htmlmin.minify(
             source,
             remove_comments=True,
@@ -62,9 +60,13 @@ def minify_content(
         )
 
     if extension == ".css":
+        import rcssmin
+
         return rcssmin.cssmin(source)
 
     if extension == ".js":
+        import rjsmin
+
         return rjsmin.jsmin(source)
 
     raise ValueError(
@@ -72,171 +74,135 @@ def minify_content(
     )
 
 
-def minify_file(
+def gzip_file(
     source_path: Path,
     output_path: Path,
 ) -> None:
+    source_data = source_path.read_bytes()
 
-    source = source_path.read_text(
-        encoding="utf-8"
+    if source_path.suffix.lower() in MINIFIED_EXTENSIONS:
+        source_text = source_data.decode("utf-8")
+        source_data = minify_content(
+            source_text,
+            source_path.suffix.lower(),
+        ).encode("utf-8")
+
+    output_data = gzip.compress(
+        source_data,
+        compresslevel=9,
+        mtime=0,
     )
 
-    result = minify_content(
-        source,
-        source_path.suffix.lower(),
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
     )
-
-    with output_path.open(
-        "w",
-        encoding="utf-8",
-        newline="\n",
-    ) as file:
-        file.write(result)
+    output_path.write_bytes(output_data)
 
     log_result(
-        source_path.name,
-        len(source.encode("utf-8")),
-        len(result.encode("utf-8")),
-    )
-
-
-def create_gzip(
-    source_path: Path,
-) -> None:
-
-    gzip_path = Path(
-        str(source_path) + ".gz"
-    )
-
-    with source_path.open("rb") as source_file:
-        with gzip.open(
-            gzip_path,
-            "wb",
-            compresslevel=9,
-        ) as gzip_file:
-
-            shutil.copyfileobj(
-                source_file,
-                gzip_file
-            )
-
-    log_result(
-        gzip_path.name,
+        output_path.name,
         source_path.stat().st_size,
-        gzip_path.stat().st_size,
+        len(output_data),
+    )
+
+
+def copy_file(
+    source_path: Path,
+    output_path: Path,
+) -> None:
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    shutil.copy2(
+        source_path,
+        output_path,
+    )
+
+    print(
+        f"Copied: {source_path.relative_to(SRC_DIR)}"
     )
 
 
 def directory_size(
     directory: Path,
 ) -> int:
-    total = 0
-
-    for file_path in directory.rglob("*"):
-        if file_path.is_file():
-            total += file_path.stat().st_size
-
-    return total
+    return sum(
+        file_path.stat().st_size
+        for file_path in directory.rglob("*")
+        if file_path.is_file()
+    )
 
 
-def source_directory_size() -> int:
-    total = 0
+def parse_arguments():
+    parser = ArgumentParser(
+        description="Build Spectra SPIFFS web resources."
+    )
+    parser.add_argument(
+        "--gzip",
+        action="store_true",
+        help="Minify text and emit only gzip-compressed resources.",
+    )
 
-    for file_path in SRC_DIR.iterdir():
-        if file_path.is_file():
-            total += file_path.stat().st_size
-
-    return total
+    return parser.parse_args()
 
 
 def main() -> None:
-    print("Building Spectra web resources...\n")
+    arguments = parse_arguments()
+    mode = "gzip" if arguments.gzip else "original"
 
+    print("Building Spectra web resources...\n")
     print(f"Source: {SRC_DIR}")
-    print(f"Output: {DIST_DIR}\n")
+    print(f"Output: {DIST_DIR}")
+    print(f"Mode:   {mode}\n")
 
     if not SRC_DIR.exists():
         raise FileNotFoundError(
             f"Source directory does not exist: {SRC_DIR}"
         )
 
-    source_size = source_directory_size()
-
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)
 
     DIST_DIR.mkdir(
         parents=True,
-        exist_ok=True
+        exist_ok=True,
     )
 
     processed = 0
 
-    for source_path in SRC_DIR.iterdir():
+    for source_path in sorted(SRC_DIR.rglob("*")):
         if not source_path.is_file():
             continue
 
-        if source_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            continue
+        relative_path = source_path.relative_to(SRC_DIR)
 
-        output_path = (
-            DIST_DIR /
-            source_path.name
-        )
-
-        minify_file(
-            source_path,
-            output_path,
-        )
-
-        create_gzip(
-            output_path
-        )
+        if arguments.gzip:
+            output_path = DIST_DIR / Path(
+                str(relative_path) + ".gz"
+            )
+            gzip_file(
+                source_path,
+                output_path,
+            )
+        else:
+            copy_file(
+                source_path,
+                DIST_DIR / relative_path,
+            )
 
         processed += 1
 
-    for source_path in SRC_DIR.iterdir():
-        if not source_path.is_file():
-            continue
-
-        if source_path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            continue
-
-        shutil.copy2(
-            source_path,
-            DIST_DIR / source_path.name
-        )
-
-        print(
-            f"Copied: {source_path.name}"
-        )
-
-    dist_size = directory_size(DIST_DIR)
-
-    gzip_size = sum(
-        file_path.stat().st_size
-        for file_path in DIST_DIR.glob("*.gz")
-    )
-
     print(
-        f"\nSource total: {format_size(source_size)}"
+        f"\nSource total: {format_size(directory_size(SRC_DIR))}"
     )
-
     print(
-        f"Dist total:   {format_size(dist_size)}"
+        f"Output total: {format_size(directory_size(DIST_DIR))}"
     )
-
-    print(
-        f"Gzip total:   {format_size(gzip_size)}"
-    )
-
     print(
         f"\nProcessed {processed} web resource(s)."
     )
-
-    print(
-        "Web resources built successfully."
-    )
+    print("Web resources built successfully.")
 
 
 if __name__ == "__main__":

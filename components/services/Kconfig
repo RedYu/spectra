@@ -15,9 +15,10 @@ config SPECTRA_WEB_CONTENT_GZIP
     bool "Serve precompressed web resources"
     default n
     help
-        Minify and gzip the HTML, CSS and JavaScript resources during
-        project configuration, then serve the generated gzip files.
-        The browser receives the Content-Encoding: gzip header.
+        Minify text resources and gzip every file from web_src during
+        the project build. The generated spiffs_data/www directory
+        contains only gzip files. The browser receives the
+        Content-Encoding: gzip header.
 
 config SPECTRA_WEB_CONTENT_CACHE
     bool "Enable browser caching for static web resources"

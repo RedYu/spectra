@@ -68,11 +68,18 @@ spectra/
 │   ├── lvgl_port/              Display/input integration with LVGL
 │   ├── models/                 Synchronized application state
 │   └── services/               Long-lived application and Web services
-├── spiffs_data/                Embedded Web UI and default data
+├── web_src/                    Developer Web UI sources
+├── spiffs_data/                Generated SPIFFS image input and default data
 ├── docs/                       User and developer documentation
 ├── partitions.csv              Flash layout
 └── sdkconfig.defaults          Project configuration defaults
 ```
+
+`web_src/` is the source of truth for the embedded Web UI. The build script
+recreates `spiffs_data/www/` when a source changes. Gzip builds emit only
+precompressed `.gz` files into that staging directory, while non-gzip builds
+copy the original resources. The SPIFFS root may also contain non-Web runtime
+defaults such as `device_config.json`.
 
 ## Architectural layers
 
