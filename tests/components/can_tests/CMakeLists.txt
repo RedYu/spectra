@@ -2,6 +2,8 @@ idf_component_register(
     SRCS
         "test_can_transmit_sequence.c"
         "test_can_hardware_filters.c"
+        "test_isotp_protocol.c"
+        "test_isotp_session.c"
 
     INCLUDE_DIRS
         "."
@@ -11,6 +13,7 @@ idf_component_register(
         services
         can
         drivers
+        isotp
     
     WHOLE_ARCHIVE
 )
