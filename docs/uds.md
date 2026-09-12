@@ -68,6 +68,17 @@ optional parameter record of up to 256 bytes. The web diagnostics page exposes
 all three primitives for controlled manual testing, using hexadecimal strings
 for 64-bit addresses and sizes to avoid JavaScript number precision loss.
 
+`uds_download` builds a non-blocking automatic transfer state machine on these
+primitives. It negotiates the ECU maximum block length, caps payload blocks to
+the configured buffer and client limit, starts sequence numbering at one,
+validates every echoed block counter, wraps the eight-bit counter naturally,
+and sends TransferExit after the requested memory size is acknowledged. Input
+comes from an application callback, so the same state machine can read a RAM or
+PSRAM image, an SD-card file, or another streaming source. The reader and OEM
+code execute only from `uds_download_poll()`, not from the ISO-TP callback. The
+adapter allocates neither heap memory nor a task and provides progress and
+cancellation APIs.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
@@ -79,8 +90,8 @@ payload memory.
 - no periodic Tester Present scheduler;
 - no built-in OEM security-access algorithms;
 - no typed DID value or routine-result decoders yet;
-- no automatic file-to-ECU download state machine yet;
+- no persistent resume after reset or interrupted ECU programming;
 - no authentication or role-based protection for destructive UDS requests.
 
-The next layer should add an automatic file-to-ECU download state machine with
-block-size negotiation, sequence handling, progress reporting, and cancellation.
+The next layer should connect the automatic download state machine to an SD-card
+file reader and a guarded Web API with progress reporting and cancellation.
