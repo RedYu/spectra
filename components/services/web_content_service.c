@@ -402,6 +402,20 @@ static esp_err_t web_content_can_logger_page_handler(
     );
 }
 
+static esp_err_t web_content_dbc_page_handler(
+    httpd_req_t *request
+)
+{
+    return web_content_send_storage_file(
+        request,
+        WEB_CONTENT_TEXT_DIRECTORY
+        "dbc.html"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/html; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
+    );
+}
+
 static esp_err_t web_content_diagnostics_page_handler(
     httpd_req_t *request
 )
@@ -470,6 +484,20 @@ static esp_err_t web_content_uds_programming_page_handler(
         request,
         WEB_CONTENT_TEXT_DIRECTORY
         "uds_programming.html"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/html; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
+    );
+}
+
+static esp_err_t web_content_xcp_page_handler(
+    httpd_req_t *request
+)
+{
+    return web_content_send_storage_file(
+        request,
+        WEB_CONTENT_TEXT_DIRECTORY
+        "xcp.html"
         WEB_CONTENT_TEXT_SUFFIX,
         "text/html; charset=utf-8",
         WEB_CONTENT_TEXT_COMPRESSED
@@ -608,6 +636,20 @@ esp_err_t web_content_service_register(
             NULL,
     };
 
+    static const httpd_uri_t dbc_page_uri = {
+        .uri =
+            "/dbc",
+
+        .method =
+            HTTP_GET,
+
+        .handler =
+            web_content_dbc_page_handler,
+
+        .user_ctx =
+            NULL,
+    };
+
     static const httpd_uri_t diagnostics_page_uri = {
         .uri =
             "/diagnostics",
@@ -659,6 +701,20 @@ esp_err_t web_content_service_register(
 
         .handler =
             web_content_uds_programming_page_handler,
+
+        .user_ctx =
+            NULL,
+    };
+
+    static const httpd_uri_t xcp_page_uri = {
+        .uri =
+            "/xcp",
+
+        .method =
+            HTTP_GET,
+
+        .handler =
+            web_content_xcp_page_handler,
 
         .user_ctx =
             NULL,
@@ -813,6 +869,16 @@ esp_err_t web_content_service_register(
     result =
         httpd_register_uri_handler(
             server,
+            &xcp_page_uri
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        httpd_register_uri_handler(
+            server,
             &can_logger_page_uri
         );
 
@@ -824,6 +890,16 @@ esp_err_t web_content_service_register(
         httpd_register_uri_handler(
             server,
             &can_analyzer_page_uri
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        httpd_register_uri_handler(
+            server,
+            &dbc_page_uri
         );
 
     if (result != ESP_OK) {

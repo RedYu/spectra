@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en" class="page-xcp page-isotp">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="/favicon.ico">
+    <title>XCP Diagnostics · Spectra</title>
+    <link rel="stylesheet" href="spectra.css?v=27">
+    <script src="spectra.js?v=27" defer></script>
+</head>
+
+<body class="page-xcp page-isotp">
+    <header class="spectra-header">
+        <a class="spectra-brand" href="/">
+            <span aria-hidden="true">▧</span>
+            Spectra
+        </a>
+
+        <nav class="spectra-nav" aria-label="Main navigation">
+            <a href="/">Overview</a>
+            <a href="/can_logger">CAN Logger</a>
+            <a href="/can_analyzer">CAN Analyzer</a>
+            <a href="/isotp">ISO-TP</a>
+            <a href="/xcp" aria-current="page">XCP</a>
+            <a href="/files">Files</a>
+            <a href="/settings">Settings</a>
+            <a href="/diagnostics">Diagnostics</a>
+        </nav>
+
+        <span id="xcp-status" role="status">Closed</span>
+    </header>
+
+    <main class="spectra-page">
+        <div class="page-header isotp-page-header">
+            <div>
+                <h1>XCP Diagnostics</h1>
+                <p>
+                    Connect to an XCP slave over CAN, execute raw CTO
+                    commands and inspect its responses.
+                </p>
+            </div>
+        </div>
+
+        <div class="isotp-layout">
+            <section class="card isotp-configuration isotp-card">
+                <h2>Slave transport</h2>
+
+                <div class="isotp-form-grid">
+                    <label>
+                        CAN bus
+                        <select id="xcp-bus">
+                            <option value="0">Primary · TWAI</option>
+                            <option value="1">Secondary · MCP2518FD</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Frame format
+                        <select id="xcp-format">
+                            <option value="classic">Classical CAN</option>
+                            <option value="fd">CAN FD</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Command ID · CRO
+                        <input id="xcp-command-id" value="667" spellcheck="false">
+                    </label>
+
+                    <label>
+                        Response ID · DTO
+                        <input id="xcp-response-id" value="668" spellcheck="false">
+                    </label>
+
+                    <label>
+                        Transmit length
+                        <select id="xcp-tx-length">
+                            <option value="8">8 bytes</option>
+                            <option value="12">12 bytes</option>
+                            <option value="16">16 bytes</option>
+                            <option value="20">20 bytes</option>
+                            <option value="24">24 bytes</option>
+                            <option value="32">32 bytes</option>
+                            <option value="48">48 bytes</option>
+                            <option value="64">64 bytes</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Padding byte
+                        <input id="xcp-padding" value="00" spellcheck="false">
+                    </label>
+
+                    <label>
+                        Response timeout
+                        <span class="input-with-unit">
+                            <input id="xcp-timeout" type="number" min="10" max="60000" value="1000">
+                            <span>ms</span>
+                        </span>
+                    </label>
+
+                    <label>
+                        CONNECT mode
+                        <input id="xcp-connect-mode" value="00" spellcheck="false">
+                    </label>
+                </div>
+
+                <div class="isotp-options">
+                    <label><input id="xcp-extended" type="checkbox">29-bit identifiers</label>
+                    <label><input id="xcp-brs" type="checkbox" disabled>CAN FD bit-rate switch</label>
+                </div>
+
+                <div class="isotp-actions">
+                    <button id="xcp-apply" class="primary">Apply transport</button>
+                    <button id="xcp-connect" disabled>Connect</button>
+                    <button id="xcp-disconnect" disabled>Disconnect</button>
+                    <button id="xcp-close" disabled>Close</button>
+                </div>
+            </section>
+
+            <section class="card isotp-transfer isotp-card">
+                <h2>CTO command</h2>
+
+                <label for="xcp-command">HEX bytes</label>
+                <textarea
+                    id="xcp-command"
+                    rows="7"
+                    spellcheck="false"
+                    placeholder="F5"
+                >F5</textarea>
+
+                <div class="isotp-payload-meta">
+                    <span id="xcp-byte-count">1 byte</span>
+                    <span>PID must be 0xC0–0xFF</span>
+                </div>
+
+                <button id="xcp-execute" class="primary" disabled>
+                    Execute CTO
+                </button>
+            </section>
+
+            <section class="card isotp-transfer isotp-card">
+                <h2>Discovery and memory read</h2>
+
+                <div class="isotp-form-grid">
+                    <label>
+                        Identification type
+                        <select id="xcp-id-type">
+                            <option value="0">ASCII text</option>
+                            <option value="1">ASAM-MC2 filename</option>
+                            <option value="2">ASAM-MC2 path</option>
+                            <option value="3">ASAM-MC2 URL</option>
+                            <option value="4">Upload tool filename</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Address extension
+                        <input id="xcp-address-extension" value="00" spellcheck="false">
+                    </label>
+
+                    <label>
+                        MTA address
+                        <input id="xcp-address" value="00000000" spellcheck="false">
+                    </label>
+
+                    <label>
+                        Upload elements
+                        <input id="xcp-upload-count" type="number" min="1" max="255" value="4">
+                    </label>
+                </div>
+
+                <div class="isotp-actions">
+                    <button id="xcp-get-status" disabled>Get status</button>
+                    <button id="xcp-get-communication" disabled>Communication info</button>
+                    <button id="xcp-get-id" disabled>Get identification</button>
+                    <button id="xcp-set-mta" disabled>Set MTA</button>
+                    <button id="xcp-upload" disabled>Upload</button>
+                </div>
+            </section>
+
+            <section class="card isotp-transfer isotp-card">
+                <h2>Memory write</h2>
+                <p class="note">
+                    Writes can change ECU calibration or operation. Use only an
+                    address range that is documented for the connected slave.
+                </p>
+
+                <div class="isotp-form-grid">
+                    <label>
+                        Allowed range start
+                        <input id="xcp-write-range-start" value="00000000" spellcheck="false">
+                    </label>
+
+                    <label>
+                        Allowed range end
+                        <input id="xcp-write-range-end" value="00000000" spellcheck="false">
+                    </label>
+                </div>
+
+                <label for="xcp-write-data">Data bytes</label>
+                <textarea
+                    id="xcp-write-data"
+                    rows="4"
+                    spellcheck="false"
+                    placeholder="00 00 00 00"
+                ></textarea>
+
+                <label>
+                    <input id="xcp-write-confirm" type="checkbox">
+                    I verified the address, range, and payload
+                </label>
+
+                <div class="isotp-actions">
+                    <button id="xcp-write-memory" class="button-danger" disabled>
+                        Write memory
+                    </button>
+                </div>
+            </section>
+
+            <section class="card isotp-response isotp-card">
+                <div class="panel-title">
+                    <h2>Latest response</h2>
+                    <span id="xcp-response-summary">No response</span>
+                </div>
+
+                <pre id="xcp-response-data">No response received.</pre>
+
+                <div class="isotp-actions">
+                    <button id="xcp-copy">Copy HEX</button>
+                    <button id="xcp-clear">Clear view</button>
+                </div>
+            </section>
+
+            <section class="card isotp-events isotp-card">
+                <h2>Session information</h2>
+                <div id="xcp-capabilities">MAX_CTO — · MAX_DTO —</div>
+                <div id="xcp-decoded">No decoded command response.</div>
+                <div id="xcp-message" role="status">Configure a slave transport to begin.</div>
+            </section>
+        </div>
+    </main>
+</body>
+</html>

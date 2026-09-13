@@ -14,6 +14,7 @@ idf_component_register(
         lvgl_port
         gui
         isotp
+        xcp
         services
         freertos
         esp_event

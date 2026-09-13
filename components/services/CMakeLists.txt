@@ -42,6 +42,7 @@ idf_component_register(
         "web_api/web_can_filters_api.c"
         "web_api/web_isotp_api.c"
         "web_api/web_uds_api.c"
+        "web_api/web_xcp_api.c"
 
     INCLUDE_DIRS
         "include"
@@ -53,6 +54,7 @@ idf_component_register(
         can
         can_monitor
         isotp
+        xcp
         uds
 
     PRIV_REQUIRES

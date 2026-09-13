@@ -7798,6 +7798,1055 @@
         setInterval(refresh, 300);
     }
 
+    function init_xcp() {
+        const element = id => document.getElementById(id);
+        const status = element('xcp-status');
+        const message = element('xcp-message');
+        const format = element('xcp-format');
+        const transmitLength = element('xcp-tx-length');
+        const brs = element('xcp-brs');
+        const commandInput = element('xcp-command');
+        const executeButton = element('xcp-execute');
+        const responseData = element('xcp-response-data');
+        const responseSummary = element('xcp-response-summary');
+        const capabilities = element('xcp-capabilities');
+        const decoded = element('xcp-decoded');
+        const byteCount = element('xcp-byte-count');
+        let latestResponse = '';
+        let lastSequence = -1;
+
+        const stateNames = [
+            'Closed',
+            'Configured',
+            'Connecting',
+            'Connected',
+            'Command pending',
+            'Disconnecting',
+            'Error'
+        ];
+
+        function normalizeHex(text) {
+            const compact = text.replace(/[\s,:-]+/g, '');
+
+            if (!compact.length ||
+                !/^[0-9a-f]+$/i.test(compact) ||
+                (compact.length % 2) !== 0) {
+
+                throw new Error('Enter complete hexadecimal bytes.');
+            }
+
+            if ((compact.length / 2) > 64)
+                throw new Error('An XCP CTO cannot exceed 64 bytes.');
+
+            const bytes = compact.match(/../g);
+
+            if (parseInt(bytes[0], 16) < 0xc0)
+                throw new Error('The first CTO byte must be a command PID from C0 to FF.');
+
+            return bytes.join(' ').toUpperCase();
+        }
+
+        function normalizeDataHex(text) {
+            const compact = text.replace(/[\s,:-]+/g, '');
+
+            if (!compact.length ||
+                !/^[0-9a-f]+$/i.test(compact) ||
+                (compact.length % 2) !== 0) {
+
+                throw new Error('Enter complete hexadecimal data bytes.');
+            }
+
+            if ((compact.length / 2) > 62)
+                throw new Error('A single XCP DOWNLOAD cannot exceed 62 data bytes.');
+
+            return compact.match(/../g).join(' ').toUpperCase();
+        }
+
+        function parseHexNumber(input, maximum, name) {
+            const text = input.value.trim();
+
+            if (!/^[0-9a-f]+$/i.test(text))
+                throw new Error(`${name} must be hexadecimal.`);
+
+            const value = parseInt(text, 16);
+
+            if (value > maximum)
+                throw new Error(`${name} is outside the selected range.`);
+
+            return value;
+        }
+
+        async function request(body) {
+            const reply = await fetch('/api/xcp', {
+                method : 'POST',
+                headers : {'Content-Type' : 'application/json'},
+                body : JSON.stringify(body)
+            });
+            const result = await reply.json();
+
+            if (!reply.ok || !result.success)
+                throw new Error(result.message || `HTTP ${reply.status}`);
+
+            return result;
+        }
+
+        function updateFormat() {
+            const fd = format.value === 'fd';
+            brs.disabled = !fd;
+
+            for (const option of transmitLength.options)
+                option.disabled = !fd && option.value !== '8';
+
+            if (!fd)
+                transmitLength.value = '8';
+        }
+
+        function updateByteCount() {
+            try {
+                const normalized = normalizeHex(commandInput.value);
+                const count = normalized.split(' ').length;
+                byteCount.textContent = `${count} ${count === 1 ? 'byte' : 'bytes'}`;
+                byteCount.classList.remove('error');
+            } catch (error) {
+                byteCount.textContent = error.message;
+                byteCount.classList.add('error');
+            }
+        }
+
+        async function refresh() {
+            try {
+                const reply = await fetch('/api/xcp', {cache : 'no-store'});
+                const data = await reply.json();
+
+                if (!reply.ok)
+                    throw new Error(`HTTP ${reply.status}`);
+
+                status.textContent = stateNames[data.state] || 'Unknown';
+                status.classList.toggle('error', data.state === 6);
+                status.classList.toggle('open', data.connected);
+                element('xcp-connect').disabled = !data.open || data.connected;
+                element('xcp-disconnect').disabled = !data.connected;
+                element('xcp-close').disabled = !data.open;
+                executeButton.disabled = !data.connected || data.state === 4;
+                for (const button of document.querySelectorAll(
+                        '#xcp-get-status, #xcp-get-communication, #xcp-get-id, '
+                        + '#xcp-set-mta, #xcp-upload')) {
+
+                    button.disabled = !data.connected || data.state === 4;
+                }
+                element('xcp-write-memory').disabled =
+                    !data.connected ||
+                    data.state === 4 ||
+                    !element('xcp-write-confirm').checked;
+                capabilities.textContent =
+                    `MAX_CTO ${data.maximum_cto || '—'} · MAX_DTO ${data.maximum_dto || '—'}`;
+
+                if (data.operation === 'get_status') {
+                    decoded.textContent =
+                        `Session status 0x${data.session_status.toString(16).padStart(2, '0').toUpperCase()} · `
+                        + `protection 0x${data.resource_protection.toString(16).padStart(2, '0').toUpperCase()} · `
+                        + `configuration ${data.session_configuration_id}`;
+                } else if (data.operation === 'get_comm_mode_info') {
+                    decoded.textContent =
+                        `Optional mode 0x${data.communication_mode_optional.toString(16).padStart(2, '0').toUpperCase()} · `
+                        + `MAX_BS ${data.maximum_block_size} · MIN_ST ${data.minimum_separation_time} · `
+                        + `driver v${(data.driver_version >> 4) & 15}.${data.driver_version & 15}`;
+                } else if (data.operation === 'get_id') {
+                    decoded.textContent =
+                        `Identification length ${data.identification_length} bytes · `
+                        + `transfer mode ${data.identification_transfer_mode}`
+                        + (data.identification_text
+                            ? ` · ${data.identification_text}`
+                            : '');
+                } else if (data.operation === 'set_mta') {
+                    decoded.textContent = 'Memory Transfer Address accepted by the slave.';
+                } else if (data.operation === 'upload') {
+                    decoded.textContent = `Uploaded ${Math.max(0, data.response_length - 1)} response bytes.`;
+                } else if (data.operation === 'write_memory') {
+                    decoded.textContent = 'Memory write was accepted by the XCP slave.';
+                }
+
+                if (data.sequence !== lastSequence) {
+                    lastSequence = data.sequence;
+
+                    if (data.response_length > 0) {
+                        latestResponse = data.response;
+                        responseData.textContent = data.response;
+                        responseSummary.textContent = `${data.response_length} bytes`;
+                    }
+
+                    if (data.xcp_error)
+                        message.textContent = `XCP error 0x${data.xcp_error.toString(16).padStart(2, '0').toUpperCase()}.`;
+                    else if (data.connected)
+                        message.textContent = 'XCP session is connected and ready.';
+                    else if (data.open)
+                        message.textContent = 'Transport configured. Connect to the slave.';
+                }
+            } catch (error) {
+                status.textContent = 'Unavailable';
+                status.classList.add('error');
+                executeButton.disabled = true;
+                message.textContent = error.message;
+            }
+        }
+
+        element('xcp-apply').addEventListener('click', async () => {
+            try {
+                const extended = element('xcp-extended').checked;
+                const fd = format.value === 'fd';
+                const maximumId = extended ? 0x1fffffff : 0x7ff;
+
+                await request({
+                    action : 'configure',
+                    bus : Number(element('xcp-bus').value),
+                    command_identifier : parseHexNumber(
+                        element('xcp-command-id'), maximumId, 'CRO identifier'),
+                    response_identifier : parseHexNumber(
+                        element('xcp-response-id'), maximumId, 'DTO identifier'),
+                    extended,
+                    can_fd : fd,
+                    brs : fd && brs.checked,
+                    transmit_data_length : Number(transmitLength.value),
+                    padding_byte : parseHexNumber(
+                        element('xcp-padding'), 0xff, 'Padding byte'),
+                    timeout_ms : Number(element('xcp-timeout').value)
+                });
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-connect').addEventListener('click', async () => {
+            try {
+                await request({
+                    action : 'connect',
+                    mode : parseHexNumber(
+                        element('xcp-connect-mode'), 0xff, 'CONNECT mode')
+                });
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-disconnect').addEventListener('click', async () => {
+            try {
+                await request({action : 'disconnect'});
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-close').addEventListener('click', async () => {
+            try {
+                await request({action : 'close'});
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        executeButton.addEventListener('click', async () => {
+            try {
+                const command = normalizeHex(commandInput.value);
+                await request({action : 'execute', command});
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        async function discovery(body, submittedMessage) {
+            try {
+                await request(body);
+                message.textContent = submittedMessage;
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        }
+
+        element('xcp-get-status').addEventListener('click', () =>
+            discovery({action : 'get_status'}, 'GET_STATUS completed.'));
+
+        element('xcp-get-communication').addEventListener('click', () =>
+            discovery(
+                {action : 'get_comm_mode_info'},
+                'GET_COMM_MODE_INFO completed.'));
+
+        element('xcp-get-id').addEventListener('click', () =>
+            discovery({
+                action : 'get_id',
+                type : Number(element('xcp-id-type').value)
+            }, 'GET_ID completed.'));
+
+        element('xcp-set-mta').addEventListener('click', () =>
+            discovery({
+                action : 'set_mta',
+                address_extension : parseHexNumber(
+                    element('xcp-address-extension'), 0xff, 'Address extension'),
+                address : parseHexNumber(
+                    element('xcp-address'), 0xffffffff, 'MTA address')
+            }, 'SET_MTA completed.'));
+
+        element('xcp-upload').addEventListener('click', () =>
+            discovery({
+                action : 'upload',
+                count : Number(element('xcp-upload-count').value)
+            }, 'UPLOAD completed.'));
+
+        element('xcp-write-confirm').addEventListener('change', () => {
+            element('xcp-write-memory').disabled =
+                !element('xcp-write-confirm').checked ||
+                status.textContent !== 'Connected';
+        });
+
+        element('xcp-write-memory').addEventListener('click', async () => {
+            try {
+                const address = parseHexNumber(
+                    element('xcp-address'), 0xffffffff, 'MTA address');
+                const rangeStart = parseHexNumber(
+                    element('xcp-write-range-start'), 0xffffffff, 'Range start');
+                const rangeEnd = parseHexNumber(
+                    element('xcp-write-range-end'), 0xffffffff, 'Range end');
+                const data = normalizeDataHex(element('xcp-write-data').value);
+
+                if (rangeStart > rangeEnd ||
+                    address < rangeStart ||
+                    address > rangeEnd) {
+
+                    throw new Error('The MTA address is outside the allowed range.');
+                }
+
+                const confirmed = window.confirm(
+                    `Write ${data.split(' ').length} byte(s) at 0x${
+                        address.toString(16).padStart(8, '0').toUpperCase()
+                    }? This can change ECU operation.`
+                );
+
+                if (!confirmed)
+                    return;
+
+                await request({
+                    action : 'write_memory',
+                    confirmed : true,
+                    address_extension : parseHexNumber(
+                        element('xcp-address-extension'), 0xff, 'Address extension'),
+                    address,
+                    range_start : rangeStart,
+                    range_end : rangeEnd,
+                    data
+                });
+                element('xcp-write-confirm').checked = false;
+                message.textContent = 'DOWNLOAD completed.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-copy').addEventListener('click', async () => {
+            if (!latestResponse)
+                return;
+
+            try {
+                await navigator.clipboard.writeText(latestResponse);
+                message.textContent = 'Response copied to the clipboard.';
+            } catch (_) {
+                message.textContent = 'Clipboard access is unavailable.';
+            }
+        });
+
+        element('xcp-clear').addEventListener('click', () => {
+            latestResponse = '';
+            responseData.textContent = 'No response received.';
+            responseSummary.textContent = 'No response';
+        });
+
+        format.addEventListener('change', updateFormat);
+        commandInput.addEventListener('input', updateByteCount);
+        updateFormat();
+        updateByteCount();
+        refresh();
+        setInterval(refresh, 500);
+    }
+
+    function init_dbc() {
+        const element = id => document.getElementById(id);
+        const fileInput = element('dbc-file');
+        const status = element('dbc-status');
+        const message = element('dbc-message');
+        const messageList = element('dbc-message-list');
+        const signalList = element('dbc-signal-list');
+        const valueGrid = element('dbc-value-grid');
+        const selectedCount = element('dbc-selected-count');
+        const frameData = element('dbc-frame-data');
+        const frameTime = element('dbc-frame-time');
+        let database = null;
+        let currentMessage = null;
+        let socket = null;
+        let paused = false;
+        let pending = false;
+        let renderPending = false;
+        let messageListDirty = true;
+        const latest = new Map();
+        const histories = new Map();
+        let selected = new Set();
+
+        try {
+            selected = new Set(JSON.parse(
+                localStorage.getItem('spectra:dbc-selected-signals') || '[]'));
+        } catch (_) {
+            selected = new Set();
+        }
+
+        const escapeHtml = text => String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        const hex = (value, width = 2) =>
+            Number(value).toString(16).toUpperCase().padStart(width, '0');
+        const signalKey = (messageDefinition, signal) =>
+            `${messageDefinition.id}:${signal.name}`;
+
+        function parseDbc(text, name) {
+            const result = {name, nodes : [], messages : new Map()};
+            let activeMessage = null;
+
+            for (const line of text.split(/\r?\n/)) {
+                const nodes = line.match(/^\s*BU_\s*:\s*(.*)$/);
+
+                if (nodes) {
+                    result.nodes = nodes[1].trim().split(/\s+/).filter(Boolean);
+                    continue;
+                }
+
+                const messageMatch = line.match(
+                    /^\s*BO_\s+(\d+)\s+([^:]+):\s*(\d+)\s+(\S+)/);
+
+                if (messageMatch) {
+                    const encodedId = Number(messageMatch[1]);
+                    const extended = encodedId > 0x1fffffff;
+                    const id = extended ? encodedId & 0x1fffffff : encodedId;
+                    activeMessage = {
+                        id,
+                        extended,
+                        name : messageMatch[2].trim(),
+                        dlc : Number(messageMatch[3]),
+                        transmitter : messageMatch[4],
+                        signals : []
+                    };
+                    result.messages.set(id, activeMessage);
+                    continue;
+                }
+
+                const signalMatch = line.match(
+                    /^\s*SG_\s+(\w+)(?:\s+(M|m\d+M?))?\s*:\s*(\d+)\|(\d+)@([01])([+-])\s*\(([^,]+),([^)]+)\)\s*\[([^|]+)\|([^\]]+)\]\s*"([^"]*)"\s*(.*)$/);
+
+                if (signalMatch && activeMessage) {
+                    const multiplex = signalMatch[2] || '';
+                    activeMessage.signals.push({
+                        name : signalMatch[1],
+                        multiplexor : multiplex === 'M',
+                        multiplexValue : multiplex.startsWith('m')
+                            ? Number(multiplex.match(/^m(\d+)/)[1])
+                            : null,
+                        start : Number(signalMatch[3]),
+                        length : Number(signalMatch[4]),
+                        littleEndian : signalMatch[5] === '1',
+                        signed : signalMatch[6] === '-',
+                        factor : Number(signalMatch[7]),
+                        offset : Number(signalMatch[8]),
+                        minimum : Number(signalMatch[9]),
+                        maximum : Number(signalMatch[10]),
+                        unit : signalMatch[11],
+                        receivers : signalMatch[12].split(',').map(value => value.trim()),
+                        values : new Map()
+                    });
+                    continue;
+                }
+
+                const valueMatch = line.match(/^\s*VAL_\s+(\d+)\s+(\w+)\s+(.*);\s*$/);
+
+                if (valueMatch) {
+                    const encodedId = Number(valueMatch[1]);
+                    const id = encodedId > 0x1fffffff
+                        ? encodedId & 0x1fffffff
+                        : encodedId;
+                    const definition = result.messages.get(id);
+                    const signal = definition && definition.signals.find(
+                        item => item.name === valueMatch[2]);
+
+                    if (signal) {
+                        const expression = /(-?\d+)\s+"([^"]*)"/g;
+                        let entry;
+
+                        while ((entry = expression.exec(valueMatch[3])) !== null)
+                            signal.values.set(entry[1], entry[2]);
+                    }
+                }
+            }
+
+            if (result.messages.size === 0)
+                throw new Error('The file contains no supported BO_ messages.');
+
+            return result;
+        }
+
+        function extractRaw(signal, bytes) {
+            if (signal.length < 1 || signal.length > 64)
+                return null;
+
+            let raw = 0n;
+
+            if (signal.littleEndian) {
+                for (let index = 0; index < signal.length; ++index) {
+                    const bit = signal.start + index;
+
+                    if (Math.floor(bit / 8) >= bytes.length)
+                        return null;
+
+                    raw |= BigInt((bytes[Math.floor(bit / 8)] >> (bit % 8)) & 1) << BigInt(index);
+                }
+            } else {
+                let bit = signal.start;
+
+                for (let index = 0; index < signal.length; ++index) {
+                    if (bit < 0 || Math.floor(bit / 8) >= bytes.length)
+                        return null;
+
+                    raw = (raw << 1n) |
+                        BigInt((bytes[Math.floor(bit / 8)] >> (bit % 8)) & 1);
+                    bit = (bit % 8 === 0) ? bit + 15 : bit - 1;
+                }
+            }
+
+            if (signal.signed) {
+                const sign = 1n << BigInt(signal.length - 1);
+
+                if ((raw & sign) !== 0n)
+                    raw -= 1n << BigInt(signal.length);
+            }
+
+            return raw;
+        }
+
+        function decodeSignal(definition, signal, frame) {
+            if (!frame)
+                return null;
+
+            if (signal.multiplexValue !== null) {
+                const multiplexor = definition.signals.find(item => item.multiplexor);
+                const multiplexRaw = multiplexor && extractRaw(multiplexor, frame.data);
+
+                if (multiplexRaw === null || Number(multiplexRaw) !== signal.multiplexValue)
+                    return {inactive : true};
+            }
+
+            const raw = extractRaw(signal, frame.data);
+
+            if (raw === null)
+                return null;
+
+            const numericRaw = Number(raw);
+            const physical = numericRaw * signal.factor + signal.offset;
+            return {
+                raw,
+                physical,
+                text : signal.values.get(raw.toString()) || '',
+                valid : physical >= signal.minimum && physical <= signal.maximum
+            };
+        }
+
+        function selectedFrame(definition) {
+            const bus = element('dbc-bus').value;
+            let frame = null;
+
+            for (const candidate of latest.values()) {
+                if (candidate.id !== definition.id ||
+                    Boolean(candidate.flags & 1) !== definition.extended ||
+                    (bus !== 'all' && candidate.bus !== Number(bus)))
+                    continue;
+
+                if (!frame || candidate.receivedAt > frame.receivedAt)
+                    frame = candidate;
+            }
+
+            return frame;
+        }
+
+        function formatValue(decoded, signal) {
+            if (!decoded)
+                return '—';
+            if (decoded.inactive)
+                return 'inactive';
+            if (decoded.text)
+                return `${decoded.text} (${decoded.physical})`;
+
+            const value = Number.isInteger(decoded.physical)
+                ? String(decoded.physical)
+                : decoded.physical.toFixed(3).replace(/\.?0+$/, '');
+            return signal.unit ? `${value} ${signal.unit}` : value;
+        }
+
+        function saveSelection() {
+            try {
+                localStorage.setItem(
+                    'spectra:dbc-selected-signals',
+                    JSON.stringify([...selected])
+                );
+            } catch (_) {
+                /* Selection remains available until the page is closed. */
+            }
+        }
+
+        function renderMessages() {
+            if (!database)
+                return;
+
+            messageListDirty = false;
+
+            const query = element('dbc-search').value.trim().toLowerCase();
+            const activeOnly = element('dbc-active-only').checked;
+            const definitions = [...database.messages.values()].filter(definition => {
+                const frame = selectedFrame(definition);
+                return (!activeOnly || frame) &&
+                    (!query || definition.name.toLowerCase().includes(query) ||
+                        hex(definition.id, definition.extended ? 8 : 3).toLowerCase().includes(query));
+            });
+
+            messageList.innerHTML = definitions.map(definition => {
+                const frame = selectedFrame(definition);
+                const active = currentMessage === definition ? ' active' : '';
+                return `<button class="dbc-message-entry${active}" data-id="${definition.id}">`
+                    + `<b>${escapeHtml(definition.name)}</b>`
+                    + `<span>0x${hex(definition.id, definition.extended ? 8 : 3)} · ${definition.dlc} B`
+                    + `${frame ? ' · live' : ''}</span></button>`;
+            }).join('') || '<p class="note">No matching messages.</p>';
+
+            for (const button of messageList.querySelectorAll('[data-id]')) {
+                button.onclick = () => {
+                    currentMessage = database.messages.get(Number(button.dataset.id));
+                    render();
+                };
+            }
+        }
+
+        function renderSignals() {
+            signalList.innerHTML = '';
+
+            if (!currentMessage) {
+                element('dbc-message-title').textContent = 'Message signals';
+                element('dbc-message-meta').textContent = 'No message selected';
+                return;
+            }
+
+            const frame = selectedFrame(currentMessage);
+            element('dbc-message-title').textContent = currentMessage.name;
+            element('dbc-message-meta').textContent =
+                `0x${hex(currentMessage.id, currentMessage.extended ? 8 : 3)} · `
+                + `${currentMessage.dlc} bytes · ${currentMessage.transmitter}`;
+
+            signalList.innerHTML = currentMessage.signals.map(signal => {
+                const key = signalKey(currentMessage, signal);
+                const decoded = decodeSignal(currentMessage, signal, frame);
+                return `<tr><td><input type="checkbox" data-signal="${escapeHtml(signal.name)}" `
+                    + `${selected.has(key) ? 'checked' : ''}></td>`
+                    + `<td>${escapeHtml(signal.name)}</td>`
+                    + `<td>${escapeHtml(formatValue(decoded, signal))}</td>`
+                    + `<td>${decoded && !decoded.inactive ? escapeHtml(decoded.raw.toString()) : '—'}</td>`
+                    + `<td>${escapeHtml(signal.unit || '—')}</td>`
+                    + `<td>${signal.start}|${signal.length}</td>`
+                    + `<td>${signal.littleEndian ? 'Intel' : 'Motorola'} · ${signal.signed ? 'signed' : 'unsigned'}</td></tr>`;
+            }).join('') || '<tr><td colspan="7">No supported SG_ signals.</td></tr>';
+
+            for (const input of signalList.querySelectorAll('[data-signal]')) {
+                input.onchange = () => {
+                    const signal = currentMessage.signals.find(item => item.name === input.dataset.signal);
+                    const key = signalKey(currentMessage, signal);
+                    input.checked ? selected.add(key) : selected.delete(key);
+                    saveSelection();
+                    renderValues();
+                };
+            }
+
+            if (frame) {
+                frameData.textContent = frame.data.map(byte => hex(byte)).join(' ');
+                frameTime.textContent = `${frame.bus === 0 ? 'Primary' : 'Secondary'} · `
+                    + `${(Number(frame.timestamp) / 1000000).toFixed(6)} s`;
+            } else {
+                frameData.textContent = 'No matching live frame received.';
+                frameTime.textContent = 'No frame received';
+            }
+        }
+
+        function renderValues() {
+            const values = [];
+            const plots = [];
+            const historyLimit = Number(element('dbc-history-limit').value);
+
+            if (database) {
+                for (const definition of database.messages.values()) {
+                    const frame = selectedFrame(definition);
+
+                    for (const signal of definition.signals) {
+                        if (!selected.has(signalKey(definition, signal)))
+                            continue;
+
+                        const decoded = decodeSignal(definition, signal, frame);
+                        const key = signalKey(definition, signal);
+                        let history = histories.get(key);
+
+                        if (!history) {
+                            history = [];
+                            histories.set(key, history);
+                        }
+
+                        if (decoded && !decoded.inactive && frame &&
+                            history.at(-1)?.timestamp !== frame.timestamp) {
+
+                            history.push({
+                                timestamp : frame.timestamp,
+                                value : decoded.physical
+                            });
+
+                            if (history.length > historyLimit)
+                                history.splice(0, history.length - historyLimit);
+                        }
+
+                        const plotId = `dbc-plot-${plots.length}`;
+                        plots.push({id : plotId, history});
+                        values.push(`<article class="dbc-value${decoded && !decoded.inactive && !decoded.valid ? ' invalid' : ''}">`
+                            + `<span>${escapeHtml(definition.name)} · 0x${hex(definition.id, definition.extended ? 8 : 3)}</span>`
+                            + `<strong>${escapeHtml(signal.name)}</strong>`
+                            + `<b>${escapeHtml(formatValue(decoded, signal))}</b>`
+                            + `<canvas id="${plotId}" class="dbc-sparkline" aria-label="${escapeHtml(signal.name)} history"></canvas>`
+                            + `</article>`);
+                    }
+                }
+            }
+
+            selectedCount.textContent = `${values.length} signal${values.length === 1 ? '' : 's'}`;
+            valueGrid.innerHTML = values.join('') ||
+                '<p class="note">Select signals from a message to build your dashboard.</p>';
+
+            for (const plot of plots)
+                drawHistory(element(plot.id), plot.history);
+        }
+
+        function drawHistory(canvas, history) {
+            if (!canvas)
+                return;
+
+            const width = Math.max(120, canvas.clientWidth);
+            const height = Math.max(46, canvas.clientHeight);
+            const ratio = window.devicePixelRatio || 1;
+            canvas.width = Math.round(width * ratio);
+            canvas.height = Math.round(height * ratio);
+            const context = canvas.getContext('2d');
+            context.scale(ratio, ratio);
+            context.clearRect(0, 0, width, height);
+
+            if (history.length < 2)
+                return;
+
+            let minimum = Math.min(...history.map(point => point.value));
+            let maximum = Math.max(...history.map(point => point.value));
+
+            if (minimum === maximum) {
+                minimum -= 0.5;
+                maximum += 0.5;
+            }
+
+            context.strokeStyle = '#3d85f5';
+            context.lineWidth = 1.5;
+            context.beginPath();
+
+            history.forEach((point, index) => {
+                const x = index * (width - 2) / (history.length - 1) + 1;
+                const y = height - 2 -
+                    (point.value - minimum) / (maximum - minimum) * (height - 4);
+                index === 0 ? context.moveTo(x, y) : context.lineTo(x, y);
+            });
+            context.stroke();
+        }
+
+        function render() {
+            renderPending = false;
+            renderMessages();
+            renderSignals();
+            renderValues();
+        }
+
+        function scheduleRender() {
+            if (renderPending)
+                return;
+            renderPending = true;
+            setTimeout(() => {
+                renderPending = false;
+
+                if (messageListDirty)
+                    renderMessages();
+
+                renderSignals();
+                renderValues();
+            }, 100);
+        }
+
+        function parseBatch(buffer) {
+            const view = new DataView(buffer);
+            const frames = [];
+
+            if (view.byteLength < 8 || view.getUint8(0) !== 1 ||
+                view.getUint8(1) !== 1 ||
+                view.getUint32(4, true) !== view.byteLength - 8)
+                throw new Error('Invalid CAN WebSocket batch.');
+
+            let offset = 8;
+
+            for (let index = 0; index < view.getUint16(2, true); ++index) {
+                if (offset + 40 > view.byteLength)
+                    throw new Error('Truncated CAN event.');
+
+                const length = view.getUint8(offset + 5);
+
+                if (length > 64 || offset + 40 + length > view.byteLength)
+                    throw new Error('Truncated CAN payload.');
+
+                if (view.getUint8(offset) === 0) {
+                    frames.push({
+                        bus : view.getUint8(offset + 1),
+                        flags : view.getUint8(offset + 3),
+                        id : view.getUint32(offset + 20, true),
+                        timestamp : view.getBigUint64(offset + 28, true),
+                        data : Array.from(new Uint8Array(buffer, offset + 40, length)),
+                        receivedAt : performance.now()
+                    });
+                }
+
+                offset += 40 + length;
+            }
+
+            return frames;
+        }
+
+        function controls() {
+            const connected = socket && socket.readyState === WebSocket.OPEN;
+            element('dbc-connect').textContent = socket ? 'Disconnect' : 'Connect live';
+            element('dbc-pause').disabled = !connected || pending;
+            element('dbc-pause').textContent = paused ? 'Resume stream' : 'Pause stream';
+            status.textContent = socket
+                ? connected ? paused ? 'Paused' : 'Live' : 'Connecting…'
+                : database ? 'DBC loaded' : 'No DBC';
+        }
+
+        function subscribe(nextPaused) {
+            if (!socket || socket.readyState !== WebSocket.OPEN || pending)
+                return;
+
+            pending = true;
+            socket.send(JSON.stringify({
+                command : 'subscribe',
+                primary : true,
+                secondary : true,
+                rx : true,
+                tx : true,
+                paused : nextPaused
+            }));
+            controls();
+        }
+
+        function closeSocket() {
+            if (socket) {
+                const previous = socket;
+                socket = null;
+                previous.close();
+            }
+            pending = false;
+            paused = false;
+            controls();
+        }
+
+        function loadDatabase(text, name) {
+            database = parseDbc(text, name);
+            currentMessage = database.messages.values().next().value || null;
+            latest.clear();
+            histories.clear();
+            messageListDirty = true;
+            element('dbc-summary').textContent =
+                `${name} · ${database.messages.size} messages · `
+                + `${[...database.messages.values()].reduce((sum, item) => sum + item.signals.length, 0)} signals`;
+            element('dbc-connect').disabled = false;
+            message.textContent = 'DBC parsed locally. Select signals or connect to live CAN.';
+            render();
+            controls();
+        }
+
+        fileInput.onchange = async () => {
+            const file = fileInput.files[0];
+
+            if (!file)
+                return;
+
+            if (file.size > 16 * 1024 * 1024) {
+                message.textContent = 'DBC file exceeds the 16 MiB browser limit.';
+                return;
+            }
+
+            try {
+                loadDatabase(await file.text(), file.name);
+            } catch (error) {
+                message.textContent = error.message;
+            } finally {
+                fileInput.value = '';
+            }
+        };
+
+        async function refreshSdFiles() {
+            const selector = element('dbc-sd-file');
+            const button = element('dbc-sd-refresh');
+            button.disabled = true;
+            selector.innerHTML = '<option value="">Loading /dbc…</option>';
+            element('dbc-sd-open').disabled = true;
+
+            try {
+                const query = new URLSearchParams({
+                    volume : 'sd',
+                    path : '/dbc',
+                    offset : '0',
+                    limit : '128'
+                });
+                const response = await fetch(`/api/files?${query}`, {cache : 'no-store'});
+                const result = await response.json();
+
+                if (!response.ok)
+                    throw new Error(result.message || `HTTP ${response.status}`);
+
+                const files = result.entries.filter(entry =>
+                    entry.type === 'file' && /\.dbc$/i.test(entry.name));
+                selector.innerHTML = '<option value="">Choose a DBC file</option>';
+
+                for (const file of files) {
+                    const option = document.createElement('option');
+                    option.value = `/dbc/${file.name}`;
+                    option.textContent = file.name;
+                    selector.append(option);
+                }
+
+                if (files.length === 0)
+                    message.textContent = 'No .dbc files found in the SD /dbc directory.';
+            } catch (error) {
+                selector.innerHTML = '<option value="">SD /dbc unavailable</option>';
+                message.textContent = `Failed to list SD DBC files: ${error.message}`;
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        element('dbc-sd-file').onchange = () => {
+            element('dbc-sd-open').disabled = !element('dbc-sd-file').value;
+        };
+        element('dbc-sd-refresh').onclick = refreshSdFiles;
+        element('dbc-sd-open').onclick = async () => {
+            const path = element('dbc-sd-file').value;
+
+            if (!path)
+                return;
+
+            element('dbc-sd-open').disabled = true;
+
+            try {
+                const query = new URLSearchParams({volume : 'sd', path});
+                const response = await fetch(`/api/files/download?${query}`);
+
+                if (!response.ok)
+                    throw new Error(`HTTP ${response.status}`);
+
+                const text = await response.text();
+
+                if (text.length > 16 * 1024 * 1024)
+                    throw new Error('DBC file exceeds the 16 MiB browser limit.');
+
+                loadDatabase(text, path.split('/').pop());
+            } catch (error) {
+                message.textContent = `Failed to open SD DBC file: ${error.message}`;
+            } finally {
+                element('dbc-sd-open').disabled = !path;
+            }
+        };
+
+        element('dbc-connect').onclick = () => {
+            if (socket) {
+                closeSocket();
+                return;
+            }
+
+            const connection = new WebSocket(
+                `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/can`);
+            connection.binaryType = 'arraybuffer';
+            socket = connection;
+            controls();
+            connection.onopen = () => socket === connection && subscribe(false);
+            connection.onmessage = event => {
+                if (socket !== connection)
+                    return;
+
+                try {
+                    if (typeof event.data === 'string') {
+                        const reply = JSON.parse(event.data);
+
+                        if (reply.type === 'subscription') {
+                            pending = false;
+                            paused = reply.paused;
+                            controls();
+                        } else if (reply.type === 'error') {
+                            message.textContent = reply.code || 'CAN stream error.';
+                        }
+                        return;
+                    }
+
+                    for (const frame of parseBatch(event.data)) {
+                        const key = `${frame.bus}:${frame.id}`;
+
+                        if (!latest.has(key))
+                            messageListDirty = true;
+
+                        latest.set(key, frame);
+                    }
+                    scheduleRender();
+                } catch (error) {
+                    message.textContent = error.message;
+                }
+            };
+            connection.onerror = () => message.textContent = 'CAN WebSocket connection failed.';
+            connection.onclose = () => socket === connection && closeSocket();
+        };
+        element('dbc-pause').onclick = () => subscribe(!paused);
+        element('dbc-search').oninput = renderMessages;
+        element('dbc-active-only').onchange = renderMessages;
+        element('dbc-bus').onchange = render;
+        element('dbc-history-limit').onchange = () => {
+            const limit = Number(element('dbc-history-limit').value);
+
+            for (const history of histories.values()) {
+                if (history.length > limit)
+                    history.splice(0, history.length - limit);
+            }
+
+            renderValues();
+        };
+        element('dbc-clear-history').onclick = () => {
+            histories.clear();
+            renderValues();
+            message.textContent = 'Signal graph history cleared.';
+        };
+        controls();
+        refreshSdFiles();
+    }
+
     function init_isotp_navigation() {
         for (const navigation of document.querySelectorAll('.spectra-nav')) {
             const files = navigation.querySelector('a[href="/files"]');
@@ -7807,6 +8856,20 @@
                 link.href = '/isotp';
                 link.textContent = 'ISO-TP';
                 navigation.insertBefore(link, files);
+            }
+
+            if (!navigation.querySelector('a[href="/xcp"]')) {
+                const xcp = document.createElement('a');
+                xcp.href = '/xcp';
+                xcp.textContent = 'XCP';
+                navigation.insertBefore(xcp, files);
+            }
+
+            if (!navigation.querySelector('a[href="/dbc"]')) {
+                const dbc = document.createElement('a');
+                dbc.href = '/dbc';
+                dbc.textContent = 'DBC';
+                navigation.insertBefore(dbc, files);
             }
 
             if (!navigation.querySelector('a[href="/uds_programming"]')) {
@@ -7827,6 +8890,8 @@
         'page-diagnostics' : init_diagnostics,
         'page-logger' : init_logger,
         'page-analyzer' : init_analyzer,
+        'page-dbc' : init_dbc,
+        'page-xcp' : init_xcp,
         'page-isotp' : init_diagnostics_transport,
         'page-uds-programming' : init_uds_programming
     };

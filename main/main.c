@@ -44,6 +44,7 @@
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
 #include "isotp_service.h"
+#include "xcp_service.h"
 #include "time_service.h"
 #include "storage_sd_benchmark.h"
 
@@ -666,6 +667,24 @@ static void startup_task(
         );
     }
 
+    const xcp_service_config_t xcp_config = {
+        .queue_depth = 32U,
+        .transmit_timeout_ms = 20U,
+    };
+
+    const esp_err_t xcp_result =
+        xcp_service_start(
+            &xcp_config
+        );
+
+    if (xcp_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "XCP service unavailable: %s",
+            esp_err_to_name(xcp_result)
+        );
+    }
+
     const can_monitor_service_config_t
         can_monitor_config = {
 
@@ -713,7 +732,41 @@ static void startup_task(
             esp_err_to_name(result)
         );
 
-        bool can_monitor_stopped = true;
+        bool can_consumers_stopped = true;
+
+        if (xcp_service_is_running()) {
+            const esp_err_t xcp_stop_result =
+                xcp_service_stop();
+
+            if ((xcp_stop_result != ESP_OK) &&
+                (xcp_stop_result != ESP_ERR_INVALID_STATE)) {
+
+                can_consumers_stopped = false;
+
+                ESP_LOGW(
+                    TAG,
+                    "Failed to stop XCP after startup error: %s",
+                    esp_err_to_name(xcp_stop_result)
+                );
+            }
+        }
+
+        if (isotp_service_is_running()) {
+            const esp_err_t isotp_stop_result =
+                isotp_service_stop();
+
+            if ((isotp_stop_result != ESP_OK) &&
+                (isotp_stop_result != ESP_ERR_INVALID_STATE)) {
+
+                can_consumers_stopped = false;
+
+                ESP_LOGW(
+                    TAG,
+                    "Failed to stop ISO-TP after startup error: %s",
+                    esp_err_to_name(isotp_stop_result)
+                );
+            }
+        }
 
         if (can_monitor_service_is_running()) {
             const esp_err_t monitor_result =
@@ -722,7 +775,7 @@ static void startup_task(
             if ((monitor_result != ESP_OK) &&
                 (monitor_result != ESP_ERR_INVALID_STATE)) {
 
-                can_monitor_stopped = false;
+                can_consumers_stopped = false;
 
                 ESP_LOGW(
                     TAG,
@@ -769,7 +822,7 @@ static void startup_task(
         }
 
         if (can_sources_stopped &&
-            can_monitor_stopped &&
+            can_consumers_stopped &&
             can_router_is_running()) {
 
             const esp_err_t router_result =

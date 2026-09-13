@@ -3053,6 +3053,46 @@ body:where(.page-isotp) {
     white-space: nowrap;
 }
 
+:where(body.page-xcp) #xcp-status {
+    margin-left: auto;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+:where(body.page-xcp) #xcp-status.open {
+    border-color: #276554;
+    background: #13302a;
+    color: #73dfbb;
+}
+
+:where(body.page-xcp) #xcp-status.error,
+:where(body.page-xcp) #xcp-message.error,
+:where(body.page-xcp) #xcp-byte-count.error {
+    color: var(--danger);
+}
+
+:where(body.page-xcp) #xcp-capabilities {
+    margin-bottom: 8px;
+    color: var(--text);
+    font: 13px/1.6 "Cascadia Mono", Consolas, monospace;
+}
+
+:where(body.page-xcp) #xcp-decoded {
+    margin-bottom: 8px;
+    color: var(--muted);
+    line-height: 1.55;
+}
+
+:where(body.page-xcp) #xcp-message {
+    color: var(--muted);
+    line-height: 1.55;
+}
+
 :where(body.page-isotp) #isotp-status.live,
 :where(body.page-isotp) #isotp-status.open {
     border-color: #276554;
@@ -3895,6 +3935,164 @@ button:disabled, .button:disabled {
 .button-danger, .danger-button {
     color: var(--danger);
     border-color: #6d353d;
+}
+
+/* DBC Explorer */
+.dbc-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+}
+
+.dbc-sidebar {
+    position: sticky;
+    top: 58px;
+    display: grid;
+    gap: 10px;
+    max-height: calc(100vh - 76px);
+    overflow: auto;
+}
+
+.dbc-sidebar h2:not(:first-child) {
+    margin-top: 10px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.dbc-sd-loader {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 6px;
+}
+
+.dbc-sd-loader select {
+    min-width: 0;
+}
+
+.dbc-workspace {
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+}
+
+.dbc-message-list {
+    display: grid;
+    gap: 6px;
+    max-height: 45vh;
+    overflow: auto;
+}
+
+.dbc-message-entry {
+    display: grid;
+    gap: 3px;
+    width: 100%;
+    padding: 9px 10px;
+    text-align: left;
+}
+
+.dbc-message-entry span {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+}
+
+.dbc-message-entry.active {
+    border-color: var(--accent);
+    background: rgba(61, 133, 245, 0.12);
+}
+
+.dbc-value-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 10px;
+}
+
+.dbc-value {
+    display: grid;
+    gap: 5px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-alt, rgba(255, 255, 255, 0.02));
+}
+
+.dbc-value span {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.dbc-value b {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 18px;
+}
+
+.dbc-value.invalid {
+    border-color: var(--danger);
+}
+
+.dbc-value.invalid b {
+    color: var(--danger);
+}
+
+.dbc-sparkline {
+    display: block;
+    width: 100%;
+    height: 52px;
+    border-top: 1px solid var(--border);
+}
+
+.dbc-history-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.dbc-history-controls label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.dbc-history-controls select,
+.dbc-history-controls button {
+    width: auto;
+}
+
+.dbc-browser .table-wrapper {
+    max-height: 42vh;
+    overflow: auto;
+}
+
+.page-dbc pre {
+    min-height: 64px;
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+    .dbc-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .dbc-sidebar {
+        position: static;
+        max-height: none;
+    }
+
+    .dbc-sd-loader {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .dbc-sd-loader select {
+        grid-column: 1 / -1;
+    }
 }
 input[type="checkbox"] {
     accent-color: var(--accent);
