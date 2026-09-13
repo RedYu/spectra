@@ -4594,6 +4594,11 @@ button:disabled, .button:disabled {
     background: var(--accent);
 }
 
+.dbc-bit-legend i.described {
+    border-color: rgba(217, 174, 74, .5);
+    background: rgba(217, 174, 74, .16);
+}
+
 .dbc-bit-legend i.unused {
     border-style: dashed;
     background: repeating-linear-gradient(
@@ -4644,6 +4649,12 @@ button:disabled, .button:disabled {
     border-color: var(--accent);
     background: var(--accent);
     color: #fff;
+}
+
+.dbc-bit-byte span.described {
+    border-color: rgba(217, 174, 74, .42);
+    background: rgba(217, 174, 74, .12);
+    color: #e7cf91;
 }
 
 .dbc-bit-byte span.unused {

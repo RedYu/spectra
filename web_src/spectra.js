@@ -9045,20 +9045,40 @@
             element('dbc-sd-open').disabled = true;
 
             try {
-                const query = new URLSearchParams({
-                    volume : 'sd',
-                    path : '/dbc',
-                    offset : '0',
-                    limit : '128'
-                });
-                const response = await fetch(`/api/files?${query}`, {cache : 'no-store'});
-                const result = await response.json();
+                const files = [];
+                let offset = 0;
+                let hasMore = false;
 
-                if (!response.ok)
-                    throw new Error(result.message || `HTTP ${response.status}`);
+                do {
+                    const query = new URLSearchParams({
+                        volume : 'sd',
+                        path : '/dbc',
+                        offset : String(offset),
+                        limit : '32'
+                    });
+                    const response = await fetch(
+                        `/api/files?${query}`,
+                        {cache : 'no-store'}
+                    );
+                    const result = await response.json();
 
-                const files = result.entries.filter(entry =>
-                    entry.type === 'file' && /\.dbc$/i.test(entry.name));
+                    if (!response.ok)
+                        throw new Error(result.message || `HTTP ${response.status}`);
+                    if (!Array.isArray(result.entries))
+                        throw new Error('Invalid SD file-list response.');
+
+                    files.push(...result.entries.filter(entry =>
+                        entry.type === 'file' && /\.dbc$/i.test(entry.name)));
+                    offset += result.entries.length;
+                    hasMore = result.has_more === true;
+                } while (hasMore && (offset <= 1024));
+
+                files.sort((left, right) =>
+                    left.name.localeCompare(
+                        right.name,
+                        undefined,
+                        {sensitivity : 'base'}
+                    ));
                 selector.innerHTML = '<option value="">Choose a DBC file</option>';
 
                 for (const file of files) {
