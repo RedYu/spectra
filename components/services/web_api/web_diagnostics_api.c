@@ -25,6 +25,7 @@
 #include "logging_service.h"
 #include "network_service.h"
 #include "storage_sd_benchmark.h"
+#include "storage_sd_service.h"
 #include "web_api_common.h"
 #include "web_can_stream_service.h"
 
@@ -659,6 +660,12 @@ static bool web_diagnostics_api_add_storage_benchmark(
             "available",
             available
         ) != NULL);
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            benchmark,
+            "running",
+            storage_sd_benchmark_is_running()
+        ) != NULL);
     ADD_BENCHMARK_NUMBER("status", status);
     ADD_BENCHMARK_NUMBER("tested_bytes", result.tested_bytes);
     ADD_BENCHMARK_NUMBER("block_size", result.block_size);
@@ -917,6 +924,72 @@ static esp_err_t web_diagnostics_api_get_handler(
     return result;
 }
 
+static esp_err_t web_diagnostics_api_start_sd_benchmark_handler(
+    httpd_req_t *request
+)
+{
+    if (request == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    storage_sd_state_t storage_state =
+        STORAGE_SD_STATE_UNAVAILABLE;
+
+    if ((storage_sd_service_get_state(&storage_state) != ESP_OK) ||
+        (storage_state != STORAGE_SD_STATE_MOUNTED)) {
+
+        return web_api_send_message(
+            request,
+            "409 Conflict",
+            false,
+            "SD card is not mounted"
+        );
+    }
+
+    if (can_logger_service_is_recording()) {
+        return web_api_send_message(
+            request,
+            "409 Conflict",
+            false,
+            "Stop CAN recording before starting the SD benchmark"
+        );
+    }
+
+    const esp_err_t result =
+        storage_sd_benchmark_start_async();
+
+    if (result == ESP_ERR_INVALID_STATE) {
+        return web_api_send_message(
+            request,
+            "409 Conflict",
+            false,
+            "SD benchmark is already running"
+        );
+    }
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to start SD benchmark: %s",
+            esp_err_to_name(result)
+        );
+
+        return web_api_send_message(
+            request,
+            "500 Internal Server Error",
+            false,
+            "Failed to start SD benchmark"
+        );
+    }
+
+    return web_api_send_message(
+        request,
+        "202 Accepted",
+        true,
+        "SD benchmark started"
+    );
+}
+
 esp_err_t web_diagnostics_api_register(
     httpd_handle_t server
 )
@@ -933,7 +1006,15 @@ esp_err_t web_diagnostics_api_register(
         .user_ctx = NULL,
     };
 
-    const esp_err_t result =
+    static const httpd_uri_t diagnostics_sd_benchmark_post_uri = {
+        .uri = "/api/diagnostics/sd-benchmark",
+        .method = HTTP_POST,
+        .handler =
+            web_diagnostics_api_start_sd_benchmark_handler,
+        .user_ctx = NULL,
+    };
+
+    esp_err_t result =
         httpd_register_uri_handler(
             server,
             &diagnostics_get_uri
@@ -943,6 +1024,23 @@ esp_err_t web_diagnostics_api_register(
         ESP_LOGE(
             TAG,
             "Failed to register GET /api/diagnostics: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    result =
+        httpd_register_uri_handler(
+            server,
+            &diagnostics_sd_benchmark_post_uri
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to register POST "
+            "/api/diagnostics/sd-benchmark: %s",
             esp_err_to_name(result)
         );
     }

@@ -57,6 +57,7 @@ Clients should primarily use the HTTP status for control flow and treat
 |---|---|---|
 | `GET` | `/api/system` | System identity, runtime, memory, storage, and reset state |
 | `GET` | `/api/diagnostics` | Heap, CAN pipeline, WebSocket, and logger diagnostics |
+| `POST` | `/api/diagnostics/sd-benchmark` | Start an asynchronous SD-card benchmark |
 | `POST` | `/api/system/restart` | Schedule a graceful restart |
 | `GET` | `/api/power` | PMIC, charger, rail, interrupt, and battery state |
 | `GET` | `/api/network` | Wi-Fi, USB RNDIS, DNS, and mDNS state |
@@ -162,6 +163,19 @@ The page can also reset its browser-local chart history. Resetting records the
 current cumulative counters as new baselines, so later error and queue-drop
 deltas contain only changes observed after the reset. Counters on the device
 are not changed.
+
+### `POST /api/diagnostics/sd-benchmark`
+
+Starts the default SD-card benchmark in a dedicated worker task and returns
+`202 Accepted` immediately. The test writes, synchronizes, reads, and verifies
+a temporary 8 MiB file using 16 KiB blocks, also measures raw-sector reads,
+and removes the temporary file after completion. The latest result and the
+current `running` state are exposed through `GET /api/diagnostics`.
+
+The request returns `409 Conflict` when another benchmark is already running
+or CAN recording is active. Running the test can temporarily reduce SD-card
+and display responsiveness, so it should be used as an explicit diagnostic
+operation rather than periodic monitoring.
 
 The browser health calculation evaluates application-task stack reserves at
 the normal warning and critical thresholds. FreeRTOS infrastructure tasks

@@ -1997,6 +1997,17 @@ body:where(.page-test) {
     gap: 12px;
     margin-bottom: 14px;
 }
+.diagnostics-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.diagnostics-card-actions button {
+    width: auto;
+    min-height: 28px;
+    padding: 4px 9px;
+    font-size: 11px;
+}
 .diagnostics-card h2 {
     margin: 0;
     font-size: 15px;

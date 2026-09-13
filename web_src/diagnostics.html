@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Device Diagnostics · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=35">
-    <script src="spectra.js?v=35" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=36">
+    <script src="spectra.js?v=36" defer></script>
 </head>
 <body class="page-diagnostics">
     <header class="spectra-header">
@@ -40,7 +40,7 @@
             <article class="diagnostics-card"><header><h2>Memory</h2><span id="diagnostics-memory-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
                 <dt>Internal free</dt><dd id="diagnostics-internal-free">—</dd><dt>Internal largest block</dt><dd id="diagnostics-internal-largest">—</dd><dt>DMA free</dt><dd id="diagnostics-dma-free">—</dd><dt>DMA largest block</dt><dd id="diagnostics-dma-largest">—</dd><dt>PSRAM free</dt><dd id="diagnostics-psram-free">—</dd><dt>PSRAM largest block</dt><dd id="diagnostics-psram-largest">—</dd>
             </dl></article>
-            <article class="diagnostics-card"><header><h2>Storage &amp; time</h2><span id="diagnostics-storage-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
+            <article class="diagnostics-card"><header><h2>Storage &amp; time</h2><div class="diagnostics-card-actions"><button id="diagnostics-sd-benchmark" type="button" disabled>Run benchmark</button><span id="diagnostics-storage-state" class="diagnostics-badge">—</span></div></header><dl class="diagnostics-values">
                 <dt>SD card</dt><dd id="diagnostics-sd-mounted">—</dd><dt>Filesystem</dt><dd id="diagnostics-sd-filesystem">—</dd><dt>SD free</dt><dd id="diagnostics-sd-free">—</dd><dt>SD used</dt><dd id="diagnostics-sd-used">—</dd><dt>Write speed</dt><dd id="diagnostics-sd-write">—</dd><dt>Read / raw read</dt><dd id="diagnostics-sd-read">—</dd><dt>Worst write block</dt><dd id="diagnostics-sd-write-latency">—</dd><dt>Last sync</dt><dd id="diagnostics-sd-sync">—</dd><dt>Local time</dt><dd id="diagnostics-time">—</dd><dt>Synchronization</dt><dd id="diagnostics-time-sync">—</dd>
             </dl></article>
             <article class="diagnostics-card"><header><h2>CAN pipeline</h2><span id="diagnostics-can-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
@@ -74,7 +74,7 @@
                 </table>
             </div>
         </section>
-        <p class="diagnostics-note">Values update every 10 seconds. Charts retain 10 minutes in this browser only. Reset history clears the charts and uses the current counters as new delta baselines. Task enumeration runs only while this page is open; SD speeds are cached from the last startup benchmark.</p>
+        <p class="diagnostics-note">Values update every 10 seconds. Charts retain 10 minutes in this browser only. Reset history clears the charts and uses the current counters as new delta baselines. The SD benchmark uses a temporary 8 MiB file and is unavailable during CAN recording. Task enumeration runs only while this page is open.</p>
     </main>
 </body>
 </html>

@@ -97,6 +97,23 @@ esp_err_t storage_sd_benchmark_run(
 );
 
 /**
+ * @brief Start the default SD-card benchmark in a worker task.
+ *
+ * The request returns immediately. The benchmark uses the default file and
+ * block sizes and removes its temporary file after completion.
+ *
+ * @return ESP_OK when the worker was started, ESP_ERR_INVALID_STATE when a
+ * benchmark is already running, ESP_ERR_NO_MEM when the task cannot be
+ * created, otherwise an ESP-IDF error code.
+ */
+esp_err_t storage_sd_benchmark_start_async(void);
+
+/**
+ * @brief Check whether an SD-card benchmark is currently running.
+ */
+bool storage_sd_benchmark_is_running(void);
+
+/**
  * @brief Copy the most recently completed SD-card benchmark result.
  *
  * Reading the cached result does not access the SD card and does not start a

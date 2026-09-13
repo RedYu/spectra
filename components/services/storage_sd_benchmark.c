@@ -5,6 +5,7 @@
 
 #include "storage_sd_benchmark.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,13 +14,19 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
+#include "app_task_priorities.h"
 #include "storage_sd_service.h"
 #include "sd_card_driver.h"
 
 #define STORAGE_SD_BENCHMARK_SECTOR_SIZE (512U)
 
 #define STORAGE_SD_BENCHMARK_MAX_BLOCK_SIZE (64U * 1024U)
+
+#define STORAGE_SD_BENCHMARK_TASK_STACK_SIZE (4096U)
+
+#define STORAGE_SD_BENCHMARK_FILE_PATH "/sd-benchmark.bin"
 
 static const char *TAG = "storage_sd_benchmark";
 
@@ -33,6 +40,20 @@ static storage_sd_benchmark_result_t
 
 static esp_err_t s_last_status =
     ESP_ERR_NOT_FOUND;
+
+static atomic_bool s_running = false;
+
+static esp_err_t storage_sd_benchmark_run_internal(
+    const storage_sd_benchmark_config_t *config,
+    storage_sd_benchmark_result_t *result
+);
+
+static void storage_sd_benchmark_task(void *context);
+
+static void storage_sd_benchmark_store_result(
+    const storage_sd_benchmark_result_t *result,
+    esp_err_t status
+);
 
 static esp_err_t storage_sd_benchmark_raw_read(
     uint8_t *buffer,
@@ -104,6 +125,33 @@ static bool storage_sd_benchmark_config_valid(
 }
 
 esp_err_t storage_sd_benchmark_run(
+    const storage_sd_benchmark_config_t *config,
+    storage_sd_benchmark_result_t *result
+)
+{
+    bool expected = false;
+
+    if (!atomic_compare_exchange_strong(
+            &s_running,
+            &expected,
+            true
+        )) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const esp_err_t operation_result =
+        storage_sd_benchmark_run_internal(
+            config,
+            result
+        );
+
+    atomic_store(&s_running, false);
+
+    return operation_result;
+}
+
+static esp_err_t storage_sd_benchmark_run_internal(
     const storage_sd_benchmark_config_t *config,
     storage_sd_benchmark_result_t *result
 )
@@ -360,15 +408,93 @@ cleanup:
         );
     }
 
+    storage_sd_benchmark_store_result(
+        result,
+        operation_result
+    );
+
+    return operation_result;
+}
+
+esp_err_t storage_sd_benchmark_start_async(void)
+{
+    bool expected = false;
+
+    if (!atomic_compare_exchange_strong(
+            &s_running,
+            &expected,
+            true
+        )) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const BaseType_t task_result =
+        xTaskCreate(
+            storage_sd_benchmark_task,
+            "sd_benchmark",
+            STORAGE_SD_BENCHMARK_TASK_STACK_SIZE,
+            NULL,
+            APP_TASK_PRIORITY_STORAGE,
+            NULL
+        );
+
+    if (task_result != pdPASS) {
+        atomic_store(&s_running, false);
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
+}
+
+bool storage_sd_benchmark_is_running(void)
+{
+    return atomic_load(&s_running);
+}
+
+static void storage_sd_benchmark_task(void *context)
+{
+    (void)context;
+
+    const storage_sd_benchmark_config_t config = {
+        .file_path = STORAGE_SD_BENCHMARK_FILE_PATH,
+        .file_size = STORAGE_SD_BENCHMARK_DEFAULT_FILE_SIZE,
+        .block_size = STORAGE_SD_BENCHMARK_DEFAULT_BLOCK_SIZE,
+        .remove_file_after_test = true,
+    };
+    storage_sd_benchmark_result_t result = {0};
+
+    const esp_err_t operation_result =
+        storage_sd_benchmark_run_internal(
+            &config,
+            &result
+        );
+
+    storage_sd_benchmark_store_result(
+        &result,
+        operation_result
+    );
+
+    atomic_store(&s_running, false);
+    vTaskDelete(NULL);
+}
+
+static void storage_sd_benchmark_store_result(
+    const storage_sd_benchmark_result_t *result,
+    esp_err_t status
+)
+{
+    if (result == NULL) {
+        return;
+    }
+
     portENTER_CRITICAL(&s_result_lock);
 
     s_last_result = *result;
-    s_last_status = operation_result;
+    s_last_status = status;
     s_result_available = true;
 
     portEXIT_CRITICAL(&s_result_lock);
-
-    return operation_result;
 }
 
 esp_err_t storage_sd_benchmark_get_last_result(

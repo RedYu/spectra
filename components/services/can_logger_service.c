@@ -25,6 +25,7 @@
 
 #include "app_task_priorities.h"
 #include "can_router.h"
+#include "storage_sd_benchmark.h"
 #include "storage_sd_service.h"
 #include "can_logger_binary_format.h"
 #include "time_service.h"
@@ -1518,6 +1519,10 @@ esp_err_t can_logger_service_start_recording(
 {
     if (!can_logger_config_valid(config)) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    if (storage_sd_benchmark_is_running()) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t result = can_logger_lock();

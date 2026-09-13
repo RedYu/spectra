@@ -3486,6 +3486,7 @@
         const HISTORY_POINT_COUNT = 60;
 
         let refreshTimer = null;
+        let benchmarkPollTimer = null;
         let refreshInProgress = false;
         let previousSample = null;
         let previousCounters = null;
@@ -4113,6 +4114,33 @@
             );
         }
 
+        function updateBenchmarkControl(system, diagnostics) {
+            const button = element("diagnostics-sd-benchmark");
+            const benchmark = diagnostics.storage_benchmark ?? {};
+            const consumers = diagnostics.consumers ?? {};
+            const loggerState = Number(consumers.logger_state ?? 0);
+            const loggerBusy = [1, 2, 3].includes(loggerState);
+            const running = Boolean(benchmark.running);
+
+            button.textContent = running
+                ? "Benchmark running…"
+                : "Run benchmark";
+            button.disabled =
+                !system.sd_card_mounted ||
+                loggerBusy ||
+                running;
+
+            if (!system.sd_card_mounted) {
+                button.title = "SD card is not mounted";
+            } else if (loggerBusy) {
+                button.title = "Stop CAN recording before running the benchmark";
+            } else if (running) {
+                button.title = "SD-card benchmark is running";
+            } else {
+                button.title = "Measure SD-card write and read performance";
+            }
+        }
+
         function updateCan(diagnostics) {
             const can = diagnostics.can ?? {};
             const consumers = diagnostics.consumers ?? {};
@@ -4394,6 +4422,7 @@
                 ]);
 
                 updateSystem(system, diagnostics);
+                updateBenchmarkControl(system, diagnostics);
                 updateCan(diagnostics);
                 updateHistory(system, diagnostics);
                 updateQueues(diagnostics);
@@ -4548,18 +4577,77 @@
             }
         }
 
+        async function startSdBenchmark() {
+            const button = element("diagnostics-sd-benchmark");
+
+            button.disabled = true;
+            button.textContent = "Starting…";
+
+            try {
+                const response = await fetch(
+                    "/api/diagnostics/sd-benchmark",
+                    {
+                        method: "POST",
+                        cache: "no-store"
+                    }
+                );
+                const result = await response.json();
+
+                if (!response.ok || !result.success) {
+                    throw new Error(
+                        result.message || "Failed to start SD benchmark"
+                    );
+                }
+
+                button.textContent = "Benchmark running…";
+                setText("diagnostics-updated", "SD benchmark started");
+
+                await refresh();
+
+                if (benchmarkPollTimer === null) {
+                    benchmarkPollTimer = window.setInterval(
+                        async () => {
+                            await refresh();
+
+                            if (!latestDiagnostics?.storage_benchmark?.running) {
+                                clearInterval(benchmarkPollTimer);
+                                benchmarkPollTimer = null;
+                            }
+                        },
+                        2000
+                    );
+                }
+            } catch (error) {
+                setText("diagnostics-updated", error.message);
+
+                if ((latestSystem !== null) &&
+                    (latestDiagnostics !== null)) {
+
+                    updateBenchmarkControl(
+                        latestSystem,
+                        latestDiagnostics
+                    );
+                }
+            }
+        }
+
         element("diagnostics-refresh").addEventListener("click", refresh);
         element("diagnostics-reset-history").addEventListener(
             "click",
             resetHistory
         );
         element("diagnostics-download").addEventListener("click", downloadReport);
+        element("diagnostics-sd-benchmark").addEventListener(
+            "click",
+            startSdBenchmark
+        );
 
         refresh();
         refreshTimer = setInterval(refresh, REFRESH_INTERVAL_MS);
 
         window.addEventListener("pagehide", () => {
             clearInterval(refreshTimer);
+            clearInterval(benchmarkPollTimer);
         });
     }
 
