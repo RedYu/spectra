@@ -3490,6 +3490,7 @@
         let previousSample = null;
         let previousCounters = null;
         let previousQueueDrops = null;
+        let previousHealthCounters = null;
 
         const history = {
             cpu: [],
@@ -3773,6 +3774,208 @@
 
             if (state !== "") {
                 badge.classList.add(state);
+            }
+        }
+
+        function updateHealth(system, diagnostics) {
+            const heap = diagnostics.heap ?? {};
+            const can = diagnostics.can ?? {};
+            const consumers = diagnostics.consumers ?? {};
+            const queues = Array.isArray(diagnostics.queues)
+                ? diagnostics.queues
+                : [];
+            const tasks = Array.isArray(diagnostics.tasks)
+                ? diagnostics.tasks
+                : [];
+            const reasons = [];
+            let severity = 0;
+
+            const addReason = (level, text) => {
+                severity = Math.max(severity, level);
+                reasons.push(text);
+            };
+
+            const cpu = Number(system.cpu_usage ?? 0);
+            const internalFree = Number(
+                heap.internal_free ?? system.free_heap ?? 0
+            );
+            const internalLargest = Number(
+                heap.internal_largest_block ?? 0
+            );
+
+            if (cpu >= 90) {
+                addReason(2, `CPU load is critical at ${cpu.toFixed(1)}%`);
+            } else if (cpu >= 75) {
+                addReason(1, `CPU load is high at ${cpu.toFixed(1)}%`);
+            }
+
+            if (internalFree < (16 * 1024)) {
+                addReason(2, `Internal heap is critically low: ${formatBytes(internalFree)}`);
+            } else if (internalFree < (32 * 1024)) {
+                addReason(1, `Internal heap is low: ${formatBytes(internalFree)}`);
+            }
+
+            if (internalLargest < (6 * 1024)) {
+                addReason(2, `Largest internal block is only ${formatBytes(internalLargest)}`);
+            } else if (internalLargest < (12 * 1024)) {
+                addReason(1, `Largest internal block is low: ${formatBytes(internalLargest)}`);
+            }
+
+            if (!can.primary_running) {
+                addReason(1, "Primary CAN service is stopped");
+            } else if (!can.primary_driver_available) {
+                addReason(1, "Primary CAN driver state is unavailable");
+            } else if (Number(can.primary_driver_state) === 4) {
+                addReason(2, "Primary CAN is bus-off");
+            } else if (Number(can.primary_driver_state) >= 2) {
+                addReason(1, "Primary CAN controller is not error-active");
+            }
+
+            if (!can.secondary_running) {
+                addReason(1, "Secondary CAN service is stopped");
+            } else if (!can.secondary_driver_available) {
+                addReason(1, "Secondary CAN driver state is unavailable");
+            } else if (Number(can.secondary_driver_state) === 4) {
+                addReason(2, "Secondary CAN is bus-off");
+            } else if (Number(can.secondary_driver_state) >= 2) {
+                addReason(1, "Secondary CAN controller is not error-active");
+            }
+
+            for (const queue of queues) {
+                if (!queue.available) {
+                    continue;
+                }
+
+                const usage = queueUsage(queue.current, queue.capacity);
+
+                if (usage >= 90) {
+                    addReason(
+                        2,
+                        `${queue.owner} queue is ${usage.toFixed(1)}% full`
+                    );
+                } else if (usage >= 75) {
+                    addReason(
+                        1,
+                        `${queue.owner} queue is ${usage.toFixed(1)}% full`
+                    );
+                }
+            }
+
+            let lowestStack = null;
+
+            for (const task of tasks) {
+                const reserve = Number(task.stack_high_watermark_bytes ?? 0);
+
+                if ((reserve > 0) &&
+                    ((lowestStack === null) ||
+                     (reserve < lowestStack.reserve))) {
+
+                    lowestStack = {
+                        name: task.name ?? "Unknown task",
+                        reserve
+                    };
+                }
+            }
+
+            if ((lowestStack !== null) &&
+                (lowestStack.reserve < 1024)) {
+
+                addReason(
+                    2,
+                    `${lowestStack.name} stack reserve is ${formatBytes(lowestStack.reserve)}`
+                );
+            } else if ((lowestStack !== null) &&
+                       (lowestStack.reserve < 2048)) {
+
+                addReason(
+                    1,
+                    `${lowestStack.name} stack reserve is ${formatBytes(lowestStack.reserve)}`
+                );
+            }
+
+            if (!system.sd_card_mounted) {
+                addReason(1, "SD card is not mounted");
+            }
+
+            if ((Number(system.uptime_sec ?? 0) >= 60) &&
+                !system.time?.synchronized) {
+
+                addReason(1, "System time is not synchronized");
+            }
+
+            const healthCounters = {
+                router: can.router_dropped_events,
+                monitor: can.monitor_dropped_events,
+                primary_rx: can.primary_dropped_rx_frames,
+                primary_tx: can.primary_dropped_confirmations,
+                primary_bus: can.primary_bus_errors,
+                primary_ack: can.primary_ack_errors,
+                secondary_rx: can.secondary_dropped_rx_frames,
+                secondary_overflow: can.secondary_rx_overflows,
+                secondary_tef: can.secondary_tef_overflows,
+                secondary_receive: can.secondary_receive_errors,
+                secondary_tx_event: can.secondary_tx_event_errors,
+                secondary_bus: can.secondary_bus_errors,
+                secondary_tx: can.secondary_tx_failures,
+                logger_drop: consumers.logger_dropped_events,
+                logger_write: consumers.logger_write_failures,
+                logger_sync: consumers.logger_sync_failures
+            };
+
+            queues
+                .filter(queue => [
+                    "Network",
+                    "Buzzer",
+                    "ISO-TP",
+                    "System logging"
+                ].includes(queue.owner))
+                .forEach((queue, index) => {
+                    healthCounters[`auxiliary_queue_${index}`] = queue.dropped;
+                });
+
+            if (previousHealthCounters !== null) {
+                const newErrors = Object.entries(healthCounters).reduce(
+                    (total, [name, value]) =>
+                        total +
+                        (counterDelta(
+                            value,
+                            previousHealthCounters[name]
+                        ) ?? 0),
+                    0
+                );
+
+                if (newErrors > 0) {
+                    addReason(
+                        2,
+                        `${formatCount(newErrors)} new error or dropped event counters`
+                    );
+                }
+            }
+
+            previousHealthCounters = healthCounters;
+
+            const health = element("diagnostics-health");
+            const reasonList = element("diagnostics-health-reasons");
+            const states = ["Healthy", "Warning", "Critical"];
+            const classes = ["", "warning", "error"];
+
+            health.classList.remove("warning", "error");
+
+            if (classes[severity] !== "") {
+                health.classList.add(classes[severity]);
+            }
+
+            setText("diagnostics-health-state", states[severity]);
+            reasonList.replaceChildren();
+
+            const visibleReasons = reasons.length > 0
+                ? reasons
+                : ["No active problems detected."];
+
+            for (const reason of visibleReasons) {
+                const item = document.createElement("li");
+                item.textContent = reason;
+                reasonList.append(item);
             }
         }
 
@@ -4150,6 +4353,7 @@
                 updateHistory(system, diagnostics);
                 updateQueues(diagnostics);
                 updateTasks(diagnostics);
+                updateHealth(system, diagnostics);
                 setText("status", "Connected");
                 setText("diagnostics-updated", `Updated ${new Date().toLocaleTimeString()}`);
                 element("status").classList.remove("warning");
