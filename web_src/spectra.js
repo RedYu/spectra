@@ -3870,6 +3870,7 @@
                 "ipc0",
                 "ipc1",
                 "esp_timer",
+                "sys_evt",
                 "Tmr Svc"
             ]);
             let lowestApplicationStack = null;
