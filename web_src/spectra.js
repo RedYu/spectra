@@ -3489,6 +3489,7 @@
         let refreshInProgress = false;
         let previousSample = null;
         let previousCounters = null;
+        let previousQueueDrops = null;
 
         const history = {
             cpu: [],
@@ -4014,6 +4015,114 @@
             }
         }
 
+        function updateQueues(diagnostics) {
+            const body = element("diagnostics-queue-list");
+            const queues = Array.isArray(diagnostics.queues)
+                ? diagnostics.queues
+                : [];
+            const currentDrops = {};
+            let highestUsage = 0;
+            let newDrops = 0;
+
+            body.replaceChildren();
+
+            if (queues.length === 0) {
+                const row = document.createElement("tr");
+                const cell = document.createElement("td");
+                cell.colSpan = 7;
+                cell.textContent = "Queue statistics are unavailable.";
+                row.append(cell);
+                body.append(row);
+                setBadge("diagnostics-queue-state", "Unavailable", "warning");
+                return;
+            }
+
+            for (const queue of queues) {
+                const row = document.createElement("tr");
+                const capacity = Number(queue.capacity ?? 0);
+                const current = Number(queue.current ?? 0);
+                const usage = capacity > 0
+                    ? Math.min(100, Math.max(0, (current * 100) / capacity))
+                    : 0;
+                const key = `${queue.owner}:${queue.name}`;
+                const droppedDelta = previousQueueDrops === null
+                    ? null
+                    : counterDelta(queue.dropped, previousQueueDrops[key]);
+
+                currentDrops[key] = Number(queue.dropped ?? 0);
+                highestUsage = Math.max(highestUsage, usage);
+                newDrops += droppedDelta ?? 0;
+
+                const values = [
+                    queue.owner ?? "—",
+                    queue.name ?? "—"
+                ];
+
+                for (const value of values) {
+                    const cell = document.createElement("td");
+                    cell.textContent = value;
+                    row.append(cell);
+                }
+
+                const usageCell = document.createElement("td");
+                const usageContainer = document.createElement("span");
+                const meter = document.createElement("span");
+                const meterValue = document.createElement("span");
+                const usageText = document.createElement("span");
+
+                usageContainer.className = "diagnostics-queue-usage";
+                meter.className = "diagnostics-queue-meter";
+
+                if (usage >= 90) {
+                    meter.classList.add("error");
+                } else if (usage >= 75) {
+                    meter.classList.add("warning");
+                }
+
+                meterValue.style.width = `${usage}%`;
+                usageText.textContent = queue.available
+                    ? `${usage.toFixed(1)}%`
+                    : "Unavailable";
+                meter.append(meterValue);
+                usageContainer.append(meter, usageText);
+                usageCell.append(usageContainer);
+                row.append(usageCell);
+
+                const numericValues = [
+                    queue.available ? formatCount(current) : "—",
+                    queue.available ? formatCount(queue.peak) : "—",
+                    queue.available ? formatCount(capacity) : "—",
+                    queue.available
+                        ? `${formatCount(queue.dropped)} ${formatDelta(droppedDelta)}`
+                        : "—"
+                ];
+
+                for (const value of numericValues) {
+                    const cell = document.createElement("td");
+                    cell.textContent = value;
+                    row.append(cell);
+                }
+
+                body.append(row);
+            }
+
+            previousQueueDrops = currentDrops;
+
+            if (newDrops > 0) {
+                setBadge(
+                    "diagnostics-queue-state",
+                    `+${formatCount(newDrops)} dropped`,
+                    "error"
+                );
+            } else if (highestUsage >= 90) {
+                setBadge("diagnostics-queue-state", "Critical", "error");
+            } else if (highestUsage >= 75) {
+                setBadge("diagnostics-queue-state", "High", "warning");
+            } else {
+                setBadge("diagnostics-queue-state", "Healthy", "ok");
+            }
+        }
+
         async function refresh() {
             if (refreshInProgress) {
                 return;
@@ -4039,6 +4148,7 @@
                 updateSystem(system, diagnostics);
                 updateCan(diagnostics);
                 updateHistory(system, diagnostics);
+                updateQueues(diagnostics);
                 updateTasks(diagnostics);
                 setText("status", "Connected");
                 setText("diagnostics-updated", `Updated ${new Date().toLocaleTimeString()}`);

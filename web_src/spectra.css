@@ -2050,6 +2050,65 @@ body:where(.page-test) {
 .diagnostics-tasks {
     margin-top: 14px;
 }
+.diagnostics-queues {
+    margin-top: 14px;
+}
+.diagnostics-queue-table-wrapper {
+    overflow-x: auto;
+    border: 1px solid #27313d;
+    border-radius: 8px;
+}
+.diagnostics-queue-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.diagnostics-queue-table th,
+.diagnostics-queue-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #27313d;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+}
+.diagnostics-queue-table th {
+    color: #8f9ba8;
+    background: #18212b;
+    font-weight: 500;
+}
+.diagnostics-queue-table th:first-child,
+.diagnostics-queue-table th:nth-child(2),
+.diagnostics-queue-table td:first-child,
+.diagnostics-queue-table td:nth-child(2) {
+    text-align: left;
+}
+.diagnostics-queue-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+.diagnostics-queue-usage {
+    display: inline-grid;
+    grid-template-columns: 82px 48px;
+    align-items: center;
+    gap: 8px;
+}
+.diagnostics-queue-meter {
+    height: 5px;
+    overflow: hidden;
+    background: #26313e;
+    border-radius: 999px;
+}
+.diagnostics-queue-meter span {
+    display: block;
+    height: 100%;
+    background: #31c48d;
+    border-radius: inherit;
+}
+.diagnostics-queue-meter.warning span {
+    background: #f6b73c;
+}
+.diagnostics-queue-meter.error span {
+    background: #ef6461;
+}
 .diagnostics-task-table-wrapper {
     max-height: 430px;
     overflow: auto;

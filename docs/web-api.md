@@ -129,7 +129,7 @@ task tracing or reset any counters.
 curl http://spectra.device/api/diagnostics
 ```
 
-The response contains three objects:
+The response contains these objects:
 
 - `heap`: current, minimum, and largest-block values for internal, DMA-capable,
   and PSRAM heaps;
@@ -137,13 +137,17 @@ The response contains three objects:
   hardware RX overflow/drop counters, and CAN controller errors;
 - `consumers`: WebSocket stream and CAN logger state, queue usage, drops,
   failures, and output totals;
+- `queues`: normalized snapshots of the instrumented CAN router, monitor,
+  TWAI RX, TWAI transmit, WebSocket, and logger queues or hardware slots;
 - `storage_benchmark`: cached write, filesystem-read, raw-read, latency, and
   synchronization measurements from the last SD benchmark;
 - `tasks`: FreeRTOS task name, state, core affinity, priority, accumulated CPU
   share, and minimum remaining stack.
 
 Queue values are exposed as separate `*_current`, `*_peak`, and `*_capacity`
-members. Error and drop counters are cumulative for the current service run.
+members and in the normalized `queues` array. Each normalized entry contains
+`name`, `owner`, `available`, `current`, `peak`, `capacity`, and `dropped`.
+Error and drop counters are cumulative for the current service run.
 Task enumeration is performed only when the endpoint is requested and can
 briefly suspend task scheduling, so clients should not poll it rapidly.
 

@@ -420,6 +420,154 @@ static bool web_diagnostics_api_add_consumers(
     return true;
 }
 
+static bool web_diagnostics_api_add_queue(
+    cJSON *queues,
+    const char *name,
+    const char *owner,
+    bool available,
+    uint32_t current,
+    uint32_t peak,
+    uint32_t capacity,
+    uint64_t dropped
+)
+{
+    cJSON *queue = cJSON_CreateObject();
+
+    if (queue == NULL) {
+        return false;
+    }
+
+    const bool valid =
+        (cJSON_AddStringToObject(queue, "name", name) != NULL) &&
+        (cJSON_AddStringToObject(queue, "owner", owner) != NULL) &&
+        (cJSON_AddBoolToObject(queue, "available", available) != NULL) &&
+        (cJSON_AddNumberToObject(queue, "current", current) != NULL) &&
+        (cJSON_AddNumberToObject(queue, "peak", peak) != NULL) &&
+        (cJSON_AddNumberToObject(queue, "capacity", capacity) != NULL) &&
+        (cJSON_AddNumberToObject(queue, "dropped", (double)dropped) != NULL);
+
+    if (!valid ||
+        !cJSON_AddItemToArray(queues, queue)) {
+
+        cJSON_Delete(queue);
+        return false;
+    }
+
+    return true;
+}
+
+static bool web_diagnostics_api_add_queues(
+    cJSON *response
+)
+{
+    can_router_statistics_t router = {0};
+    can_monitor_service_statistics_t monitor = {0};
+    can_service_queue_statistics_t primary = {0};
+    can_twai_driver_info_t primary_driver = {0};
+    web_can_stream_service_statistics_t stream = {0};
+    can_logger_info_t logger = {0};
+
+    const bool router_available =
+        can_router_get_statistics(&router) == ESP_OK;
+    const bool monitor_available =
+        can_monitor_service_get_statistics(&monitor) == ESP_OK;
+    const bool primary_available =
+        can_service_get_queue_statistics(&primary) == ESP_OK;
+    const bool primary_driver_available =
+        can_service_get_info(&primary_driver) == ESP_OK;
+    const bool stream_available =
+        web_can_stream_service_get_statistics(&stream) == ESP_OK;
+    const bool logger_available =
+        can_logger_service_get_info(&logger) == ESP_OK;
+
+    cJSON *queues = cJSON_CreateArray();
+
+    if (queues == NULL) {
+        return false;
+    }
+
+    const bool valid =
+        web_diagnostics_api_add_queue(
+            queues,
+            "Event input",
+            "CAN router",
+            router_available,
+            router.queue_current,
+            router.queue_peak,
+            router.queue_capacity,
+            router.dropped_events
+        ) &&
+        web_diagnostics_api_add_queue(
+            queues,
+            "Monitor input",
+            "CAN monitor",
+            monitor_available,
+            monitor.input_queue_current,
+            monitor.input_queue_peak,
+            monitor.input_queue_capacity,
+            monitor.dropped_input_events
+        ) &&
+        web_diagnostics_api_add_queue(
+            queues,
+            "RX frames",
+            "Primary TWAI",
+            primary_driver_available,
+            primary_driver.rx_queue_current,
+            primary_driver.rx_queue_peak,
+            primary_driver.rx_queue_capacity,
+            primary_driver.dropped_rx_frames
+        ) &&
+        web_diagnostics_api_add_queue(
+            queues,
+            "TX confirmations",
+            "Primary CAN service",
+            primary_available,
+            primary.confirmation_queue_current,
+            primary.confirmation_queue_peak,
+            primary.confirmation_queue_capacity,
+            primary.dropped_tx_confirmations
+        ) &&
+        web_diagnostics_api_add_queue(
+            queues,
+            "TX hardware slots",
+            "Primary TWAI",
+            primary_driver_available,
+            primary_driver.tx_slots_used,
+            primary_driver.tx_slots_peak,
+            primary_driver.tx_slots_capacity,
+            0U
+        ) &&
+        web_diagnostics_api_add_queue(
+            queues,
+            "Stream events",
+            "CAN WebSocket",
+            stream_available,
+            stream.queue_current,
+            stream.queue_peak,
+            stream.queue_capacity,
+            stream.dropped_events
+        ) &&
+        web_diagnostics_api_add_queue(
+            queues,
+            "Recording events",
+            "CAN logger",
+            logger_available,
+            (uint32_t)logger.statistics.queue_current,
+            (uint32_t)logger.statistics.queue_peak,
+            (uint32_t)logger.statistics.queue_capacity,
+            logger.statistics.dropped_events
+        );
+
+    if (!valid ||
+        !cJSON_AddItemToObject(response, "queues", queues)) {
+
+        cJSON_Delete(queues);
+        return false;
+    }
+
+    return true;
+}
+
 static bool web_diagnostics_api_add_storage_benchmark(
     cJSON *response
 )
@@ -687,6 +835,7 @@ static esp_err_t web_diagnostics_api_get_handler(
         web_diagnostics_api_add_heap(response) &&
         web_diagnostics_api_add_can(response) &&
         web_diagnostics_api_add_consumers(response) &&
+        web_diagnostics_api_add_queues(response) &&
         web_diagnostics_api_add_storage_benchmark(response) &&
         web_diagnostics_api_add_tasks(response);
 

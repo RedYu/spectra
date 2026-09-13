@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Device Diagnostics · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=29">
-    <script src="spectra.js?v=29" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=30">
+    <script src="spectra.js?v=30" defer></script>
 </head>
 <body class="page-diagnostics">
     <header class="spectra-header">
@@ -51,6 +51,15 @@
             <article class="diagnostics-card"><header><h2>Device</h2><span id="diagnostics-network-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
                 <dt>Device</dt><dd id="diagnostics-device">—</dd><dt>Firmware</dt><dd id="diagnostics-firmware">—</dd><dt>Chip</dt><dd id="diagnostics-chip">—</dd><dt>CPU frequency</dt><dd id="diagnostics-frequency">—</dd><dt>Internet</dt><dd id="diagnostics-internet">—</dd><dt>OTA</dt><dd id="diagnostics-ota">—</dd>
             </dl></article>
+        </section>
+        <section class="diagnostics-card diagnostics-queues">
+            <header><h2>Service queues</h2><span id="diagnostics-queue-state" class="diagnostics-badge">—</span></header>
+            <div class="diagnostics-queue-table-wrapper">
+                <table class="diagnostics-queue-table">
+                    <thead><tr><th>Service</th><th>Queue</th><th>Usage</th><th>Current</th><th>Peak</th><th>Capacity</th><th>Dropped</th></tr></thead>
+                    <tbody id="diagnostics-queue-list"><tr><td colspan="7">Loading queues…</td></tr></tbody>
+                </table>
+            </div>
         </section>
         <section class="diagnostics-card diagnostics-tasks">
             <header><h2>FreeRTOS tasks</h2><span id="diagnostics-task-count" class="diagnostics-badge">—</span></header>
