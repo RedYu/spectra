@@ -20,6 +20,10 @@
 #include "can_monitor_service.h"
 #include "can_router.h"
 #include "can_service.h"
+#include "buzzer_service.h"
+#include "isotp_service.h"
+#include "logging_service.h"
+#include "network_service.h"
 #include "storage_sd_benchmark.h"
 #include "web_api_common.h"
 #include "web_can_stream_service.h"
@@ -466,6 +470,10 @@ static bool web_diagnostics_api_add_queues(
     can_twai_driver_info_t primary_driver = {0};
     web_can_stream_service_statistics_t stream = {0};
     can_logger_info_t logger = {0};
+    network_service_queue_statistics_t network = {0};
+    buzzer_service_queue_statistics_t buzzer = {0};
+    isotp_service_queue_statistics_t isotp = {0};
+    logging_service_queue_statistics_t logging = {0};
 
     const bool router_available =
         can_router_get_statistics(&router) == ESP_OK;
@@ -479,6 +487,14 @@ static bool web_diagnostics_api_add_queues(
         web_can_stream_service_get_statistics(&stream) == ESP_OK;
     const bool logger_available =
         can_logger_service_get_info(&logger) == ESP_OK;
+    const bool network_available =
+        network_service_get_queue_statistics(&network) == ESP_OK;
+    const bool buzzer_available =
+        buzzer_service_get_queue_statistics(&buzzer) == ESP_OK;
+    const bool isotp_available =
+        isotp_service_get_queue_statistics(&isotp) == ESP_OK;
+    const bool logging_available =
+        logging_service_get_queue_statistics(&logging) == ESP_OK;
 
     cJSON *queues = cJSON_CreateArray();
 
@@ -556,6 +572,46 @@ static bool web_diagnostics_api_add_queues(
             (uint32_t)logger.statistics.queue_peak,
             (uint32_t)logger.statistics.queue_capacity,
             logger.statistics.dropped_events
+        ) &&
+        web_diagnostics_api_add_queue(
+            queues,
+            "Maintenance commands",
+            "Network",
+            network_available,
+            network.current,
+            network.peak,
+            network.capacity,
+            network.dropped
+        ) &&
+        web_diagnostics_api_add_queue(
+            queues,
+            "Signals",
+            "Buzzer",
+            buzzer_available,
+            buzzer.current,
+            buzzer.peak,
+            buzzer.capacity,
+            buzzer.dropped
+        ) &&
+        web_diagnostics_api_add_queue(
+            queues,
+            "Commands and CAN events",
+            "ISO-TP",
+            isotp_available,
+            isotp.current,
+            isotp.peak,
+            isotp.capacity,
+            isotp.dropped
+        ) &&
+        web_diagnostics_api_add_queue(
+            queues,
+            "File messages",
+            "System logging",
+            logging_available,
+            (uint32_t)logging.current,
+            (uint32_t)logging.peak,
+            (uint32_t)logging.capacity,
+            logging.dropped
         );
 
     if (!valid ||

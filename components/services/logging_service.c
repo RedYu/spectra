@@ -89,6 +89,9 @@ static atomic_uint_fast32_t s_dropped_messages =
 static atomic_uint_fast32_t s_pending_dropped_messages =
     ATOMIC_VAR_INIT(0U);
 
+static atomic_uint_fast32_t s_queue_peak =
+    ATOMIC_VAR_INIT(0U);
+
 typedef struct
 {
     char warning_tags[
@@ -141,6 +144,8 @@ static esp_err_t logging_service_send_command(
 );
 
 static void logging_service_record_dropped_message(void);
+
+static void logging_service_update_queue_peak(void);
 
 static esp_err_t logging_service_write_message(
     FILE *file,
@@ -248,6 +253,8 @@ esp_err_t logging_service_init(void)
         &s_pending_dropped_messages,
         0U
     );
+
+    atomic_store(&s_queue_peak, 0U);
 
     const BaseType_t task_result = xTaskCreate(
         logging_service_task,
@@ -497,6 +504,31 @@ esp_err_t logging_service_get_dropped_count(
     return ESP_OK;
 }
 
+esp_err_t logging_service_get_queue_statistics(
+    logging_service_queue_statistics_t *statistics
+)
+{
+    if (statistics == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!atomic_load(&s_initialized) ||
+        (s_log_queue == NULL)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    statistics->current =
+        uxQueueMessagesWaiting(s_log_queue);
+    statistics->peak =
+        (size_t)atomic_load(&s_queue_peak);
+    statistics->capacity = LOGGING_QUEUE_LENGTH;
+    statistics->dropped =
+        (uint64_t)atomic_load(&s_dropped_messages);
+
+    return ESP_OK;
+}
+
 esp_err_t logging_service_reset_dropped_count(void)
 {
     if (!atomic_load(&s_initialized)) {
@@ -695,6 +727,8 @@ static esp_err_t logging_service_send_command(
         return ESP_FAIL;
     }
 
+    logging_service_update_queue_peak();
+
     if (xSemaphoreTake(
             s_command_done,
             portMAX_DELAY
@@ -812,6 +846,8 @@ static int logging_service_vprintf(
                 ) != pdTRUE) {
 
                 logging_service_record_dropped_message();
+            } else {
+                logging_service_update_queue_peak();
             }
         }
     }
@@ -1006,6 +1042,25 @@ static void logging_service_record_dropped_message(void)
         &s_pending_dropped_messages,
         1U
     );
+}
+
+static void logging_service_update_queue_peak(void)
+{
+    if (s_log_queue == NULL) {
+        return;
+    }
+
+    const uint_fast32_t current =
+        (uint_fast32_t)uxQueueMessagesWaiting(s_log_queue);
+    uint_fast32_t peak = atomic_load(&s_queue_peak);
+
+    while ((current > peak) &&
+           !atomic_compare_exchange_weak(
+               &s_queue_peak,
+               &peak,
+               current
+           )) {
+    }
 }
 
 static esp_err_t logging_service_write_message(
@@ -1342,4 +1397,3 @@ static void logging_service_restore_tag_levels(void)
         default_level
     );
 }
-

@@ -45,6 +45,12 @@ static TaskHandle_t s_maintenance_task = NULL;
 static atomic_bool s_maintenance_enabled =
     ATOMIC_VAR_INIT(false);
 
+static atomic_uint_fast32_t s_command_queue_peak =
+    ATOMIC_VAR_INIT(0U);
+
+static atomic_uint_fast64_t s_dropped_commands =
+    ATOMIC_VAR_INIT(0U);
+
 static SemaphoreHandle_t s_maintenance_mutex = NULL;
 
 static bool s_netif_initialized = false;
@@ -292,6 +298,9 @@ static esp_err_t network_service_start_maintenance(void)
         return ESP_ERR_NO_MEM;
     }
 
+    atomic_store(&s_command_queue_peak, 0U);
+    atomic_store(&s_dropped_commands, 0U);
+
     const BaseType_t task_result =
         xTaskCreate(
             network_service_maintenance_task,
@@ -439,6 +448,30 @@ esp_err_t network_service_get_dns_info(
     return ESP_OK;
 }
 
+esp_err_t network_service_get_queue_statistics(
+    network_service_queue_statistics_t *statistics
+)
+{
+    if (statistics == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_command_queue == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    statistics->current =
+        (uint32_t)uxQueueMessagesWaiting(s_command_queue);
+    statistics->peak =
+        (uint32_t)atomic_load(&s_command_queue_peak);
+    statistics->capacity =
+        NETWORK_SERVICE_COMMAND_QUEUE_LENGTH;
+    statistics->dropped =
+        (uint64_t)atomic_load(&s_dropped_commands);
+
+    return ESP_OK;
+}
+
 esp_err_t network_service_request_mdns_refresh(void)
 {
     if (!s_netif_initialized ||
@@ -476,6 +509,19 @@ esp_err_t network_service_request_mdns_refresh(void)
         );
 
         return ESP_OK;
+    }
+
+    const uint_fast32_t current =
+        (uint_fast32_t)uxQueueMessagesWaiting(s_command_queue);
+    uint_fast32_t peak =
+        atomic_load(&s_command_queue_peak);
+
+    while ((current > peak) &&
+           !atomic_compare_exchange_weak(
+               &s_command_queue_peak,
+               &peak,
+               current
+           )) {
     }
 
     return ESP_OK;

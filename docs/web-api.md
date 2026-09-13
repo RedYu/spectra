@@ -137,8 +137,9 @@ The response contains these objects:
   hardware RX overflow/drop counters, and CAN controller errors;
 - `consumers`: WebSocket stream and CAN logger state, queue usage, drops,
   failures, and output totals;
-- `queues`: normalized snapshots of the instrumented CAN router, monitor,
-  TWAI RX, TWAI transmit, WebSocket, and logger queues or hardware slots;
+- `queues`: normalized snapshots of the CAN router, CAN monitor, TWAI RX,
+  TWAI transmit, WebSocket, CAN logger, network maintenance, buzzer, ISO-TP,
+  and system logging queues or hardware slots;
 - `storage_benchmark`: cached write, filesystem-read, raw-read, latency, and
   synchronization measurements from the last SD benchmark;
 - `tasks`: FreeRTOS task name, state, core affinity, priority, accumulated CPU

@@ -6,6 +6,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -13,6 +14,15 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct
+{
+    size_t current;
+    size_t peak;
+    size_t capacity;
+    uint64_t dropped;
+
+} logging_service_queue_statistics_t;
 
 /**
  * @brief Initialize the logging service.
@@ -86,6 +96,13 @@ esp_err_t logging_service_get_file_enabled(
  */
 esp_err_t logging_service_get_dropped_count(
     uint32_t *count
+);
+
+/**
+ * @brief Get asynchronous file-log queue statistics.
+ */
+esp_err_t logging_service_get_queue_statistics(
+    logging_service_queue_statistics_t *statistics
 );
 
 /**

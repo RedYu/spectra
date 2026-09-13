@@ -6,6 +6,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 
@@ -33,6 +34,15 @@ typedef struct
     ];
 
 } network_service_dns_info_t;
+
+typedef struct
+{
+    uint32_t current;
+    uint32_t peak;
+    uint32_t capacity;
+    uint64_t dropped;
+
+} network_service_queue_statistics_t;
 
 /**
  * @brief Initialize the global network stack.
@@ -76,6 +86,13 @@ esp_err_t network_service_get_initialized(
  */
 esp_err_t network_service_get_dns_info(
     network_service_dns_info_t *info
+);
+
+/**
+ * @brief Get network-maintenance queue statistics.
+ */
+esp_err_t network_service_get_queue_statistics(
+    network_service_queue_statistics_t *statistics
 );
 
 /**

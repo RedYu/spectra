@@ -92,6 +92,15 @@ typedef struct
 
 } isotp_service_channel_info_t;
 
+typedef struct
+{
+    uint32_t current;
+    uint32_t peak;
+    uint32_t capacity;
+    uint64_t dropped;
+
+} isotp_service_queue_statistics_t;
+
 /**
  * @brief Start the ISO-TP transport service after the CAN router.
  */
@@ -108,6 +117,13 @@ esp_err_t isotp_service_stop(void);
  * @brief Check whether the ISO-TP transport service is running.
  */
 bool isotp_service_is_running(void);
+
+/**
+ * @brief Get ISO-TP command queue statistics.
+ */
+esp_err_t isotp_service_get_queue_statistics(
+    isotp_service_queue_statistics_t *statistics
+);
 
 /**
  * @brief Open one ISO-TP addressing channel.

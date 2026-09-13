@@ -56,6 +56,15 @@ typedef enum
 
 } buzzer_signal_t;
 
+typedef struct
+{
+    uint32_t current;
+    uint32_t peak;
+    uint32_t capacity;
+    uint64_t dropped;
+
+} buzzer_service_queue_statistics_t;
+
 /**
  * @brief Start the asynchronous buzzer service.
  *
@@ -138,6 +147,13 @@ esp_err_t buzzer_service_get_enabled(
  * @brief Check whether the buzzer service is running.
  */
 bool buzzer_service_is_running(void);
+
+/**
+ * @brief Get buzzer signal queue statistics.
+ */
+esp_err_t buzzer_service_get_queue_statistics(
+    buzzer_service_queue_statistics_t *statistics
+);
 
 /**
  * @brief Set the buzzer volume.

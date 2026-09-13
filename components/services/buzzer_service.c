@@ -114,6 +114,12 @@ static atomic_uint_fast8_t s_volume_percent =
         BUZZER_SERVICE_VOLUME_DEFAULT_PERCENT
     );
 
+static atomic_uint_fast32_t s_queue_peak =
+    ATOMIC_VAR_INIT(0U);
+
+static atomic_uint_fast64_t s_dropped_signals =
+    ATOMIC_VAR_INIT(0U);
+
 /*
  * Short UI feedback.
  */
@@ -540,6 +546,9 @@ esp_err_t buzzer_service_start(void)
         return ESP_ERR_NO_MEM;
     }
 
+    atomic_store(&s_queue_peak, 0U);
+    atomic_store(&s_dropped_signals, 0U);
+
     s_events =
         xEventGroupCreate();
 
@@ -710,7 +719,21 @@ esp_err_t buzzer_service_play(
             0U
         ) != pdTRUE) {
 
+        atomic_fetch_add(&s_dropped_signals, 1U);
+
         return ESP_ERR_TIMEOUT;
+    }
+
+    const uint_fast32_t current =
+        (uint_fast32_t)uxQueueMessagesWaiting(s_queue);
+    uint_fast32_t peak = atomic_load(&s_queue_peak);
+
+    while ((current > peak) &&
+           !atomic_compare_exchange_weak(
+               &s_queue_peak,
+               &peak,
+               current
+           )) {
     }
 
     return ESP_OK;
@@ -785,6 +808,31 @@ bool buzzer_service_is_running(void)
     return atomic_load(
         &s_running
     );
+}
+
+esp_err_t buzzer_service_get_queue_statistics(
+    buzzer_service_queue_statistics_t *statistics
+)
+{
+    if (statistics == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!atomic_load(&s_running) ||
+        (s_queue == NULL)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    statistics->current =
+        (uint32_t)uxQueueMessagesWaiting(s_queue);
+    statistics->peak =
+        (uint32_t)atomic_load(&s_queue_peak);
+    statistics->capacity = BUZZER_SERVICE_QUEUE_LENGTH;
+    statistics->dropped =
+        (uint64_t)atomic_load(&s_dropped_signals);
+
+    return ESP_OK;
 }
 
 esp_err_t buzzer_service_set_volume(

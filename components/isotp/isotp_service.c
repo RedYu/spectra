@@ -68,6 +68,13 @@ static uint32_t s_next_channel_id = 1U;
 static uint32_t s_transmit_timeout_ms =
     ISOTP_SERVICE_DEFAULT_TX_TIMEOUT_MS;
 static atomic_bool s_running = false;
+static uint32_t s_queue_capacity = 0U;
+static atomic_uint_fast32_t s_queue_peak =
+    ATOMIC_VAR_INIT(0U);
+static atomic_uint_fast64_t s_dropped_commands =
+    ATOMIC_VAR_INIT(0U);
+
+static void isotp_service_update_queue_peak(void);
 
 static bool isotp_service_channel_config_valid(
     const isotp_service_channel_config_t *config
@@ -167,6 +174,10 @@ esp_err_t isotp_service_start(
         s_lock = NULL;
         return ESP_ERR_NO_MEM;
     }
+
+    s_queue_capacity = queue_depth;
+    atomic_store(&s_queue_peak, 0U);
+    atomic_store(&s_dropped_commands, 0U);
 
     memset(
         s_channels,
@@ -273,6 +284,7 @@ esp_err_t isotp_service_stop(void)
     s_queue = NULL;
     s_lock = NULL;
     s_task = NULL;
+    s_queue_capacity = 0U;
 
     return ESP_OK;
 }
@@ -280,6 +292,31 @@ esp_err_t isotp_service_stop(void)
 bool isotp_service_is_running(void)
 {
     return atomic_load(&s_running);
+}
+
+esp_err_t isotp_service_get_queue_statistics(
+    isotp_service_queue_statistics_t *statistics
+)
+{
+    if (statistics == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!atomic_load(&s_running) ||
+        (s_queue == NULL)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    statistics->current =
+        (uint32_t)uxQueueMessagesWaiting(s_queue);
+    statistics->peak =
+        (uint32_t)atomic_load(&s_queue_peak);
+    statistics->capacity = s_queue_capacity;
+    statistics->dropped =
+        (uint64_t)atomic_load(&s_dropped_commands);
+
+    return ESP_OK;
 }
 
 esp_err_t isotp_service_open_channel(
@@ -471,9 +508,12 @@ esp_err_t isotp_service_send(
 
         channel->transmit_reserved = false;
         channel->requested_transmit_size = 0U;
+        atomic_fetch_add(&s_dropped_commands, 1U);
         xSemaphoreGive(s_lock);
         return ESP_ERR_TIMEOUT;
     }
+
+    isotp_service_update_queue_peak();
 
     xSemaphoreGive(s_lock);
 
@@ -596,11 +636,36 @@ static void isotp_service_router_callback(
         .can_event = *event,
     };
 
-    (void)xQueueSend(
-        s_queue,
-        &command,
-        0U
-    );
+    if (xQueueSend(
+            s_queue,
+            &command,
+            0U
+        ) != pdTRUE) {
+
+        atomic_fetch_add(&s_dropped_commands, 1U);
+        return;
+    }
+
+    isotp_service_update_queue_peak();
+}
+
+static void isotp_service_update_queue_peak(void)
+{
+    if (s_queue == NULL) {
+        return;
+    }
+
+    const uint_fast32_t current =
+        (uint_fast32_t)uxQueueMessagesWaiting(s_queue);
+    uint_fast32_t peak = atomic_load(&s_queue_peak);
+
+    while ((current > peak) &&
+           !atomic_compare_exchange_weak(
+               &s_queue_peak,
+               &peak,
+               current
+           )) {
+    }
 }
 
 static bool isotp_service_event_relevant(
