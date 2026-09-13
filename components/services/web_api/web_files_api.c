@@ -58,6 +58,10 @@
 #define WEB_FILE_QUERY_WORKSPACE_SIZE \
     (WEB_FILE_QUERY_MAX_LENGTH * 2U)
 
+#define WEB_FILE_ACTION_MAX_LENGTH       (24U)
+#define WEB_FILE_UPLOAD_BUFFER_SIZE      (16U * 1024U)
+#define WEB_FILE_UPLOAD_MAX_SIZE         (256U * 1024U * 1024U)
+
 static const char *TAG =
     "web_files_api";
 
@@ -685,6 +689,324 @@ static esp_err_t web_files_api_get_file_parameters(
     free(workspace);
 
     return result;
+}
+
+static esp_err_t web_files_api_get_query_value(
+    httpd_req_t *request,
+    const char *name,
+    char *value,
+    size_t value_size
+)
+{
+    if ((request == NULL) ||
+        (name == NULL) ||
+        (value == NULL) ||
+        (value_size == 0U)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t query_length =
+        httpd_req_get_url_query_len(request);
+
+    if ((query_length == 0U) ||
+        (query_length >= WEB_FILE_QUERY_MAX_LENGTH)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char *query =
+        web_files_api_alloc_psram(
+            WEB_FILE_QUERY_MAX_LENGTH
+        );
+
+    if (query == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t result =
+        httpd_req_get_url_query_str(
+            request,
+            query,
+            WEB_FILE_QUERY_MAX_LENGTH
+        );
+
+    if (result == ESP_OK) {
+        result = httpd_query_key_value(
+            query,
+            name,
+            value,
+            value_size
+        );
+    }
+
+    free(query);
+
+    return result;
+}
+
+static esp_err_t web_files_api_send_operation_result(
+    httpd_req_t *request,
+    esp_err_t result,
+    const char *success_message
+)
+{
+    if (result == ESP_OK) {
+        return web_api_send_message(
+            request,
+            "200 OK",
+            true,
+            success_message
+        );
+    }
+
+    const char *status =
+        result == ESP_ERR_INVALID_ARG
+            ? "400 Bad Request"
+            : result == ESP_ERR_NOT_FOUND
+                ? "404 Not Found"
+                : result == ESP_ERR_INVALID_STATE
+                    ? "409 Conflict"
+                    : result == ESP_ERR_TIMEOUT
+                        ? "503 Service Unavailable"
+                        : "500 Internal Server Error";
+
+    return web_api_send_message(
+        request,
+        status,
+        false,
+        esp_err_to_name(result)
+    );
+}
+
+static esp_err_t web_files_api_upload_sd_file(
+    httpd_req_t *request,
+    const char *path
+)
+{
+    if (request->content_len >
+        WEB_FILE_UPLOAD_MAX_SIZE) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    FILE *file = NULL;
+    esp_err_t result =
+        storage_sd_service_open(
+            path,
+            "wb",
+            &file
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    uint8_t *buffer =
+        web_files_api_alloc_psram(
+            WEB_FILE_UPLOAD_BUFFER_SIZE
+        );
+
+    if (buffer == NULL) {
+        (void)storage_sd_service_close(&file);
+        (void)storage_sd_service_remove(path);
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t remaining =
+        (size_t)request->content_len;
+
+    while ((result == ESP_OK) &&
+           (remaining > 0U)) {
+
+        const size_t requested =
+            remaining < WEB_FILE_UPLOAD_BUFFER_SIZE
+                ? remaining
+                : WEB_FILE_UPLOAD_BUFFER_SIZE;
+
+        const int received =
+            httpd_req_recv(
+                request,
+                (char *)buffer,
+                requested
+            );
+
+        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+
+        if (received <= 0) {
+            result = ESP_FAIL;
+            break;
+        }
+
+        size_t written = 0U;
+        result = storage_sd_service_write(
+            file,
+            buffer,
+            (size_t)received,
+            &written
+        );
+
+        if ((result == ESP_OK) &&
+            (written != (size_t)received)) {
+
+            result = ESP_FAIL;
+        }
+
+        remaining -= (size_t)received;
+    }
+
+    if (result == ESP_OK) {
+        result = storage_sd_service_sync(file);
+    }
+
+    const esp_err_t close_result =
+        storage_sd_service_close(&file);
+
+    free(buffer);
+
+    if ((result == ESP_OK) &&
+        (close_result != ESP_OK)) {
+
+        result = close_result;
+    }
+
+    if (result != ESP_OK) {
+        (void)storage_sd_service_remove(path);
+    }
+
+    return result;
+}
+
+static esp_err_t web_files_api_mutation_handler(
+    httpd_req_t *request
+)
+{
+    if (request == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char action[WEB_FILE_ACTION_MAX_LENGTH];
+    char volume[WEB_FILE_VOLUME_MAX_LENGTH];
+    char path[WEB_FILE_PATH_MAX_LENGTH];
+
+    esp_err_t result =
+        web_files_api_get_query_value(
+            request,
+            "action",
+            action,
+            sizeof(action)
+        );
+
+    if (result != ESP_OK) {
+        return web_api_send_message(
+            request,
+            "400 Bad Request",
+            false,
+            "Missing file operation"
+        );
+    }
+
+    result = web_files_api_get_file_parameters(
+        request,
+        volume,
+        sizeof(volume),
+        path,
+        sizeof(path)
+    );
+
+    if ((result != ESP_OK) ||
+        (strcmp(volume, "sd") != 0)) {
+
+        return web_api_send_message(
+            request,
+            "400 Bad Request",
+            false,
+            "Write operations require the SD volume"
+        );
+    }
+
+    if (strcmp(action, "mkdir") == 0) {
+        result = storage_sd_service_ensure_directory(path);
+        return web_files_api_send_operation_result(
+            request,
+            result,
+            "Folder created"
+        );
+    }
+
+    if (strcmp(action, "create") == 0) {
+        if (request->content_len != 0) {
+            result = ESP_ERR_INVALID_ARG;
+        } else {
+            FILE *file = NULL;
+            result = storage_sd_service_open(path, "wb", &file);
+
+            if (result == ESP_OK) {
+                result = storage_sd_service_close(&file);
+            }
+        }
+
+        return web_files_api_send_operation_result(
+            request,
+            result,
+            "File created"
+        );
+    }
+
+    if (strcmp(action, "upload") == 0) {
+        result = web_files_api_upload_sd_file(request, path);
+        return web_files_api_send_operation_result(
+            request,
+            result,
+            "File uploaded"
+        );
+    }
+
+    if (strcmp(action, "delete") == 0) {
+        result = strcmp(path, "/") == 0
+            ? ESP_ERR_INVALID_ARG
+            : storage_sd_service_remove(path);
+
+        return web_files_api_send_operation_result(
+            request,
+            result,
+            "Entry deleted"
+        );
+    }
+
+    if (strcmp(action, "format") == 0) {
+        char confirmation[16];
+
+        result = web_files_api_get_query_value(
+            request,
+            "confirm",
+            confirmation,
+            sizeof(confirmation)
+        );
+
+        if ((result != ESP_OK) ||
+            (strcmp(confirmation, "FORMAT") != 0)) {
+
+            result = ESP_ERR_INVALID_ARG;
+        } else {
+            result = storage_sd_service_format();
+        }
+
+        return web_files_api_send_operation_result(
+            request,
+            result,
+            "SD card formatted"
+        );
+    }
+
+    return web_api_send_message(
+        request,
+        "400 Bad Request",
+        false,
+        "Unknown file operation"
+    );
 }
 
 
@@ -2383,6 +2705,14 @@ esp_err_t web_files_api_register(
         .user_ctx = NULL,
     };
 
+    static const httpd_uri_t mutation_uri = {
+        .uri = "/api/files",
+        .method = HTTP_POST,
+        .handler =
+            web_files_api_mutation_handler,
+        .user_ctx = NULL,
+    };
+
     esp_err_t result =
         httpd_register_uri_handler(
             server,
@@ -2409,6 +2739,21 @@ esp_err_t web_files_api_register(
         ESP_LOGE(
             TAG,
             "Failed to register GET /api/files/download: %s",
+            esp_err_to_name(result)
+        );
+        return result;
+    }
+
+    result =
+        httpd_register_uri_handler(
+            server,
+            &mutation_uri
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to register POST /api/files: %s",
             esp_err_to_name(result)
         );
     }

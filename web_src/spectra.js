@@ -2351,6 +2351,16 @@
 
         const pageStatusElement = document.getElementById("page-status");
 
+        const createFolderButton = document.getElementById("create-folder");
+        const createFileButton = document.getElementById("create-file");
+        const uploadInput = document.getElementById("upload-files");
+        const uploadProgress = document.getElementById("upload-progress");
+        const formatButton = document.getElementById("format-sd");
+        const viewer = document.getElementById("file-viewer");
+        const viewerTitle = document.getElementById("file-viewer-title");
+        const viewerMeta = document.getElementById("file-viewer-meta");
+        const viewerContent = document.getElementById("file-viewer-content");
+
         let currentPath = "/";
         let currentOffset = 0;
         let hasMore = false;
@@ -2404,6 +2414,66 @@
             return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
         }
 
+        function isTextFile(name) {
+            return /\.(txt|log|json|cfg|conf|ini|csv|asc|dbc|md|xml|yaml|yml|html|css|js|c|h)$/i.test(name);
+        }
+
+        async function fileOperation(action, path, body = null, confirmation = null) {
+            const query = new URLSearchParams({action, volume : "sd", path});
+
+            if (confirmation !== null)
+                query.set("confirm", confirmation);
+
+            const response = await fetch(`/api/files?${query.toString()}`, {
+                method : "POST",
+                body,
+                cache : "no-store"
+            });
+            let result = {};
+
+            try {
+                result = await response.json();
+            } catch (_) {
+                /* The HTTP status remains useful for malformed responses. */
+            }
+
+            if (!response.ok)
+                throw new Error(result.message || `HTTP ${response.status}`);
+
+            return result;
+        }
+
+        async function refreshAfterMutation(message) {
+            currentOffset = 0;
+            await loadFiles();
+            loadDirectoryTree();
+            setStatus(message);
+        }
+
+        async function previewFile(volume, path, name, size) {
+            if ((size > 1024 * 1024) &&
+                !window.confirm("This file is larger than 1 MiB. Show only its first 128 KiB?")) {
+
+                return;
+            }
+
+            const query = new URLSearchParams({volume, path});
+            const response = await fetch(`/api/files/download?${query.toString()}`, {
+                headers : {Range : "bytes=0-131071"},
+                cache : "no-store"
+            });
+
+            if (!response.ok && (response.status !== 206))
+                throw new Error(`HTTP ${response.status}`);
+
+            viewerTitle.textContent = name;
+            viewerMeta.textContent = size > 131072
+                ? `Showing first 128 KiB of ${formatSize(size)}`
+                : formatSize(size);
+            viewerContent.textContent = await response.text();
+            viewer.showModal();
+        }
+
         function updateNavigation() {
             backButton.disabled = currentPath === "/";
 
@@ -2428,64 +2498,85 @@
 
         function createFileRow(volume, entry) {
             const row = document.createElement("tr");
-
             const nameCell = document.createElement("td");
-
             const typeCell = document.createElement("td");
-
             const sizeCell = document.createElement("td");
-
             const actionCell = document.createElement("td");
-
             const nameIcon = document.createElement("span");
-
             nameIcon.className = "file-entry-icon";
             nameIcon.textContent = entry.type === "directory" ? "▸" : "·";
-
             const name = document.createElement("span");
-
             name.className = "file-entry-name";
             name.textContent = entry.name;
-
             nameCell.append(nameIcon, name);
-
             nameCell.title = entry.name;
-
             typeCell.textContent = entry.type === "directory" ? "Folder" : "File";
-
             sizeCell.textContent = entry.type === "directory" ? "-" : formatSize(entry.size);
-
-            const button = document.createElement("button");
-
-            button.type = "button";
+            const actions = document.createElement("div");
+            actions.className = "file-row-actions";
+            const entryPath = joinPath(currentPath, entry.name);
 
             if (entry.type === "directory") {
                 row.classList.add("directory-row");
-                button.textContent = "Open";
+                const openButton = document.createElement("button");
+                openButton.type = "button";
+                openButton.textContent = "Open";
 
-                button.addEventListener("click", () => {
-                    currentPath = joinPath(currentPath, entry.name);
-
+                openButton.addEventListener("click", () => {
+                    currentPath = entryPath;
                     currentOffset = 0;
                     hasMore = false;
-
                     loadFiles();
                 });
 
+                actions.appendChild(openButton);
+
             } else {
-                button.textContent = "Download";
+                if (isTextFile(entry.name)) {
+                    const viewButton = document.createElement("button");
+                    viewButton.type = "button";
+                    viewButton.textContent = "View";
+                    viewButton.addEventListener("click", async () => {
+                        try {
+                            await previewFile(volume, entryPath, entry.name, entry.size);
+                        } catch (error) {
+                            setStatus(`Preview failed: ${error.message}`, true);
+                        }
+                    });
+                    actions.appendChild(viewButton);
+                }
 
-                button.addEventListener("click", () => {
-                    const filePath = joinPath(currentPath, entry.name);
-
-                    const query = new URLSearchParams({volume, path : filePath});
+                const downloadButton = document.createElement("button");
+                downloadButton.type = "button";
+                downloadButton.textContent = "Download";
+                downloadButton.addEventListener("click", () => {
+                    const query = new URLSearchParams({volume, path : entryPath});
 
                     window.location.href = `/api/files/download?` + query.toString();
                 });
+                actions.appendChild(downloadButton);
             }
 
-            actionCell.appendChild(button);
+            if (volume === "sd") {
+                const deleteButton = document.createElement("button");
+                deleteButton.type = "button";
+                deleteButton.className = "file-delete-action";
+                deleteButton.textContent = "Delete";
+                deleteButton.addEventListener("click", async () => {
+                    if (!window.confirm(`Delete ${entry.type} “${entry.name}”?`))
+                        return;
 
+                    try {
+                        await fileOperation("delete", entryPath);
+                        await refreshAfterMutation(`${entry.name} deleted`);
+                    } catch (error) {
+                        setStatus(`Delete failed: ${error.message}`, true);
+                    }
+                });
+                actions.appendChild(deleteButton);
+            }
+
+            actionCell.appendChild(actions);
             row.append(nameCell, typeCell, sizeCell, actionCell);
 
             return row;
@@ -2802,12 +2893,104 @@
 
             loadFiles();
             loadDirectoryTree();
+            updateWriteControls();
         });
 
         refreshTreeButton.addEventListener("click", loadDirectoryTree);
 
+        function updateWriteControls() {
+            const writable = volumeSelector.value === "sd";
+            createFolderButton.disabled = !writable;
+            createFileButton.disabled = !writable;
+            uploadInput.disabled = !writable;
+            formatButton.disabled = !writable;
+        }
+
+        createFolderButton.addEventListener("click", async () => {
+            const name = window.prompt("New folder name:");
+
+            if (!name)
+                return;
+
+            try {
+                await fileOperation("mkdir", joinPath(currentPath, name));
+                await refreshAfterMutation(`Folder ${name} created`);
+            } catch (error) {
+                setStatus(`Create folder failed: ${error.message}`, true);
+            }
+        });
+
+        createFileButton.addEventListener("click", async () => {
+            const name = window.prompt("New file name:");
+
+            if (!name)
+                return;
+
+            try {
+                await fileOperation("create", joinPath(currentPath, name));
+                await refreshAfterMutation(`File ${name} created`);
+            } catch (error) {
+                setStatus(`Create file failed: ${error.message}`, true);
+            }
+        });
+
+        uploadInput.addEventListener("change", async () => {
+            const files = [...uploadInput.files];
+
+            for (let index = 0; index < files.length; ++index) {
+                const file = files[index];
+                uploadProgress.textContent =
+                    `Uploading ${index + 1}/${files.length}: ${file.name}`;
+
+                try {
+                    await fileOperation("upload", joinPath(currentPath, file.name), file);
+                } catch (error) {
+                    setStatus(`Upload failed: ${error.message}`, true);
+                    uploadInput.value = "";
+                    uploadProgress.textContent = "";
+                    return;
+                }
+            }
+
+            uploadInput.value = "";
+            uploadProgress.textContent = "";
+            await refreshAfterMutation(
+                `${files.length} file${files.length === 1 ? "" : "s"} uploaded`
+            );
+        });
+
+        formatButton.addEventListener("click", async () => {
+            const confirmation = window.prompt(
+                "Formatting permanently deletes the entire SD card. Type FORMAT to continue:"
+            );
+
+            if (confirmation !== "FORMAT")
+                return;
+
+            formatButton.disabled = true;
+            setStatus("Formatting SD card...");
+
+            try {
+                await fileOperation("format", "/", null, confirmation);
+                currentPath = "/";
+                await refreshAfterMutation(
+                    "SD card formatted and Spectra folders recreated"
+                );
+            } catch (error) {
+                setStatus(`Format failed: ${error.message}`, true);
+            } finally {
+                updateWriteControls();
+            }
+        });
+
+        document.getElementById("file-viewer-close").addEventListener(
+            "click",
+            () => viewer.close()
+        );
+
         loadFiles();
         loadDirectoryTree();
+        updateWriteControls();
     
     }
 
@@ -8996,41 +9179,38 @@
         refreshSdFiles();
     }
 
-    function init_isotp_navigation() {
+    function init_navigation() {
+        const entries = [
+            ['/', 'Overview'],
+            ['/can_logger', 'CAN Logger'],
+            ['/can_analyzer', 'CAN Analyzer'],
+            ['/dbc', 'DBC'],
+            ['/isotp', 'ISO-TP'],
+            ['/xcp', 'XCP'],
+            ['/uds_programming', 'Programming'],
+            ['/files', 'Files'],
+            ['/settings', 'Settings'],
+            ['/diagnostics', 'Diagnostics']
+        ];
+        const currentPath = location.pathname.replace(/\/$/, '') || '/';
+
         for (const navigation of document.querySelectorAll('.spectra-nav')) {
-            const files = navigation.querySelector('a[href="/files"]');
-
-            if (!navigation.querySelector('a[href="/isotp"]')) {
+            const links = entries.map(([path, label]) => {
                 const link = document.createElement('a');
-                link.href = '/isotp';
-                link.textContent = 'ISO-TP';
-                navigation.insertBefore(link, files);
-            }
+                link.href = path;
+                link.textContent = label;
 
-            if (!navigation.querySelector('a[href="/xcp"]')) {
-                const xcp = document.createElement('a');
-                xcp.href = '/xcp';
-                xcp.textContent = 'XCP';
-                navigation.insertBefore(xcp, files);
-            }
+                if (currentPath === path)
+                    link.setAttribute('aria-current', 'page');
 
-            if (!navigation.querySelector('a[href="/dbc"]')) {
-                const dbc = document.createElement('a');
-                dbc.href = '/dbc';
-                dbc.textContent = 'DBC';
-                navigation.insertBefore(dbc, files);
-            }
+                return link;
+            });
 
-            if (!navigation.querySelector('a[href="/uds_programming"]')) {
-                const programming = document.createElement('a');
-                programming.href = '/uds_programming';
-                programming.textContent = 'Programming';
-                navigation.insertBefore(programming, files);
-            }
+            navigation.replaceChildren(...links);
         }
     }
 
-    init_isotp_navigation();
+    init_navigation();
 
     const pages = {
         'page-overview' : init_overview,

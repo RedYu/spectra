@@ -1840,6 +1840,97 @@ esp_err_t storage_sd_service_mount(void)
     return ESP_OK;
 }
 
+static void storage_sd_service_restore_file_logging(void)
+{
+    app_settings_t settings;
+
+    if ((settings_model_get(&settings) == ESP_OK) &&
+        settings.logging.sd_enabled) {
+
+        const esp_err_t result =
+            logging_service_enable_file();
+
+        if (result != ESP_OK) {
+            ESP_LOGE(
+                TAG,
+                "Failed to restore SD logging: %s",
+                esp_err_to_name(result)
+            );
+        }
+    }
+}
+
+esp_err_t storage_sd_service_format(void)
+{
+    const esp_err_t logging_result =
+        logging_service_disable_file();
+
+    if (logging_result != ESP_OK) {
+        return logging_result;
+    }
+
+    const esp_err_t lock_result =
+        storage_sd_service_mutex_lock();
+
+    if (lock_result != ESP_OK) {
+        storage_sd_service_restore_file_logging();
+        return lock_result;
+    }
+
+    if (!s_started || s_shutdown_requested ||
+        (s_state != STORAGE_SD_STATE_MOUNTED) ||
+        (s_open_file_count != 0U)) {
+
+        storage_sd_service_mutex_unlock();
+        storage_sd_service_restore_file_logging();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const esp_err_t result =
+        sd_card_driver_format();
+
+    storage_sd_service_set_state_locked(
+        result == ESP_OK
+            ? STORAGE_SD_STATE_MOUNTED
+            : STORAGE_SD_STATE_ERROR
+    );
+
+    storage_sd_service_mutex_unlock();
+
+    if (result != ESP_OK) {
+        storage_sd_service_restore_file_logging();
+        return result;
+    }
+
+    static const char *directories[] = {
+        "/config",
+        "/dbc",
+        "/firmwares",
+        "/logs",
+        "/logs/can",
+        "/logs/firmware",
+    };
+
+    for (size_t index = 0U;
+         index < (sizeof(directories) / sizeof(directories[0]));
+         ++index) {
+
+        const esp_err_t directory_result =
+            storage_sd_service_ensure_directory(
+                directories[index]
+            );
+
+        if (directory_result != ESP_OK) {
+            storage_sd_service_restore_file_logging();
+            return directory_result;
+        }
+    }
+
+    storage_sd_service_restore_file_logging();
+
+    return ESP_OK;
+}
+
 esp_err_t storage_sd_service_unmount(void)
 {
     storage_sd_state_t current_state;

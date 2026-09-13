@@ -17,6 +17,7 @@ extern "C" {
  *
  * Registers:
  * - GET /api/files
+ * - POST /api/files
  * - GET /api/files/download
  *
  * @param[in] server HTTP server handle.

@@ -242,6 +242,18 @@ esp_err_t storage_sd_service_ensure_directory(
 );
 
 /**
+ * @brief Format the SD card and recreate Spectra directories.
+ *
+ * This operation permanently removes every file on the card. It is
+ * rejected while external files are open.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the card is not
+ * mounted or a file is open, ESP_ERR_TIMEOUT if a lock cannot be acquired,
+ * otherwise an ESP-IDF error code.
+ */
+esp_err_t storage_sd_service_format(void);
+
+/**
  * @brief Start the SD storage service.
  *
  * This function initializes the SD card driver and performs an

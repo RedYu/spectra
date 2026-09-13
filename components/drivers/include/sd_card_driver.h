@@ -47,6 +47,17 @@ esp_err_t sd_card_driver_mount(void);
 esp_err_t sd_card_driver_unmount(void);
 
 /**
+ * @brief Format the mounted SD card as FAT and mount it again.
+ *
+ * All filesystem users must be stopped before this function is called.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the card is not
+ * mounted, ESP_ERR_TIMEOUT if a required lock cannot be acquired,
+ * otherwise an ESP-IDF error code.
+ */
+esp_err_t sd_card_driver_format(void);
+
+/**
  * @brief Check whether the mounted SD card is accessible.
  *
  * @return ESP_OK when the card is mounted and accessible,

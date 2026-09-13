@@ -245,6 +245,59 @@ esp_err_t sd_card_driver_unmount(void)
     return result;
 }
 
+esp_err_t sd_card_driver_format(void)
+{
+    if (s_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(
+            s_mutex,
+            pdMS_TO_TICKS(1000U)
+        ) != pdTRUE) {
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (!s_mounted || (s_card == NULL)) {
+        (void)xSemaphoreGive(s_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!board_spi_lock(
+            pdMS_TO_TICKS(3000U)
+        )) {
+
+        (void)xSemaphoreGive(s_mutex);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    const esp_err_t result =
+        esp_vfs_fat_sdcard_format(
+            SD_CARD_MOUNT_POINT,
+            s_card
+        );
+
+    board_spi_unlock();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to format SD card: %s",
+            esp_err_to_name(result)
+        );
+    } else {
+        ESP_LOGI(
+            TAG,
+            "SD card formatted and mounted"
+        );
+    }
+
+    (void)xSemaphoreGive(s_mutex);
+
+    return result;
+}
+
 esp_err_t sd_card_driver_get_mounted(
     bool *mounted
 )

@@ -364,7 +364,7 @@ Detailed request and response documentation is available in
 | `POST` | `/api/settings/save` | Save settings to internal storage |
 | `POST` | `/api/settings/reload` | Reload settings from internal storage |
 | `DELETE` | `/api/settings/wifi/sta/credentials` | Remove stored Station credentials |
-| `GET` | `/api/files` | List internal-storage or SD-card entries |
+| `GET`, `POST` | `/api/files` | List entries or manage SD-card files and folders |
 | `GET` | `/api/files/download` | Download a file |
 | `GET`, `POST` | `/api/can/transmit` | Read, start, and stop CAN transmission jobs |
 | `GET`, `POST` | `/api/can/filters` | Read and apply hardware CAN receive filters |

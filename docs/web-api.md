@@ -67,7 +67,7 @@ Clients should primarily use the HTTP status for control flow and treat
 | `POST` | `/api/settings/save` | Persist the active configuration |
 | `POST` | `/api/settings/reload` | Reload and apply persistent configuration |
 | `DELETE` | `/api/settings/wifi/sta/credentials` | Delete stored Station credentials |
-| `GET` | `/api/files` | List a storage directory |
+| `GET`, `POST` | `/api/files` | List a directory or modify SD-card contents |
 | `GET` | `/api/files/download` | Download one file |
 
 ## System API
@@ -544,6 +544,32 @@ Response shape:
 
 Entry size is meaningful for files. Directory size should not be interpreted
 as a recursive byte total.
+
+### `POST /api/files`
+
+Performs an SD-card operation. Internal SPIFFS storage is intentionally
+read-only. Common query parameters are `volume=sd`, an absolute
+volume-relative `path`, and one of these `action` values:
+
+| Action | Request body | Result |
+|---|---|---|
+| `mkdir` | Empty | Create the requested directory and missing parents |
+| `create` | Empty | Create or truncate an empty file |
+| `upload` | Raw file bytes | Create or replace a file with streamed request data |
+| `delete` | Empty | Delete a file or an empty directory |
+| `format` | Empty | Format the SD card; requires `path=/&confirm=FORMAT` |
+
+Uploads are streamed through a bounded 16 KiB PSRAM buffer and are limited to
+256 MiB per request. An interrupted or failed upload removes its partial file.
+Formatting is rejected while a file is open and recreates `/config`, `/dbc`,
+`/firmwares`, `/logs/can`, and `/logs/firmware` afterwards.
+
+Example:
+
+```bash
+curl --data-binary @vehicle.dbc \
+  "http://spectra.device/api/files?action=upload&volume=sd&path=%2Fdbc%2Fvehicle.dbc"
+```
 
 ### `GET /api/files/download`
 

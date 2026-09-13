@@ -1499,6 +1499,101 @@ body:where(.page-files) {
 :where(body.page-files) .file-panel {
     min-width: 0;
 }
+
+:where(body.page-files) .file-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+:where(body.page-files) .file-actions > .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+:where(body.page-files) .file-operation-progress {
+    overflow: hidden;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+:where(body.page-files) .file-format-button {
+    margin-left: auto;
+}
+
+:where(body.page-files) .button-danger {
+    border: 1px solid rgba(239, 68, 68, .45);
+    background: rgba(239, 68, 68, .1);
+    color: #fca5a5;
+}
+
+:where(body.page-files) .file-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+:where(body.page-files) .file-row-actions button {
+    min-width: 0;
+}
+
+:where(body.page-files) .file-delete-action {
+    border-color: rgba(239, 68, 68, .35);
+    color: #fca5a5;
+}
+
+:where(body.page-files) .file-viewer-dialog {
+    width: min(1000px, calc(100vw - 40px));
+    height: min(720px, calc(100vh - 40px));
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text);
+}
+
+:where(body.page-files) .file-viewer-dialog::backdrop {
+    background: rgba(0, 0, 0, .72);
+}
+
+:where(body.page-files) .file-viewer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+:where(body.page-files) .file-viewer-header h2 {
+    margin: 0 0 3px;
+    font-size: 16px;
+}
+
+:where(body.page-files) .file-viewer-header span {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+:where(body.page-files) .file-viewer-dialog pre {
+    overflow: auto;
+    height: calc(100% - 65px);
+    margin: 0;
+    padding: 16px;
+    background: var(--background);
+    color: var(--text);
+    font: 12px/1.55 var(--mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
 :where(body.page-files) .file-toolbar {
     display: flex;
     align-items: center;
@@ -1625,8 +1720,12 @@ body:where(.page-files) {
     white-space: nowrap;
 }
 :where(body.page-files) th:last-child, :where(body.page-files) td:last-child {
-    width: 16%;
+    width: 30%;
     text-align: right;
+}
+
+:where(body.page-files) th:first-child, :where(body.page-files) td:first-child {
+    width: 38%;
 }
 :where(body.page-files) td:last-child button {
     min-width: 84px;
@@ -1714,6 +1813,14 @@ body:where(.page-files) {
     :where(body.page-files) .file-toolbar {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    :where(body.page-files) .file-actions {
+        flex-wrap: wrap;
+    }
+
+    :where(body.page-files) .file-format-button {
+        margin-left: 0;
     }
     :where(body.page-files) .path-container {
         order: -1;
@@ -3838,6 +3945,9 @@ body {
     font-weight: 650;
     text-decoration: none;
     white-space: nowrap;
+    flex: 0 0 112px;
+    max-width: 112px;
+    overflow: hidden;
 }
 .spectra-brand span {
     color: var(--accent);
@@ -3845,12 +3955,15 @@ body {
 .spectra-brand .brand-title {
     color: var(--text);
     font-size: 20px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .spectra-nav {
     display: flex;
+    flex: 1 1 auto;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px 24px;
+    gap: 8px 20px;
     min-width: 0;
 }
 .spectra-nav a {
@@ -3865,8 +3978,9 @@ body {
 .spectra-nav a[aria-current="page"] {
     box-shadow: 0 2px var(--accent);
 }
-.spectra-header > #status {
+.spectra-header > [role="status"] {
     margin-left: auto;
+    white-space: nowrap;
 }
 .spectra-page, main.container {
     width: 100%;

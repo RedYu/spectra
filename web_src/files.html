@@ -22,8 +22,8 @@
 
     <title>Spectra Files</title>
 
-    <link rel="stylesheet" href="spectra.css?v=26">
-    <script src="spectra.js?v=26" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=31">
+    <script src="spectra.js?v=31" defer></script>
 </head>
 
 <body class="page-files">
@@ -78,7 +78,7 @@
                         Internal storage
                     </option>
 
-                    <option value="sd">
+                    <option value="sd" selected>
                         SD card
                     </option>
                 </select>
@@ -112,6 +112,14 @@
             </aside>
 
             <section class="card file-panel">
+            <div class="file-actions" aria-label="File operations">
+                <button id="create-folder" class="button button-secondary" type="button">New folder</button>
+                <button id="create-file" class="button button-secondary" type="button">New file</button>
+                <label for="upload-files" class="button button-primary">Upload files</label>
+                <input id="upload-files" type="file" multiple hidden>
+                <span id="upload-progress" class="file-operation-progress"></span>
+                <button id="format-sd" class="button button-danger file-format-button" type="button">Format SD</button>
+            </div>
             <nav
                 class="file-toolbar"
                 aria-label="Directory navigation"
@@ -193,6 +201,17 @@
             role="status"
             aria-live="polite"
         ></p>
+
+        <dialog id="file-viewer" class="file-viewer-dialog">
+            <div class="file-viewer-header">
+                <div>
+                    <h2 id="file-viewer-title">File preview</h2>
+                    <span id="file-viewer-meta"></span>
+                </div>
+                <button id="file-viewer-close" class="button button-secondary" type="button">Close</button>
+            </div>
+            <pre id="file-viewer-content"></pre>
+        </dialog>
     </main>
 
 </body>
