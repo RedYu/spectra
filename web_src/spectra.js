@@ -8176,6 +8176,7 @@
     function init_dbc() {
         const element = id => document.getElementById(id);
         const fileInput = element('dbc-file');
+        const localFileName = element('dbc-local-file-name');
         const status = element('dbc-status');
         const message = element('dbc-message');
         const messageList = element('dbc-message-list');
@@ -8191,6 +8192,7 @@
         let pending = false;
         let renderPending = false;
         let messageListDirty = true;
+        let hoveredSignal = null;
         const latest = new Map();
         const histories = new Map();
         let selected = new Set();
@@ -8334,6 +8336,24 @@
             return raw;
         }
 
+        function signalBits(signal) {
+            const bits = [];
+
+            if (signal.littleEndian) {
+                for (let index = 0; index < signal.length; ++index)
+                    bits.push(signal.start + index);
+            } else {
+                let bit = signal.start;
+
+                for (let index = 0; index < signal.length; ++index) {
+                    bits.push(bit);
+                    bit = (bit % 8 === 0) ? bit + 15 : bit - 1;
+                }
+            }
+
+            return new Set(bits);
+        }
+
         function decodeSignal(definition, signal, frame) {
             if (!frame)
                 return null;
@@ -8411,25 +8431,49 @@
 
             const query = element('dbc-search').value.trim().toLowerCase();
             const activeOnly = element('dbc-active-only').checked;
-            const definitions = [...database.messages.values()].filter(definition => {
-                const frame = selectedFrame(definition);
-                return (!activeOnly || frame) &&
-                    (!query || definition.name.toLowerCase().includes(query) ||
-                        hex(definition.id, definition.extended ? 8 : 3).toLowerCase().includes(query));
-            });
+            const definitions = [...database.messages.values()]
+                .filter(definition => {
+                    const frame = selectedFrame(definition);
+                    return (!activeOnly || frame) &&
+                        (!query || definition.name.toLowerCase().includes(query) ||
+                            hex(definition.id, definition.extended ? 8 : 3).toLowerCase().includes(query));
+                })
+                .sort((left, right) => left.name.localeCompare(
+                    right.name,
+                    undefined,
+                    {numeric : true, sensitivity : 'base'}
+                ));
+            const groups = new Map();
 
-            messageList.innerHTML = definitions.map(definition => {
-                const frame = selectedFrame(definition);
-                const active = currentMessage === definition ? ' active' : '';
-                return `<button class="dbc-message-entry${active}" data-id="${definition.id}">`
-                    + `<b>${escapeHtml(definition.name)}</b>`
-                    + `<span>0x${hex(definition.id, definition.extended ? 8 : 3)} · ${definition.dlc} B`
-                    + `${frame ? ' · live' : ''}</span></button>`;
-            }).join('') || '<p class="note">No matching messages.</p>';
+            for (const definition of definitions) {
+                const first = definition.name.trim().charAt(0).toUpperCase();
+                const group = /^[A-Z0-9]$/.test(first) ? first : '#';
+
+                if (!groups.has(group))
+                    groups.set(group, []);
+
+                groups.get(group).push(definition);
+            }
+
+            element('dbc-message-count').textContent =
+                `${definitions.length} message${definitions.length === 1 ? '' : 's'}`;
+            messageList.innerHTML = [...groups.entries()].map(([group, entries]) =>
+                `<details class="dbc-message-group" open><summary>${escapeHtml(group)}`
+                + `<span>${entries.length}</span></summary>`
+                + entries.map(definition => {
+                    const frame = selectedFrame(definition);
+                    const active = currentMessage === definition ? ' active' : '';
+                    return `<button class="dbc-message-entry${active}" data-id="${definition.id}">`
+                        + `<b>${escapeHtml(definition.name)}</b>`
+                        + `<span>0x${hex(definition.id, definition.extended ? 8 : 3)} · ${definition.dlc} B`
+                        + `${frame ? ' · live' : ''}</span></button>`;
+                }).join('') + '</details>'
+            ).join('') || '<p class="note">No matching messages.</p>';
 
             for (const button of messageList.querySelectorAll('[data-id]')) {
                 button.onclick = () => {
                     currentMessage = database.messages.get(Number(button.dataset.id));
+                    hoveredSignal = null;
                     render();
                 };
             }
@@ -8441,6 +8485,7 @@
             if (!currentMessage) {
                 element('dbc-message-title').textContent = 'Message signals';
                 element('dbc-message-meta').textContent = 'No message selected';
+                renderInspector(null, null);
                 return;
             }
 
@@ -8453,7 +8498,7 @@
             signalList.innerHTML = currentMessage.signals.map(signal => {
                 const key = signalKey(currentMessage, signal);
                 const decoded = decodeSignal(currentMessage, signal, frame);
-                return `<tr><td><input type="checkbox" data-signal="${escapeHtml(signal.name)}" `
+                return `<tr data-signal-row="${escapeHtml(signal.name)}"><td><input type="checkbox" data-signal="${escapeHtml(signal.name)}" `
                     + `${selected.has(key) ? 'checked' : ''}></td>`
                     + `<td>${escapeHtml(signal.name)}</td>`
                     + `<td>${escapeHtml(formatValue(decoded, signal))}</td>`
@@ -8473,14 +8518,113 @@
                 };
             }
 
-            if (frame) {
-                frameData.textContent = frame.data.map(byte => hex(byte)).join(' ');
-                frameTime.textContent = `${frame.bus === 0 ? 'Primary' : 'Secondary'} · `
-                    + `${(Number(frame.timestamp) / 1000000).toFixed(6)} s`;
-            } else {
-                frameData.textContent = 'No matching live frame received.';
-                frameTime.textContent = 'No frame received';
+            for (const row of signalList.querySelectorAll('[data-signal-row]')) {
+                row.onmouseenter = () => {
+                    hoveredSignal = currentMessage.signals.find(
+                        signal => signal.name === row.dataset.signalRow) || null;
+                    renderInspector(frame, hoveredSignal);
+                };
+                row.onmouseleave = () => {
+                    hoveredSignal = null;
+                    renderInspector(frame, null);
+                };
             }
+
+            renderInspector(frame, hoveredSignal);
+        }
+
+        function renderInspector(frame, signal) {
+            if (!currentMessage) {
+                frameData.innerHTML =
+                    '<p class="note">Select a message, then point to a signal row.</p>';
+                frameTime.textContent = 'No frame received';
+                return;
+            }
+
+            const byteCount = Math.max(
+                currentMessage.dlc,
+                frame ? frame.data.length : 0
+            );
+            const bytes = frame
+                ? [...frame.data]
+                : Array(byteCount).fill(0);
+            const activeBits = signal ? signalBits(signal) : new Set();
+            const describedBits = new Set();
+
+            for (const messageSignal of currentMessage.signals) {
+                for (const bit of signalBits(messageSignal)) {
+                    if (bit < byteCount * 8)
+                        describedBits.add(bit);
+                }
+            }
+
+            const byteCells = [];
+            const asciiCells = [];
+            const bitRows = [];
+
+            for (let byteIndex = 0; byteIndex < byteCount; ++byteIndex) {
+                const value = bytes[byteIndex] || 0;
+                let byteActive = false;
+
+                for (let bit = 0; bit < 8; ++bit) {
+                    if (activeBits.has(byteIndex * 8 + bit)) {
+                        byteActive = true;
+                        break;
+                    }
+                }
+
+                byteCells.push(
+                    `<span class="dbc-frame-byte${byteActive ? ' active' : ''}">`
+                    + `<small>${byteIndex}</small><b>${hex(value)}</b></span>`);
+                const character = value >= 32 && value <= 126
+                    ? String.fromCharCode(value)
+                    : '·';
+                asciiCells.push(
+                    `<span class="dbc-frame-ascii${byteActive ? ' active' : ''}">`
+                    + `${escapeHtml(character)}</span>`);
+
+                const bits = [];
+
+                for (let bitInByte = 7; bitInByte >= 0; --bitInByte) {
+                    const absoluteBit = byteIndex * 8 + bitInByte;
+                    const active = activeBits.has(absoluteBit);
+                    const described = describedBits.has(absoluteBit);
+                    const bitState = active
+                        ? 'active'
+                        : described ? 'described' : 'unused';
+                    const stateDescription = active
+                        ? `Selected signal: ${signal.name}`
+                        : described ? 'Described by DBC' : 'Not described by DBC';
+                    bits.push(
+                        `<span class="${bitState}" `
+                        + `title="Byte ${byteIndex}, bit ${bitInByte} · ${escapeHtml(stateDescription)}">`
+                        + `${(value >> bitInByte) & 1}</span>`);
+                }
+
+                bitRows.push(
+                    `<div class="dbc-bit-byte"><small>B${byteIndex}</small>`
+                    + `<div>${bits.join('')}</div></div>`);
+            }
+
+            const signalDescription = signal
+                ? `<b>${escapeHtml(signal.name)}</b> · start ${signal.start} · `
+                    + `${signal.length} bits · ${signal.littleEndian ? 'Intel' : 'Motorola'}`
+                : 'Point to a signal row to highlight its location.';
+            frameData.innerHTML =
+                `<div class="dbc-inspector-caption">${signalDescription}</div>`
+                + `<div class="dbc-inspector-line"><span>HEX</span><div>${byteCells.join('')}</div></div>`
+                + `<div class="dbc-inspector-line"><span>ASCII</span><div>${asciiCells.join('')}</div></div>`
+                + `<div class="dbc-bit-view">`
+                + `<div class="dbc-bit-heading"><span>Bit view · MSB 7 → 0 LSB</span>`
+                + `<span class="dbc-bit-legend">`
+                + `<i class="active"></i>Selected <i class="described"></i>DBC `
+                + `<i class="unused"></i>Unused</span></div>`
+                + `<div class="dbc-bit-grid">${bitRows.join('')}</div></div>`;
+
+            frameTime.textContent = frame
+                ? `${frame.bus === 0 ? 'Primary' : 'Secondary'} · `
+                    + `${(Number(frame.timestamp) / 1000000).toFixed(6)} s`
+                : 'DBC layout · no live frame';
         }
 
         function renderValues() {
@@ -8530,6 +8674,7 @@
             }
 
             selectedCount.textContent = `${values.length} signal${values.length === 1 ? '' : 's'}`;
+            valueGrid.classList.toggle('empty', values.length === 0);
             valueGrid.innerHTML = values.join('') ||
                 '<p class="note">Select signals from a message to build your dashboard.</p>';
 
@@ -8688,8 +8833,14 @@
         fileInput.onchange = async () => {
             const file = fileInput.files[0];
 
-            if (!file)
+            if (!file) {
+                localFileName.textContent = 'No file chosen';
+                localFileName.title = 'No file chosen';
                 return;
+            }
+
+            localFileName.textContent = file.name;
+            localFileName.title = file.name;
 
             if (file.size > 16 * 1024 * 1024) {
                 message.textContent = 'DBC file exceeds the 16 MiB browser limit.';
@@ -8700,8 +8851,6 @@
                 loadDatabase(await file.text(), file.name);
             } catch (error) {
                 message.textContent = error.message;
-            } finally {
-                fileInput.value = '';
             }
         };
 

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.ico">
     <title>DBC Explorer · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=28">
-    <script src="spectra.js?v=28" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=30">
+    <script src="spectra.js?v=30" defer></script>
 </head>
 
 <body class="page-dbc">
@@ -33,39 +33,50 @@
         </div>
 
         <div class="dbc-layout">
-            <aside class="card dbc-sidebar">
-                <h2>Database</h2>
-                <label for="dbc-file">Open DBC file</label>
-                <input id="dbc-file" type="file" accept=".dbc,text/plain">
-
-                <label for="dbc-sd-file">DBC from SD card</label>
-                <div class="dbc-sd-loader">
-                    <select id="dbc-sd-file" aria-label="DBC file on SD card">
-                        <option value="">No SD files loaded</option>
-                    </select>
-                    <button id="dbc-sd-refresh" type="button">Refresh</button>
-                    <button id="dbc-sd-open" type="button" disabled>Open</button>
-                </div>
-                <div id="dbc-summary" class="note">Choose a DBC file to begin.</div>
-
-                <h2>Live source</h2>
-                <div class="controls">
-                    <button id="dbc-connect" class="primary" disabled>Connect live</button>
-                    <button id="dbc-pause" disabled>Pause stream</button>
-                    <select id="dbc-bus" aria-label="CAN bus">
-                        <option value="all">All buses</option>
-                        <option value="0">Primary · TWAI</option>
-                        <option value="1">Secondary · MCP2518FD</option>
-                    </select>
-                </div>
-
-                <h2>Messages</h2>
-                <input id="dbc-search" type="search" placeholder="Search ID or name…">
-                <label><input id="dbc-active-only" type="checkbox"> Active messages only</label>
-                <div id="dbc-message-list" class="dbc-message-list"></div>
-            </aside>
-
             <div class="dbc-workspace">
+                <section class="card dbc-source-card">
+                    <div class="dbc-source-section">
+                        <h2>DBC database</h2>
+                        <div class="dbc-database-loaders">
+                            <div class="dbc-loader">
+                                <label for="dbc-file">This computer</label>
+                                <div class="dbc-local-file">
+                                    <input id="dbc-file" type="file" accept=".dbc,text/plain">
+                                    <label for="dbc-file" class="button">Choose file</label>
+                                    <span id="dbc-local-file-name" title="No file chosen">No file chosen</span>
+                                </div>
+                            </div>
+
+                            <div class="dbc-loader">
+                                <label for="dbc-sd-file">SD card · /dbc</label>
+                                <div class="dbc-sd-loader">
+                                    <select id="dbc-sd-file" aria-label="DBC file on SD card">
+                                        <option value="">No SD files loaded</option>
+                                    </select>
+                                    <button id="dbc-sd-refresh" type="button">Refresh</button>
+                                    <button id="dbc-sd-open" type="button" disabled>Open</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="dbc-summary" class="note">Choose a DBC file to begin.</div>
+                    </div>
+
+                    <div class="dbc-source-section">
+                        <h2>Live CAN source</h2>
+                        <label for="dbc-bus">Channel</label>
+                        <select id="dbc-bus" aria-label="CAN bus">
+                            <option value="all">All buses</option>
+                            <option value="0">Primary · TWAI</option>
+                            <option value="1">Secondary · MCP2518FD</option>
+                        </select>
+                        <div class="dbc-source-actions">
+                            <button id="dbc-connect" class="primary" disabled>Connect live</button>
+                            <button id="dbc-pause" disabled>Pause stream</button>
+                        </div>
+                        <p class="note">DBC parsing and signal history stay in this browser.</p>
+                    </div>
+                </section>
+
                 <section class="card">
                     <div class="panel-title">
                         <h2>Selected values</h2>
@@ -84,6 +95,16 @@
                     </div>
                     <div id="dbc-value-grid" class="dbc-value-grid">
                         <p class="note">Select signals from a message to build your dashboard.</p>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="panel-title">
+                        <h2>Frame inspector</h2>
+                        <span id="dbc-frame-time">No frame received</span>
+                    </div>
+                    <div id="dbc-frame-data" class="dbc-frame-inspector">
+                        <p class="note">Select a message, then point to a signal row.</p>
                     </div>
                 </section>
 
@@ -109,15 +130,20 @@
                         </table>
                     </div>
                 </section>
-
-                <section class="card">
-                    <div class="panel-title">
-                        <h2>Frame inspector</h2>
-                        <span id="dbc-frame-time">No frame received</span>
-                    </div>
-                    <pre id="dbc-frame-data">Select a message and connect to live traffic.</pre>
-                </section>
             </div>
+
+            <aside class="card dbc-sidebar">
+                <div class="panel-title">
+                    <h2>Messages</h2>
+                    <span id="dbc-message-count">0 messages</span>
+                </div>
+                <input id="dbc-search" type="search" placeholder="Search name or CAN ID…">
+                <label class="dbc-active-filter">
+                    <input id="dbc-active-only" type="checkbox">
+                    Active messages only
+                </label>
+                <div id="dbc-message-list" class="dbc-message-list"></div>
+            </aside>
         </div>
 
         <p id="dbc-message" class="status" role="status" aria-live="polite"></p>

@@ -1093,6 +1093,12 @@ body:where(.page-settings) {
     }
 }
 
+.page-dbc input:focus-visible,
+.page-dbc select:focus-visible,
+.page-dbc textarea:focus-visible {
+    outline: 0;
+}
+
 .page-isotp .spectra-page {
     max-width: 1500px;
     margin: 0 auto;
@@ -3938,10 +3944,94 @@ button:disabled, .button:disabled {
 }
 
 /* DBC Explorer */
+.page-dbc input[type="search"],
+.page-dbc input[type="text"],
+.page-dbc input[type="number"],
+.page-dbc input[type="file"],
+.page-dbc select,
+.page-dbc textarea {
+    width: 100%;
+    min-height: 36px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    outline: 0;
+    background-color: var(--background);
+    color: var(--text);
+    font: inherit;
+}
+
+.page-dbc select {
+    appearance: none;
+    padding-right: 32px;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position:
+        calc(100% - 14px) 15px,
+        calc(100% - 9px) 15px;
+    background-repeat: no-repeat;
+    background-size: 5px 5px, 5px 5px;
+}
+
+.page-dbc input::placeholder,
+.page-dbc textarea::placeholder {
+    color: #697583;
+    opacity: 1;
+}
+
+.page-dbc input:hover,
+.page-dbc select:hover,
+.page-dbc textarea:hover {
+    border-color: #3a4858;
+}
+
+.page-dbc input:focus,
+.page-dbc select:focus,
+.page-dbc textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, .18);
+}
+
+.page-dbc input:disabled,
+.page-dbc select:disabled,
+.page-dbc textarea:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+.page-dbc input[type="file"] {
+    padding: 4px;
+    color: var(--muted);
+}
+
+.page-dbc input[type="file"]::file-selector-button {
+    height: 28px;
+    margin: 0 9px 0 0;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: #1a2430;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+}
+
+.page-dbc input[type="file"]::file-selector-button:hover {
+    background: #243244;
+}
+
+.page-dbc input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    min-height: 0;
+    margin: 0;
+}
+
 .dbc-layout {
     display: grid;
-    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-    gap: 18px;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 370px);
+    gap: 14px;
     align-items: start;
 }
 
@@ -3951,13 +4041,111 @@ button:disabled, .button:disabled {
     display: grid;
     gap: 10px;
     max-height: calc(100vh - 76px);
+    padding: 14px;
     overflow: auto;
 }
 
-.dbc-sidebar h2:not(:first-child) {
-    margin-top: 10px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
+.dbc-sidebar .panel-title {
+    margin: 0;
+}
+
+.dbc-sidebar .panel-title h2 {
+    margin: 0;
+}
+
+.dbc-active-filter {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.dbc-source-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(260px, .7fr);
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+.dbc-source-section {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    padding: 12px 16px;
+}
+
+.dbc-source-section + .dbc-source-section {
+    border-left: 1px solid var(--border);
+}
+
+.dbc-source-section h2 {
+    margin: 0 0 2px;
+    font-size: 13px;
+}
+
+.dbc-database-loaders {
+    display: grid;
+    grid-template-columns: minmax(210px, .55fr) minmax(300px, 1.45fr);
+    gap: 12px;
+    align-items: end;
+}
+
+.dbc-loader {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+}
+
+.dbc-loader > label {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.dbc-local-file {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
+}
+
+.dbc-local-file input[type="file"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
+.dbc-local-file .button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    margin: 0;
+    cursor: pointer;
+}
+
+.dbc-local-file > span {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dbc-source-section > label {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.dbc-source-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
 }
 
 .dbc-sd-loader {
@@ -3972,23 +4160,93 @@ button:disabled, .button:disabled {
 
 .dbc-workspace {
     display: grid;
-    gap: 18px;
+    gap: 14px;
     min-width: 0;
+}
+
+.dbc-workspace > .card:not(.dbc-source-card) {
+    padding: 12px 14px;
+}
+
+.dbc-workspace > .card .panel-title {
+    min-height: 34px;
+    margin: 0 0 8px;
+}
+
+.dbc-workspace > .card .panel-title h2 {
+    margin: 0;
+    font-size: 14px;
 }
 
 .dbc-message-list {
     display: grid;
-    gap: 6px;
-    max-height: 45vh;
-    overflow: auto;
+    gap: 12px;
+    min-height: 180px;
+    padding-right: 2px;
+}
+
+.dbc-message-group {
+    display: block;
+}
+
+.dbc-message-group summary {
+    position: sticky;
+    top: -14px;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    cursor: pointer;
+    list-style: none;
+}
+
+.dbc-message-group summary::-webkit-details-marker {
+    display: none;
+}
+
+.dbc-message-group summary::before {
+    content: "▾";
+    margin-right: 7px;
+    color: var(--muted);
+}
+
+.dbc-message-group:not([open]) summary::before {
+    content: "▸";
+}
+
+.dbc-message-group summary span {
+    margin-left: auto;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-weight: 400;
+    letter-spacing: normal;
+}
+
+.dbc-message-group .dbc-message-entry {
+    margin-top: 4px;
 }
 
 .dbc-message-entry {
     display: grid;
     gap: 3px;
     width: 100%;
-    padding: 9px 10px;
+    padding: 8px 10px;
+    border-color: transparent;
+    background: transparent;
     text-align: left;
+}
+
+.dbc-message-entry:hover {
+    border-color: var(--border);
+    background: #18212b;
 }
 
 .dbc-message-entry span {
@@ -4006,6 +4264,15 @@ button:disabled, .button:disabled {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 10px;
+}
+
+.dbc-value-grid.empty {
+    display: block;
+    min-height: 0;
+}
+
+.dbc-value-grid.empty .note {
+    margin: 2px 0 0;
 }
 
 .dbc-value {
@@ -4069,14 +4336,225 @@ button:disabled, .button:disabled {
     overflow: auto;
 }
 
+.dbc-browser table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+.dbc-browser th:first-child,
+.dbc-browser td:first-child {
+    width: 64px;
+    text-align: center;
+}
+
+.dbc-browser th:nth-child(6),
+.dbc-browser td:nth-child(6) {
+    width: 82px;
+}
+
+.dbc-browser th:last-child,
+.dbc-browser td:last-child {
+    width: 150px;
+}
+
+.dbc-browser tbody tr[data-signal-row] {
+    cursor: crosshair;
+}
+
+.dbc-browser tbody tr[data-signal-row]:hover td {
+    background: rgba(59, 130, 246, .1);
+}
+
+.dbc-frame-inspector {
+    display: grid;
+    gap: 9px;
+    min-width: 0;
+    padding: 10px;
+    border-radius: 7px;
+    background: var(--background);
+    font-family: var(--mono);
+}
+
+.dbc-inspector-caption {
+    min-height: 18px;
+    color: var(--muted);
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
+}
+
+.dbc-inspector-caption b {
+    color: var(--text);
+}
+
+.dbc-inspector-line {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+}
+
+.dbc-inspector-line > span {
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: .08em;
+}
+
+.dbc-inspector-line > div {
+    display: flex;
+    gap: 4px;
+    min-width: 0;
+    overflow-x: auto;
+    padding: 2px;
+}
+
+.dbc-frame-byte {
+    display: grid;
+    place-items: center;
+    flex: 0 0 36px;
+    min-height: 40px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface);
+}
+
+.dbc-frame-byte small {
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 400;
+}
+
+.dbc-frame-byte b {
+    font-size: 13px;
+}
+
+.dbc-frame-byte.active,
+.dbc-frame-ascii.active {
+    border-color: var(--accent);
+    background: rgba(59, 130, 246, .2);
+    color: #fff;
+}
+
+.dbc-frame-ascii {
+    display: grid;
+    place-items: center;
+    flex: 0 0 36px;
+    height: 28px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    color: var(--text);
+}
+
+.dbc-bit-view {
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+}
+
+.dbc-bit-heading {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 6px 14px;
+    color: var(--muted);
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+    font-size: 11px;
+}
+
+.dbc-bit-legend {
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.dbc-bit-legend i {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-left: 5px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    background: var(--surface);
+}
+
+.dbc-bit-legend i.active {
+    border-color: var(--accent);
+    background: var(--accent);
+}
+
+.dbc-bit-legend i.unused {
+    border-style: dashed;
+    background: repeating-linear-gradient(
+        135deg,
+        transparent 0,
+        transparent 3px,
+        rgba(148, 163, 184, .14) 3px,
+        rgba(148, 163, 184, .14) 5px
+    );
+}
+
+.dbc-bit-grid {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.dbc-bit-byte {
+    display: grid;
+    flex: 0 0 auto;
+    gap: 3px;
+}
+
+.dbc-bit-byte > small {
+    color: var(--muted);
+    font-size: 9px;
+}
+
+.dbc-bit-byte > div {
+    display: grid;
+    grid-template-columns: repeat(8, 18px);
+    gap: 1px;
+}
+
+.dbc-bit-byte span {
+    display: grid;
+    place-items: center;
+    height: 22px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.dbc-bit-byte span.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+}
+
+.dbc-bit-byte span.unused {
+    border-style: dashed;
+    background: repeating-linear-gradient(
+        135deg,
+        transparent 0,
+        transparent 4px,
+        rgba(148, 163, 184, .12) 4px,
+        rgba(148, 163, 184, .12) 7px
+    );
+    color: rgba(148, 163, 184, .5);
+}
+
 .page-dbc pre {
-    min-height: 64px;
+    min-height: 32px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--background);
     margin: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
     .dbc-layout {
         grid-template-columns: 1fr;
     }
@@ -4084,6 +4562,17 @@ button:disabled, .button:disabled {
     .dbc-sidebar {
         position: static;
         max-height: none;
+        grid-row: 1;
+    }
+
+    .dbc-message-list {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        max-height: 360px;
+        overflow: auto;
+    }
+
+    .dbc-message-group summary {
+        position: static;
     }
 
     .dbc-sd-loader {
@@ -4092,6 +4581,21 @@ button:disabled, .button:disabled {
 
     .dbc-sd-loader select {
         grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 700px) {
+    .dbc-source-card {
+        grid-template-columns: 1fr;
+    }
+
+    .dbc-source-section + .dbc-source-section {
+        border-top: 1px solid var(--border);
+        border-left: 0;
+    }
+
+    .dbc-database-loaders {
+        grid-template-columns: 1fr;
     }
 }
 input[type="checkbox"] {
