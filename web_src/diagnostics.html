@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Device Diagnostics · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=28">
-    <script src="spectra.js?v=28" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=29">
+    <script src="spectra.js?v=29" defer></script>
 </head>
 <body class="page-diagnostics">
     <header class="spectra-header">
@@ -25,6 +25,12 @@
             <article class="diagnostics-card diagnostics-summary-card"><span class="diagnostics-card-label">Internal heap</span><strong id="diagnostics-internal">—</strong><small id="diagnostics-internal-minimum">Minimum —</small></article>
             <article class="diagnostics-card diagnostics-summary-card"><span class="diagnostics-card-label">Temperature</span><strong id="diagnostics-temperature">—</strong><small id="diagnostics-temperature-state">Sensor state unknown</small></article>
             <article class="diagnostics-card diagnostics-summary-card"><span class="diagnostics-card-label">Uptime</span><strong id="diagnostics-uptime">—</strong><small id="diagnostics-reset">Reset reason —</small></article>
+        </section>
+        <section class="diagnostics-history" aria-label="Ten minute history">
+            <article class="diagnostics-card diagnostics-chart-card"><header><h2>CPU load</h2><span id="diagnostics-cpu-history-value">—</span></header><canvas id="diagnostics-cpu-history" role="img" aria-label="CPU load history"></canvas></article>
+            <article class="diagnostics-card diagnostics-chart-card"><header><h2>Internal heap</h2><span id="diagnostics-heap-history-value">—</span></header><canvas id="diagnostics-heap-history" role="img" aria-label="Internal heap history"></canvas></article>
+            <article class="diagnostics-card diagnostics-chart-card"><header><h2>CAN RX rate</h2><span id="diagnostics-can-history-value">—</span></header><canvas id="diagnostics-can-history" role="img" aria-label="Primary and secondary CAN receive rate history"></canvas><div class="diagnostics-chart-legend"><span class="primary">Primary</span><span class="secondary">Secondary</span></div></article>
+            <article class="diagnostics-card diagnostics-chart-card"><header><h2>Queue usage</h2><span id="diagnostics-queue-history-value">—</span></header><canvas id="diagnostics-queue-history" role="img" aria-label="Maximum queue usage history"></canvas></article>
         </section>
         <section class="diagnostics-grid">
             <article class="diagnostics-card"><header><h2>Memory</h2><span id="diagnostics-memory-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
@@ -55,7 +61,7 @@
                 </table>
             </div>
         </section>
-        <p class="diagnostics-note">Values update every 10 seconds. Task enumeration runs only while this page is open; SD speeds are cached from the last startup benchmark.</p>
+        <p class="diagnostics-note">Values update every 10 seconds. Charts retain 10 minutes in this browser only. Error deltas show changes since the previous successful refresh. Task enumeration runs only while this page is open; SD speeds are cached from the last startup benchmark.</p>
     </main>
 </body>
 </html>

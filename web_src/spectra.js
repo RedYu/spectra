@@ -3483,9 +3483,20 @@
 
     function init_diagnostics() {
         const REFRESH_INTERVAL_MS = 10000;
+        const HISTORY_POINT_COUNT = 60;
 
         let refreshTimer = null;
         let refreshInProgress = false;
+        let previousSample = null;
+        let previousCounters = null;
+
+        const history = {
+            cpu: [],
+            heap: [],
+            primaryRx: [],
+            secondaryRx: [],
+            queue: []
+        };
 
         const element = id =>
             document.getElementById(id);
@@ -3561,6 +3572,192 @@
 
         function formatQueue(current, peak, capacity) {
             return `${formatCount(current)} / ${formatCount(capacity)} · peak ${formatCount(peak)}`;
+        }
+
+        function counterDelta(current, previous) {
+            const currentValue = Number(current ?? 0);
+            const previousValue = Number(previous ?? 0);
+
+            if ((previous === undefined) ||
+                !Number.isFinite(currentValue) ||
+                !Number.isFinite(previousValue) ||
+                (currentValue < previousValue)) {
+
+                return null;
+            }
+
+            return currentValue - previousValue;
+        }
+
+        function formatDelta(value) {
+            return value === null
+                ? "(+—)"
+                : `(+${formatCount(value)})`;
+        }
+
+        function formatCounterWithDelta(value, previous) {
+            return `${formatCount(value)} ${formatDelta(counterDelta(value, previous))}`;
+        }
+
+        function appendHistory(series, value) {
+            series.push(Number.isFinite(value) ? value : 0);
+
+            if (series.length > HISTORY_POINT_COUNT) {
+                series.shift();
+            }
+        }
+
+        function drawHistory(canvasId, seriesList, colors, fixedMaximum = null) {
+            const canvas = element(canvasId);
+
+            if (canvas === null) {
+                return;
+            }
+
+            const width = Math.max(1, Math.floor(canvas.clientWidth));
+            const height = Math.max(1, Math.floor(canvas.clientHeight));
+            const scale = Math.max(1, window.devicePixelRatio || 1);
+
+            if ((canvas.width !== Math.floor(width * scale)) ||
+                (canvas.height !== Math.floor(height * scale))) {
+
+                canvas.width = Math.floor(width * scale);
+                canvas.height = Math.floor(height * scale);
+            }
+
+            const context = canvas.getContext("2d");
+            context.setTransform(scale, 0, 0, scale, 0, 0);
+            context.clearRect(0, 0, width, height);
+
+            context.strokeStyle = "#27313d";
+            context.lineWidth = 1;
+
+            for (let line = 1; line < 4; line += 1) {
+                const y = Math.round((height * line) / 4) + 0.5;
+                context.beginPath();
+                context.moveTo(0, y);
+                context.lineTo(width, y);
+                context.stroke();
+            }
+
+            const maximum = fixedMaximum ?? Math.max(
+                1,
+                ...seriesList.flat()
+            );
+
+            seriesList.forEach((series, seriesIndex) => {
+                if (series.length === 0) {
+                    return;
+                }
+
+                context.strokeStyle = colors[seriesIndex];
+                context.lineWidth = 1.5;
+                context.lineJoin = "round";
+                context.beginPath();
+
+                series.forEach((value, index) => {
+                    const x = series.length === 1
+                        ? width
+                        : (index * width) / (HISTORY_POINT_COUNT - 1);
+                    const y = height -
+                        (Math.min(maximum, Math.max(0, value)) / maximum) *
+                        (height - 2) - 1;
+
+                    if (index === 0) {
+                        context.moveTo(x, y);
+                    } else {
+                        context.lineTo(x, y);
+                    }
+                });
+
+                context.stroke();
+            });
+        }
+
+        function queueUsage(current, capacity) {
+            const currentValue = Number(current ?? 0);
+            const capacityValue = Number(capacity ?? 0);
+
+            return capacityValue > 0
+                ? (currentValue * 100) / capacityValue
+                : 0;
+        }
+
+        function updateHistory(system, diagnostics) {
+            const now = performance.now();
+            const can = diagnostics.can ?? {};
+            const consumers = diagnostics.consumers ?? {};
+            const heap = diagnostics.heap ?? {};
+            const elapsedSeconds = previousSample === null
+                ? 0
+                : Math.max(0.001, (now - previousSample.time) / 1000);
+            const primaryRxDelta = previousSample === null
+                ? 0
+                : counterDelta(
+                    can.primary_received_frames,
+                    previousSample.primaryRx
+                );
+            const secondaryRxDelta = previousSample === null
+                ? 0
+                : counterDelta(
+                    can.secondary_received_frames,
+                    previousSample.secondaryRx
+                );
+            const primaryRate = (previousSample === null) ||
+                (primaryRxDelta === null)
+                ? 0
+                : primaryRxDelta / elapsedSeconds;
+            const secondaryRate = (previousSample === null) ||
+                (secondaryRxDelta === null)
+                ? 0
+                : secondaryRxDelta / elapsedSeconds;
+            const maximumQueueUsage = Math.max(
+                queueUsage(can.router_queue_current, can.router_queue_capacity),
+                queueUsage(can.monitor_queue_current, can.monitor_queue_capacity),
+                queueUsage(consumers.stream_queue_current, consumers.stream_queue_capacity),
+                queueUsage(consumers.logger_queue_current, consumers.logger_queue_capacity)
+            );
+
+            appendHistory(history.cpu, Number(system.cpu_usage ?? 0));
+            appendHistory(
+                history.heap,
+                Number(heap.internal_free ?? system.free_heap ?? 0) / 1024
+            );
+            appendHistory(history.primaryRx, primaryRate);
+            appendHistory(history.secondaryRx, secondaryRate);
+            appendHistory(history.queue, maximumQueueUsage);
+
+            previousSample = {
+                time: now,
+                primaryRx: Number(can.primary_received_frames ?? 0),
+                secondaryRx: Number(can.secondary_received_frames ?? 0)
+            };
+
+            setText(
+                "diagnostics-cpu-history-value",
+                `${Number(system.cpu_usage ?? 0).toFixed(1)}%`
+            );
+            setText(
+                "diagnostics-heap-history-value",
+                formatBytes(heap.internal_free ?? system.free_heap)
+            );
+            setText(
+                "diagnostics-can-history-value",
+                `${primaryRate.toFixed(0)} / ${secondaryRate.toFixed(0)} frame/s`
+            );
+            setText(
+                "diagnostics-queue-history-value",
+                `${maximumQueueUsage.toFixed(1)}% max`
+            );
+
+            drawHistory("diagnostics-cpu-history", [history.cpu], ["#3b82f6"], 100);
+            drawHistory("diagnostics-heap-history", [history.heap], ["#a78bfa"]);
+            drawHistory(
+                "diagnostics-can-history",
+                [history.primaryRx, history.secondaryRx],
+                ["#3b82f6", "#31c48d"]
+            );
+            drawHistory("diagnostics-queue-history", [history.queue], ["#f6b73c"], 100);
         }
 
         function setBadge(id, text, state) {
@@ -3672,6 +3869,7 @@
         function updateCan(diagnostics) {
             const can = diagnostics.can ?? {};
             const consumers = diagnostics.consumers ?? {};
+            const previous = previousCounters ?? {};
 
             setText("diagnostics-primary-state", can.primary_running ? "Running" : "Stopped");
             setText("diagnostics-primary-traffic", `${formatCount(can.primary_received_frames)} / ${formatCount(can.primary_transmitted_frames)}`);
@@ -3694,17 +3892,17 @@
             setText("diagnostics-logger-written", `${formatCount(consumers.logger_written_events)} / ${formatBytes(consumers.logger_written_bytes)}`);
             setBadge("diagnostics-consumer-state", "Available", "ok");
 
-            setText("diagnostics-router-drops", formatCount(can.router_dropped_events));
-            setText("diagnostics-monitor-drops", formatCount(can.monitor_dropped_events));
-            setText("diagnostics-primary-rx-drops", formatCount(can.primary_dropped_rx_frames));
-            setText("diagnostics-primary-drops", formatCount(can.primary_dropped_confirmations));
-            setText("diagnostics-primary-errors", `${formatCount(can.primary_bus_errors)} / ${formatCount(can.primary_ack_errors)}`);
-            setText("diagnostics-secondary-overflow", `${formatCount(can.secondary_dropped_rx_frames)} / ${formatCount(can.secondary_rx_overflows)}`);
-            setText("diagnostics-secondary-tef-overflow", formatCount(can.secondary_tef_overflows));
-            setText("diagnostics-secondary-errors", `${formatCount(can.secondary_receive_errors)} / ${formatCount(can.secondary_tx_event_errors)}`);
-            setText("diagnostics-secondary-bus-errors", `${formatCount(can.secondary_bus_errors)} / ${formatCount(can.secondary_tx_failures)}`);
-            setText("diagnostics-logger-drops", formatCount(consumers.logger_dropped_events));
-            setText("diagnostics-logger-errors", `${formatCount(consumers.logger_write_failures)} / ${formatCount(consumers.logger_sync_failures)}`);
+            setText("diagnostics-router-drops", formatCounterWithDelta(can.router_dropped_events, previous.router_dropped_events));
+            setText("diagnostics-monitor-drops", formatCounterWithDelta(can.monitor_dropped_events, previous.monitor_dropped_events));
+            setText("diagnostics-primary-rx-drops", formatCounterWithDelta(can.primary_dropped_rx_frames, previous.primary_dropped_rx_frames));
+            setText("diagnostics-primary-drops", formatCounterWithDelta(can.primary_dropped_confirmations, previous.primary_dropped_confirmations));
+            setText("diagnostics-primary-errors", `${formatCounterWithDelta(can.primary_bus_errors, previous.primary_bus_errors)} / ${formatCounterWithDelta(can.primary_ack_errors, previous.primary_ack_errors)}`);
+            setText("diagnostics-secondary-overflow", `${formatCounterWithDelta(can.secondary_dropped_rx_frames, previous.secondary_dropped_rx_frames)} / ${formatCounterWithDelta(can.secondary_rx_overflows, previous.secondary_rx_overflows)}`);
+            setText("diagnostics-secondary-tef-overflow", formatCounterWithDelta(can.secondary_tef_overflows, previous.secondary_tef_overflows));
+            setText("diagnostics-secondary-errors", `${formatCounterWithDelta(can.secondary_receive_errors, previous.secondary_receive_errors)} / ${formatCounterWithDelta(can.secondary_tx_event_errors, previous.secondary_tx_event_errors)}`);
+            setText("diagnostics-secondary-bus-errors", `${formatCounterWithDelta(can.secondary_bus_errors, previous.secondary_bus_errors)} / ${formatCounterWithDelta(can.secondary_tx_failures, previous.secondary_tx_failures)}`);
+            setText("diagnostics-logger-drops", formatCounterWithDelta(consumers.logger_dropped_events, previous.logger_dropped_events));
+            setText("diagnostics-logger-errors", `${formatCounterWithDelta(consumers.logger_write_failures, previous.logger_write_failures)} / ${formatCounterWithDelta(consumers.logger_sync_failures, previous.logger_sync_failures)}`);
 
             const totalErrors =
                 Number(can.router_dropped_events ?? 0) +
@@ -3723,12 +3921,45 @@
                 Number(consumers.logger_dropped_events ?? 0) +
                 Number(consumers.logger_write_failures ?? 0) +
                 Number(consumers.logger_sync_failures ?? 0);
+            const currentCounters = {
+                router_dropped_events: can.router_dropped_events,
+                monitor_dropped_events: can.monitor_dropped_events,
+                primary_dropped_confirmations: can.primary_dropped_confirmations,
+                primary_dropped_rx_frames: can.primary_dropped_rx_frames,
+                primary_bus_errors: can.primary_bus_errors,
+                primary_ack_errors: can.primary_ack_errors,
+                secondary_dropped_rx_frames: can.secondary_dropped_rx_frames,
+                secondary_rx_overflows: can.secondary_rx_overflows,
+                secondary_tef_overflows: can.secondary_tef_overflows,
+                secondary_receive_errors: can.secondary_receive_errors,
+                secondary_tx_event_errors: can.secondary_tx_event_errors,
+                secondary_bus_errors: can.secondary_bus_errors,
+                secondary_tx_failures: can.secondary_tx_failures,
+                logger_dropped_events: consumers.logger_dropped_events,
+                logger_write_failures: consumers.logger_write_failures,
+                logger_sync_failures: consumers.logger_sync_failures
+            };
+            const totalNewErrors = previousCounters === null
+                ? null
+                : Object.entries(currentCounters).reduce(
+                    (total, [name, value]) =>
+                        total + (counterDelta(value, previous[name]) ?? 0),
+                    0
+                );
 
             setBadge(
                 "diagnostics-error-state",
-                totalErrors === 0 ? "No errors" : `${formatCount(totalErrors)} total`,
-                totalErrors === 0 ? "ok" : "warning"
+                totalNewErrors === null
+                    ? `${formatCount(totalErrors)} total`
+                    : totalNewErrors === 0
+                        ? "Stable"
+                        : `+${formatCount(totalNewErrors)} new`,
+                (totalNewErrors === null) || (totalNewErrors === 0)
+                    ? "ok"
+                    : "warning"
             );
+
+            previousCounters = currentCounters;
         }
 
         function updateTasks(diagnostics) {
@@ -3807,6 +4038,7 @@
 
                 updateSystem(system, diagnostics);
                 updateCan(diagnostics);
+                updateHistory(system, diagnostics);
                 updateTasks(diagnostics);
                 setText("status", "Connected");
                 setText("diagnostics-updated", `Updated ${new Date().toLocaleTimeString()}`);
