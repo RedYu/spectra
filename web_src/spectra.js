@@ -4344,6 +4344,7 @@
 
             refreshInProgress = true;
             element("diagnostics-download").disabled = true;
+            element("diagnostics-reset-history").disabled = true;
 
             try {
                 const [systemResponse, diagnosticsResponse] = await Promise.all([
@@ -4381,7 +4382,66 @@
                 refreshInProgress = false;
                 element("diagnostics-download").disabled =
                     latestDiagnostics === null;
+                element("diagnostics-reset-history").disabled =
+                    latestDiagnostics === null;
             }
+        }
+
+        function resetHistory() {
+            if ((latestSystem === null) ||
+                (latestDiagnostics === null)) {
+
+                return;
+            }
+
+            for (const series of Object.values(history)) {
+                series.length = 0;
+            }
+
+            const can = latestDiagnostics.can ?? {};
+
+            previousSample = {
+                time: performance.now(),
+                primaryRx: Number(can.primary_received_frames ?? 0),
+                secondaryRx: Number(can.secondary_received_frames ?? 0)
+            };
+            previousCounters = null;
+            previousQueueDrops = null;
+            previousHealthCounters = null;
+
+            updateCan(latestDiagnostics);
+            updateQueues(latestDiagnostics);
+            latestHealth = updateHealth(latestSystem, latestDiagnostics);
+
+            setText("diagnostics-can-history-value", "0 / 0 frame/s");
+
+            drawHistory(
+                "diagnostics-cpu-history",
+                [history.cpu],
+                ["#3b82f6"],
+                100
+            );
+            drawHistory(
+                "diagnostics-heap-history",
+                [history.heap],
+                ["#a78bfa"]
+            );
+            drawHistory(
+                "diagnostics-can-history",
+                [history.primaryRx, history.secondaryRx],
+                ["#3b82f6", "#31c48d"]
+            );
+            drawHistory(
+                "diagnostics-queue-history",
+                [history.queue],
+                ["#f6b73c"],
+                100
+            );
+
+            setText(
+                "diagnostics-updated",
+                `History reset ${new Date().toLocaleTimeString()}`
+            );
         }
 
         function reportFileTimestamp(date) {
@@ -4457,6 +4517,10 @@
         }
 
         element("diagnostics-refresh").addEventListener("click", refresh);
+        element("diagnostics-reset-history").addEventListener(
+            "click",
+            resetHistory
+        );
         element("diagnostics-download").addEventListener("click", downloadReport);
 
         refresh();

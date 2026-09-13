@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Device Diagnostics · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=32">
-    <script src="spectra.js?v=32" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=33">
+    <script src="spectra.js?v=33" defer></script>
 </head>
 <body class="page-diagnostics">
     <header class="spectra-header">
@@ -18,7 +18,7 @@
     <main class="diagnostics-page">
         <section class="diagnostics-heading">
             <div><h1>Device Diagnostics</h1><p>Live health, memory, storage and CAN pipeline information.</p></div>
-            <div class="diagnostics-actions"><span id="diagnostics-updated">Not updated</span><button id="diagnostics-download" type="button" disabled>Download report</button><button id="diagnostics-refresh" type="button">Refresh</button></div>
+            <div class="diagnostics-actions"><span id="diagnostics-updated">Not updated</span><button id="diagnostics-reset-history" type="button" disabled>Reset history</button><button id="diagnostics-download" type="button" disabled>Download report</button><button id="diagnostics-refresh" type="button">Refresh</button></div>
         </section>
         <section id="diagnostics-health" class="diagnostics-health" aria-live="polite">
             <div class="diagnostics-health-summary"><span id="diagnostics-health-indicator" aria-hidden="true"></span><div><span class="diagnostics-card-label">Device health</span><strong id="diagnostics-health-state">Evaluating</strong></div></div>
@@ -74,7 +74,7 @@
                 </table>
             </div>
         </section>
-        <p class="diagnostics-note">Values update every 10 seconds. Charts retain 10 minutes in this browser only. Error deltas show changes since the previous successful refresh. Task enumeration runs only while this page is open; SD speeds are cached from the last startup benchmark.</p>
+        <p class="diagnostics-note">Values update every 10 seconds. Charts retain 10 minutes in this browser only. Reset history clears the charts and uses the current counters as new delta baselines. Task enumeration runs only while this page is open; SD speeds are cached from the last startup benchmark.</p>
     </main>
 </body>
 </html>

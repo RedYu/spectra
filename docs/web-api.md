@@ -158,6 +158,11 @@ The browser builds this report from a fresh `/api/system` and
 reasons, and up to ten minutes of browser-local chart history. The report is
 not written to device or SD-card storage.
 
+The page can also reset its browser-local chart history. Resetting records the
+current cumulative counters as new baselines, so later error and queue-drop
+deltas contain only changes observed after the reset. Counters on the device
+are not changed.
+
 ### `POST /api/system/restart`
 
 Schedules a graceful restart after a 500 ms delay. The delay allows the HTTP
