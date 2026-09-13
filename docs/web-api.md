@@ -177,11 +177,11 @@ or CAN recording is active. Running the test can temporarily reduce SD-card
 and display responsiveness, so it should be used as an explicit diagnostic
 operation rather than periodic monitoring.
 
-The browser health calculation evaluates application-task stack reserves at
-the normal warning and critical thresholds. FreeRTOS infrastructure tasks
-(`IDLE0`, `IDLE1`, IPC, system event loop, timer service, and ESP timer) use a
-separate critical threshold of 128 bytes because their intentionally small
-stacks would otherwise cause false device-health warnings.
+The browser health calculation reports application-task stack reserves below
+1 KiB as a warning and below 512 bytes as critical. FreeRTOS infrastructure
+tasks (`IDLE0`, `IDLE1`, IPC, system event loop, timer service, and ESP timer)
+use a separate critical threshold of 128 bytes because their intentionally
+small stacks would otherwise cause false device-health warnings.
 
 ### `POST /api/system/restart`
 

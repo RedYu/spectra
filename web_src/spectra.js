@@ -3902,7 +3902,7 @@
             }
 
             if ((lowestApplicationStack !== null) &&
-                (lowestApplicationStack.reserve < 1024)) {
+                (lowestApplicationStack.reserve < 512)) {
 
                 addReason(
                     2,
@@ -3910,7 +3910,7 @@
                     formatBytes(lowestApplicationStack.reserve)
                 );
             } else if ((lowestApplicationStack !== null) &&
-                       (lowestApplicationStack.reserve < 2048)) {
+                       (lowestApplicationStack.reserve < 1024)) {
 
                 addReason(
                     1,
