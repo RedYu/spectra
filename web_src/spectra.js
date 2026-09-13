@@ -3864,35 +3864,66 @@
                 }
             }
 
-            let lowestStack = null;
+            const systemTaskNames = new Set([
+                "IDLE0",
+                "IDLE1",
+                "ipc0",
+                "ipc1",
+                "esp_timer",
+                "Tmr Svc"
+            ]);
+            let lowestApplicationStack = null;
+            let lowestSystemStack = null;
 
             for (const task of tasks) {
                 const reserve = Number(task.stack_high_watermark_bytes ?? 0);
+                const stack = {
+                    name: task.name ?? "Unknown task",
+                    reserve
+                };
 
-                if ((reserve > 0) &&
-                    ((lowestStack === null) ||
-                     (reserve < lowestStack.reserve))) {
+                if (reserve <= 0) {
+                    continue;
+                }
 
-                    lowestStack = {
-                        name: task.name ?? "Unknown task",
-                        reserve
-                    };
+                if (systemTaskNames.has(stack.name)) {
+                    if ((lowestSystemStack === null) ||
+                        (reserve < lowestSystemStack.reserve)) {
+
+                        lowestSystemStack = stack;
+                    }
+                } else if ((lowestApplicationStack === null) ||
+                           (reserve < lowestApplicationStack.reserve)) {
+
+                    lowestApplicationStack = stack;
                 }
             }
 
-            if ((lowestStack !== null) &&
-                (lowestStack.reserve < 1024)) {
+            if ((lowestApplicationStack !== null) &&
+                (lowestApplicationStack.reserve < 1024)) {
 
                 addReason(
                     2,
-                    `${lowestStack.name} stack reserve is ${formatBytes(lowestStack.reserve)}`
+                    `${lowestApplicationStack.name} stack reserve is ` +
+                    formatBytes(lowestApplicationStack.reserve)
                 );
-            } else if ((lowestStack !== null) &&
-                       (lowestStack.reserve < 2048)) {
+            } else if ((lowestApplicationStack !== null) &&
+                       (lowestApplicationStack.reserve < 2048)) {
 
                 addReason(
                     1,
-                    `${lowestStack.name} stack reserve is ${formatBytes(lowestStack.reserve)}`
+                    `${lowestApplicationStack.name} stack reserve is ` +
+                    formatBytes(lowestApplicationStack.reserve)
+                );
+            }
+
+            if ((lowestSystemStack !== null) &&
+                (lowestSystemStack.reserve < 128)) {
+
+                addReason(
+                    2,
+                    `${lowestSystemStack.name} system stack reserve is ` +
+                    formatBytes(lowestSystemStack.reserve)
                 );
             }
 

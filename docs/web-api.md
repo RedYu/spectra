@@ -163,6 +163,12 @@ current cumulative counters as new baselines, so later error and queue-drop
 deltas contain only changes observed after the reset. Counters on the device
 are not changed.
 
+The browser health calculation evaluates application-task stack reserves at
+the normal warning and critical thresholds. FreeRTOS infrastructure tasks
+(`IDLE0`, `IDLE1`, IPC, timer service, and ESP timer) use a separate critical
+threshold of 128 bytes because their intentionally small stacks would
+otherwise cause false device-health warnings.
+
 ### `POST /api/system/restart`
 
 Schedules a graceful restart after a 500 ms delay. The delay allows the HTTP
