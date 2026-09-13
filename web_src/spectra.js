@@ -3491,6 +3491,9 @@
         let previousCounters = null;
         let previousQueueDrops = null;
         let previousHealthCounters = null;
+        let latestSystem = null;
+        let latestDiagnostics = null;
+        let latestHealth = null;
 
         const history = {
             cpu: [],
@@ -3977,6 +3980,14 @@
                 item.textContent = reason;
                 reasonList.append(item);
             }
+
+            return {
+                state: states[severity],
+                severity: severity === 0
+                    ? "ok"
+                    : classes[severity],
+                reasons: [...reasons]
+            };
         }
 
         function updateSystem(system, diagnostics) {
@@ -4328,10 +4339,11 @@
 
         async function refresh() {
             if (refreshInProgress) {
-                return;
+                return false;
             }
 
             refreshInProgress = true;
+            element("diagnostics-download").disabled = true;
 
             try {
                 const [systemResponse, diagnosticsResponse] = await Promise.all([
@@ -4353,20 +4365,99 @@
                 updateHistory(system, diagnostics);
                 updateQueues(diagnostics);
                 updateTasks(diagnostics);
-                updateHealth(system, diagnostics);
+                latestHealth = updateHealth(system, diagnostics);
+                latestSystem = system;
+                latestDiagnostics = diagnostics;
                 setText("status", "Connected");
                 setText("diagnostics-updated", `Updated ${new Date().toLocaleTimeString()}`);
                 element("status").classList.remove("warning");
+                return true;
             } catch (error) {
                 setText("status", "Unavailable");
                 setText("diagnostics-updated", error.message);
                 element("status").classList.add("warning");
+                return false;
             } finally {
                 refreshInProgress = false;
+                element("diagnostics-download").disabled =
+                    latestDiagnostics === null;
+            }
+        }
+
+        function reportFileTimestamp(date) {
+            const value = number =>
+                String(number).padStart(2, "0");
+
+            return `${date.getFullYear()}${value(date.getMonth() + 1)}` +
+                `${value(date.getDate())}-${value(date.getHours())}` +
+                `${value(date.getMinutes())}${value(date.getSeconds())}`;
+        }
+
+        async function downloadReport() {
+            const button = element("diagnostics-download");
+            button.disabled = true;
+
+            try {
+                const refreshed = await refresh();
+
+                if (!refreshed ||
+                    (latestSystem === null) ||
+                    (latestDiagnostics === null) ||
+                    (latestHealth === null)) {
+
+                    throw new Error("Unable to collect a fresh diagnostic snapshot");
+                }
+
+                const generatedAt = new Date();
+                const report = {
+                    schema: "spectra-diagnostic-report",
+                    schema_version: 1,
+                    generated_at: generatedAt.toISOString(),
+                    browser: {
+                        user_agent: navigator.userAgent,
+                        language: navigator.language,
+                        online: navigator.onLine
+                    },
+                    health: latestHealth,
+                    system: latestSystem,
+                    diagnostics: latestDiagnostics,
+                    browser_history: {
+                        sample_interval_ms: REFRESH_INTERVAL_MS,
+                        maximum_points: HISTORY_POINT_COUNT,
+                        cpu_percent: [...history.cpu],
+                        internal_heap_kib: [...history.heap],
+                        primary_rx_frames_per_second: [...history.primaryRx],
+                        secondary_rx_frames_per_second: [...history.secondaryRx],
+                        maximum_queue_usage_percent: [...history.queue]
+                    }
+                };
+                const blob = new Blob(
+                    [JSON.stringify(report, null, 2)],
+                    {type: "application/json"}
+                );
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+
+                link.href = url;
+                link.download =
+                    `diagnostic-report-${reportFileTimestamp(generatedAt)}.json`;
+                document.body.append(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+                setText(
+                    "diagnostics-updated",
+                    `Report saved ${generatedAt.toLocaleTimeString()}`
+                );
+            } catch (error) {
+                setText("diagnostics-updated", error.message);
+            } finally {
+                button.disabled = latestDiagnostics === null;
             }
         }
 
         element("diagnostics-refresh").addEventListener("click", refresh);
+        element("diagnostics-download").addEventListener("click", downloadReport);
 
         refresh();
         refreshTimer = setInterval(refresh, REFRESH_INTERVAL_MS);

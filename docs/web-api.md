@@ -152,6 +152,12 @@ Error and drop counters are cumulative for the current service run.
 Task enumeration is performed only when the endpoint is requested and can
 briefly suspend task scheduling, so clients should not poll it rapidly.
 
+The Device Diagnostics page can download a `diagnostic-report-*.json` file.
+The browser builds this report from a fresh `/api/system` and
+`/api/diagnostics` snapshot and includes the calculated health status, active
+reasons, and up to ten minutes of browser-local chart history. The report is
+not written to device or SD-card storage.
+
 ### `POST /api/system/restart`
 
 Schedules a graceful restart after a 500 ms delay. The delay allows the HTTP

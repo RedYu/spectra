@@ -1893,6 +1893,7 @@ body:where(.page-test) {
 }
 .diagnostics-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
     color: #8f9ba8;
