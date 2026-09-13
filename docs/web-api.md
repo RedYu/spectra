@@ -133,13 +133,19 @@ The response contains three objects:
 
 - `heap`: current, minimum, and largest-block values for internal, DMA-capable,
   and PSRAM heaps;
-- `can`: router and monitor queue usage, traffic totals, interface state, and
-  CAN service error counters;
+- `can`: router and monitor queue usage, traffic totals, interface state,
+  hardware RX overflow/drop counters, and CAN controller errors;
 - `consumers`: WebSocket stream and CAN logger state, queue usage, drops,
-  failures, and output totals.
+  failures, and output totals;
+- `storage_benchmark`: cached write, filesystem-read, raw-read, latency, and
+  synchronization measurements from the last SD benchmark;
+- `tasks`: FreeRTOS task name, state, core affinity, priority, accumulated CPU
+  share, and minimum remaining stack.
 
 Queue values are exposed as separate `*_current`, `*_peak`, and `*_capacity`
 members. Error and drop counters are cumulative for the current service run.
+Task enumeration is performed only when the endpoint is requested and can
+briefly suspend task scheduling, so clients should not poll it rapidly.
 
 ### `POST /api/system/restart`
 

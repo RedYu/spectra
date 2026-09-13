@@ -12,6 +12,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 
 #include "storage_sd_service.h"
 #include "sd_card_driver.h"
@@ -21,6 +22,17 @@
 #define STORAGE_SD_BENCHMARK_MAX_BLOCK_SIZE (64U * 1024U)
 
 static const char *TAG = "storage_sd_benchmark";
+
+static portMUX_TYPE s_result_lock =
+    portMUX_INITIALIZER_UNLOCKED;
+
+static bool s_result_available = false;
+
+static storage_sd_benchmark_result_t
+    s_last_result = {0};
+
+static esp_err_t s_last_status =
+    ESP_ERR_NOT_FOUND;
 
 static esp_err_t storage_sd_benchmark_raw_read(
     uint8_t *buffer,
@@ -348,7 +360,43 @@ cleanup:
         );
     }
 
+    portENTER_CRITICAL(&s_result_lock);
+
+    s_last_result = *result;
+    s_last_status = operation_result;
+    s_result_available = true;
+
+    portEXIT_CRITICAL(&s_result_lock);
+
     return operation_result;
+}
+
+esp_err_t storage_sd_benchmark_get_last_result(
+    storage_sd_benchmark_result_t *result,
+    esp_err_t *status
+)
+{
+    if ((result == NULL) ||
+        (status == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    portENTER_CRITICAL(&s_result_lock);
+
+    const bool available =
+        s_result_available;
+
+    if (available) {
+        *result = s_last_result;
+        *status = s_last_status;
+    }
+
+    portEXIT_CRITICAL(&s_result_lock);
+
+    return available
+        ? ESP_OK
+        : ESP_ERR_NOT_FOUND;
 }
 
 static esp_err_t storage_sd_benchmark_raw_read(

@@ -2003,6 +2003,45 @@ body:where(.page-test) {
     margin-top: 16px;
     font-size: 12px;
 }
+.diagnostics-tasks {
+    margin-top: 14px;
+}
+.diagnostics-task-table-wrapper {
+    max-height: 430px;
+    overflow: auto;
+    border: 1px solid #27313d;
+    border-radius: 8px;
+}
+.diagnostics-task-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.diagnostics-task-table th,
+.diagnostics-task-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #27313d;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+}
+.diagnostics-task-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    color: #8f9ba8;
+    background: #18212b;
+    font-weight: 500;
+}
+.diagnostics-task-table th:first-child,
+.diagnostics-task-table th:nth-child(2),
+.diagnostics-task-table td:first-child,
+.diagnostics-task-table td:nth-child(2) {
+    text-align: left;
+}
+.diagnostics-task-table tbody tr:last-child td {
+    border-bottom: 0;
+}
 @media (max-width: 1050px) {
     .diagnostics-summary,
     .diagnostics-grid {

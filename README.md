@@ -354,7 +354,7 @@ Detailed request and response documentation is available in
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/api/system` | Read system, CPU, memory, storage, and reset information |
-| `GET` | `/api/diagnostics` | Read heap, CAN pipeline, WebSocket, and logger diagnostics |
+| `GET` | `/api/diagnostics` | Read heap, FreeRTOS tasks, SD speed, CAN overflow/drop, queues, WebSocket, and logger diagnostics |
 | `POST` | `/api/system/restart` | Request a graceful device restart |
 | `GET` | `/api/network` | Read Wi-Fi, USB RNDIS, DNS, and mDNS information |
 | `POST` | `/api/network/wifi/scan` | Start a Wi-Fi network scan |

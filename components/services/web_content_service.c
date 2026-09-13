@@ -191,7 +191,13 @@ static esp_err_t web_content_send_storage_file(
         httpd_resp_set_hdr(
             request,
             "Cache-Control",
-            WEB_CONTENT_CACHE_CONTROL
+            (strncmp(
+                content_type,
+                "text/html",
+                strlen("text/html")
+            ) == 0)
+                ? "no-cache"
+                : WEB_CONTENT_CACHE_CONTROL
         );
 
     if (result != ESP_OK) {
@@ -410,6 +416,38 @@ static esp_err_t web_content_diagnostics_page_handler(
     );
 }
 
+static esp_err_t web_content_legacy_can_test_handler(
+    httpd_req_t *request
+)
+{
+    esp_err_t result =
+        httpd_resp_set_status(
+            request,
+            "302 Found"
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        httpd_resp_set_hdr(
+            request,
+            "Location",
+            "/diagnostics"
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return httpd_resp_send(
+        request,
+        NULL,
+        0U
+    );
+}
+
 static esp_err_t web_content_isotp_page_handler(
     httpd_req_t *request
 )
@@ -584,6 +622,20 @@ esp_err_t web_content_service_register(
             NULL,
     };
 
+    static const httpd_uri_t legacy_can_test_uri = {
+        .uri =
+            "/can_test",
+
+        .method =
+            HTTP_GET,
+
+        .handler =
+            web_content_legacy_can_test_handler,
+
+        .user_ctx =
+            NULL,
+    };
+
     static const httpd_uri_t isotp_page_uri = {
         .uri =
             "/isotp",
@@ -716,6 +768,22 @@ esp_err_t web_content_service_register(
         ESP_LOGE(
             TAG,
             "Failed to register GET /diagnostics: %s",
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    result =
+        httpd_register_uri_handler(
+            server,
+            &legacy_can_test_uri
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to register legacy GET /can_test: %s",
             esp_err_to_name(result)
         );
 

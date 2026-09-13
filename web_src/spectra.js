@@ -3482,7 +3482,7 @@
     }
 
     function init_diagnostics() {
-        const REFRESH_INTERVAL_MS = 5000;
+        const REFRESH_INTERVAL_MS = 10000;
 
         let refreshTimer = null;
         let refreshInProgress = false;
@@ -3514,6 +3514,32 @@
             }
 
             return `${(bytes / 1024).toFixed(1)} KiB`;
+        }
+
+        function formatSpeed(value) {
+            const bytesPerSecond = Number(value ?? 0);
+
+            if (!Number.isFinite(bytesPerSecond) ||
+                (bytesPerSecond <= 0)) {
+
+                return "—";
+            }
+
+            return `${(bytesPerSecond / (1024 * 1024)).toFixed(2)} MiB/s`;
+        }
+
+        function formatMicroseconds(value) {
+            const microseconds = Number(value ?? 0);
+
+            if (!Number.isFinite(microseconds) ||
+                (microseconds <= 0)) {
+
+                return "—";
+            }
+
+            return microseconds >= 1000
+                ? `${(microseconds / 1000).toFixed(1)} ms`
+                : `${microseconds.toFixed(0)} µs`;
         }
 
         function formatCount(value) {
@@ -3554,6 +3580,7 @@
 
         function updateSystem(system, diagnostics) {
             const heap = diagnostics.heap ?? {};
+            const benchmark = diagnostics.storage_benchmark ?? {};
             const cpu = Number(system.cpu_usage ?? 0);
             const internalFree = Number(heap.internal_free ?? system.free_heap ?? 0);
             const internalMinimum = Number(heap.internal_minimum_free ?? system.minimum_free_heap ?? 0);
@@ -3597,6 +3624,30 @@
             setText("diagnostics-sd-filesystem", system.sd_card_filesystem || "—");
             setText("diagnostics-sd-free", formatBytes(system.sd_card_free_bytes));
             setText("diagnostics-sd-used", formatBytes(system.sd_card_used_bytes));
+            setText(
+                "diagnostics-sd-write",
+                benchmark.available
+                    ? formatSpeed(benchmark.write_bytes_per_second)
+                    : "Not measured"
+            );
+            setText(
+                "diagnostics-sd-read",
+                benchmark.available
+                    ? `${formatSpeed(benchmark.read_bytes_per_second)} / ${formatSpeed(benchmark.raw_read_bytes_per_second)}`
+                    : "Not measured"
+            );
+            setText(
+                "diagnostics-sd-write-latency",
+                benchmark.available
+                    ? formatMicroseconds(benchmark.maximum_write_us)
+                    : "—"
+            );
+            setText(
+                "diagnostics-sd-sync",
+                benchmark.available
+                    ? formatMicroseconds(benchmark.sync_us)
+                    : "—"
+            );
             setText("diagnostics-time", system.time?.local ?? "Unavailable");
             setText("diagnostics-time-sync", system.time?.synchronized ? "Synchronized" : "Not synchronized");
             setBadge(
@@ -3645,8 +3696,13 @@
 
             setText("diagnostics-router-drops", formatCount(can.router_dropped_events));
             setText("diagnostics-monitor-drops", formatCount(can.monitor_dropped_events));
+            setText("diagnostics-primary-rx-drops", formatCount(can.primary_dropped_rx_frames));
             setText("diagnostics-primary-drops", formatCount(can.primary_dropped_confirmations));
+            setText("diagnostics-primary-errors", `${formatCount(can.primary_bus_errors)} / ${formatCount(can.primary_ack_errors)}`);
+            setText("diagnostics-secondary-overflow", `${formatCount(can.secondary_dropped_rx_frames)} / ${formatCount(can.secondary_rx_overflows)}`);
+            setText("diagnostics-secondary-tef-overflow", formatCount(can.secondary_tef_overflows));
             setText("diagnostics-secondary-errors", `${formatCount(can.secondary_receive_errors)} / ${formatCount(can.secondary_tx_event_errors)}`);
+            setText("diagnostics-secondary-bus-errors", `${formatCount(can.secondary_bus_errors)} / ${formatCount(can.secondary_tx_failures)}`);
             setText("diagnostics-logger-drops", formatCount(consumers.logger_dropped_events));
             setText("diagnostics-logger-errors", `${formatCount(consumers.logger_write_failures)} / ${formatCount(consumers.logger_sync_failures)}`);
 
@@ -3654,8 +3710,16 @@
                 Number(can.router_dropped_events ?? 0) +
                 Number(can.monitor_dropped_events ?? 0) +
                 Number(can.primary_dropped_confirmations ?? 0) +
+                Number(can.primary_dropped_rx_frames ?? 0) +
+                Number(can.primary_bus_errors ?? 0) +
+                Number(can.primary_ack_errors ?? 0) +
+                Number(can.secondary_dropped_rx_frames ?? 0) +
+                Number(can.secondary_rx_overflows ?? 0) +
+                Number(can.secondary_tef_overflows ?? 0) +
                 Number(can.secondary_receive_errors ?? 0) +
                 Number(can.secondary_tx_event_errors ?? 0) +
+                Number(can.secondary_bus_errors ?? 0) +
+                Number(can.secondary_tx_failures ?? 0) +
                 Number(consumers.logger_dropped_events ?? 0) +
                 Number(consumers.logger_write_failures ?? 0) +
                 Number(consumers.logger_sync_failures ?? 0);
@@ -3665,6 +3729,58 @@
                 totalErrors === 0 ? "No errors" : `${formatCount(totalErrors)} total`,
                 totalErrors === 0 ? "ok" : "warning"
             );
+        }
+
+        function updateTasks(diagnostics) {
+            const body = element("diagnostics-task-list");
+            const tasks = Array.isArray(diagnostics.tasks)
+                ? diagnostics.tasks
+                : [];
+
+            body.replaceChildren();
+
+            setBadge(
+                "diagnostics-task-count",
+                diagnostics.tasks_available
+                    ? `${tasks.length} tasks`
+                    : "Unavailable",
+                diagnostics.tasks_available ? "ok" : "warning"
+            );
+
+            if (tasks.length === 0) {
+                const row = document.createElement("tr");
+                const cell = document.createElement("td");
+                cell.colSpan = 6;
+                cell.textContent = "Task statistics are unavailable.";
+                row.append(cell);
+                body.append(row);
+                return;
+            }
+
+            tasks.sort((left, right) =>
+                Number(right.runtime_percent ?? 0) -
+                Number(left.runtime_percent ?? 0)
+            );
+
+            for (const task of tasks) {
+                const row = document.createElement("tr");
+                const values = [
+                    task.name ?? "—",
+                    task.state ?? "—",
+                    Number(task.core) < 0 ? "Any" : task.core,
+                    task.priority ?? "—",
+                    `${Number(task.runtime_percent ?? 0).toFixed(2)}%`,
+                    formatBytes(task.stack_high_watermark_bytes)
+                ];
+
+                for (const value of values) {
+                    const cell = document.createElement("td");
+                    cell.textContent = value;
+                    row.append(cell);
+                }
+
+                body.append(row);
+            }
         }
 
         async function refresh() {
@@ -3691,6 +3807,7 @@
 
                 updateSystem(system, diagnostics);
                 updateCan(diagnostics);
+                updateTasks(diagnostics);
                 setText("status", "Connected");
                 setText("diagnostics-updated", `Updated ${new Date().toLocaleTimeString()}`);
                 element("status").classList.remove("warning");

@@ -96,6 +96,23 @@ esp_err_t storage_sd_benchmark_run(
     storage_sd_benchmark_result_t *result
 );
 
+/**
+ * @brief Copy the most recently completed SD-card benchmark result.
+ *
+ * Reading the cached result does not access the SD card and does not start a
+ * new benchmark.
+ *
+ * @param[out] result Destination benchmark result.
+ * @param[out] status Final status returned by storage_sd_benchmark_run().
+ *
+ * @return ESP_OK when a result is available, ESP_ERR_NOT_FOUND before the
+ * first benchmark completes, or ESP_ERR_INVALID_ARG for invalid arguments.
+ */
+esp_err_t storage_sd_benchmark_get_last_result(
+    storage_sd_benchmark_result_t *result,
+    esp_err_t *status
+);
+
 #ifdef __cplusplus
 }
 #endif

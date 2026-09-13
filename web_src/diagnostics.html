@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Device Diagnostics · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=27">
-    <script src="spectra.js?v=27" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=28">
+    <script src="spectra.js?v=28" defer></script>
 </head>
 <body class="page-diagnostics">
     <header class="spectra-header">
@@ -31,7 +31,7 @@
                 <dt>Internal free</dt><dd id="diagnostics-internal-free">—</dd><dt>Internal largest block</dt><dd id="diagnostics-internal-largest">—</dd><dt>DMA free</dt><dd id="diagnostics-dma-free">—</dd><dt>DMA largest block</dt><dd id="diagnostics-dma-largest">—</dd><dt>PSRAM free</dt><dd id="diagnostics-psram-free">—</dd><dt>PSRAM largest block</dt><dd id="diagnostics-psram-largest">—</dd>
             </dl></article>
             <article class="diagnostics-card"><header><h2>Storage &amp; time</h2><span id="diagnostics-storage-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
-                <dt>SD card</dt><dd id="diagnostics-sd-mounted">—</dd><dt>Filesystem</dt><dd id="diagnostics-sd-filesystem">—</dd><dt>SD free</dt><dd id="diagnostics-sd-free">—</dd><dt>SD used</dt><dd id="diagnostics-sd-used">—</dd><dt>Local time</dt><dd id="diagnostics-time">—</dd><dt>Synchronization</dt><dd id="diagnostics-time-sync">—</dd>
+                <dt>SD card</dt><dd id="diagnostics-sd-mounted">—</dd><dt>Filesystem</dt><dd id="diagnostics-sd-filesystem">—</dd><dt>SD free</dt><dd id="diagnostics-sd-free">—</dd><dt>SD used</dt><dd id="diagnostics-sd-used">—</dd><dt>Write speed</dt><dd id="diagnostics-sd-write">—</dd><dt>Read / raw read</dt><dd id="diagnostics-sd-read">—</dd><dt>Worst write block</dt><dd id="diagnostics-sd-write-latency">—</dd><dt>Last sync</dt><dd id="diagnostics-sd-sync">—</dd><dt>Local time</dt><dd id="diagnostics-time">—</dd><dt>Synchronization</dt><dd id="diagnostics-time-sync">—</dd>
             </dl></article>
             <article class="diagnostics-card"><header><h2>CAN pipeline</h2><span id="diagnostics-can-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
                 <dt>Primary CAN</dt><dd id="diagnostics-primary-state">—</dd><dt>Primary RX / TX</dt><dd id="diagnostics-primary-traffic">—</dd><dt>Secondary CAN</dt><dd id="diagnostics-secondary-state">—</dd><dt>Secondary RX / TX</dt><dd id="diagnostics-secondary-traffic">—</dd><dt>Router queue</dt><dd id="diagnostics-router-queue">—</dd><dt>Monitor queue</dt><dd id="diagnostics-monitor-queue">—</dd><dt>Tracked identifiers</dt><dd id="diagnostics-identifiers">—</dd>
@@ -40,13 +40,22 @@
                 <dt>WebSocket client</dt><dd id="diagnostics-stream-client">—</dd><dt>WebSocket queue</dt><dd id="diagnostics-stream-queue">—</dd><dt>WebSocket drops / failures</dt><dd id="diagnostics-stream-errors">—</dd><dt>CAN logger</dt><dd id="diagnostics-logger-state">—</dd><dt>Logger queue</dt><dd id="diagnostics-logger-queue">—</dd><dt>Written events / bytes</dt><dd id="diagnostics-logger-written">—</dd>
             </dl></article>
             <article class="diagnostics-card diagnostics-errors"><header><h2>Error counters</h2><span id="diagnostics-error-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
-                <dt>Router drops</dt><dd id="diagnostics-router-drops">—</dd><dt>Monitor drops</dt><dd id="diagnostics-monitor-drops">—</dd><dt>Primary confirmation drops</dt><dd id="diagnostics-primary-drops">—</dd><dt>Secondary RX / TX errors</dt><dd id="diagnostics-secondary-errors">—</dd><dt>Logger drops</dt><dd id="diagnostics-logger-drops">—</dd><dt>Logger write / sync failures</dt><dd id="diagnostics-logger-errors">—</dd>
+                <dt>Router drops</dt><dd id="diagnostics-router-drops">—</dd><dt>Monitor drops</dt><dd id="diagnostics-monitor-drops">—</dd><dt>Primary RX drops</dt><dd id="diagnostics-primary-rx-drops">—</dd><dt>Primary confirmation drops</dt><dd id="diagnostics-primary-drops">—</dd><dt>Primary bus / ACK errors</dt><dd id="diagnostics-primary-errors">—</dd><dt>Secondary RX drops / overflow</dt><dd id="diagnostics-secondary-overflow">—</dd><dt>Secondary TEF overflow</dt><dd id="diagnostics-secondary-tef-overflow">—</dd><dt>Secondary service RX / TX errors</dt><dd id="diagnostics-secondary-errors">—</dd><dt>Secondary bus / TX failures</dt><dd id="diagnostics-secondary-bus-errors">—</dd><dt>Logger drops</dt><dd id="diagnostics-logger-drops">—</dd><dt>Logger write / sync failures</dt><dd id="diagnostics-logger-errors">—</dd>
             </dl></article>
             <article class="diagnostics-card"><header><h2>Device</h2><span id="diagnostics-network-state" class="diagnostics-badge">—</span></header><dl class="diagnostics-values">
                 <dt>Device</dt><dd id="diagnostics-device">—</dd><dt>Firmware</dt><dd id="diagnostics-firmware">—</dd><dt>Chip</dt><dd id="diagnostics-chip">—</dd><dt>CPU frequency</dt><dd id="diagnostics-frequency">—</dd><dt>Internet</dt><dd id="diagnostics-internet">—</dd><dt>OTA</dt><dd id="diagnostics-ota">—</dd>
             </dl></article>
         </section>
-        <p class="diagnostics-note">Values update every 5 seconds. Task-level tracing is intentionally disabled to keep diagnostics lightweight.</p>
+        <section class="diagnostics-card diagnostics-tasks">
+            <header><h2>FreeRTOS tasks</h2><span id="diagnostics-task-count" class="diagnostics-badge">—</span></header>
+            <div class="diagnostics-task-table-wrapper">
+                <table class="diagnostics-task-table">
+                    <thead><tr><th>Task</th><th>State</th><th>Core</th><th>Priority</th><th>CPU</th><th>Stack reserve</th></tr></thead>
+                    <tbody id="diagnostics-task-list"><tr><td colspan="6">Loading tasks…</td></tr></tbody>
+                </table>
+            </div>
+        </section>
+        <p class="diagnostics-note">Values update every 10 seconds. Task enumeration runs only while this page is open; SD speeds are cached from the last startup benchmark.</p>
     </main>
 </body>
 </html>
