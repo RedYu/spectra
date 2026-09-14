@@ -6963,9 +6963,12 @@
                 selected !== 'routine';
             const security =
                 selected === 'security_seed' ||
-                selected === 'security_key';
+                selected === 'security_key' ||
+                selected === 'security_unlock';
             element('uds-security-level-field').hidden = !security;
             element('uds-security-data-field').hidden = !security;
+            element('uds-security-key-field').hidden =
+                selected !== 'security_unlock';
             element('uds-security-data-label').textContent =
                 selected === 'security_key'
                     ? 'Calculated key (HEX bytes)'
@@ -6998,6 +7001,15 @@
                 download ||
                 transfer ||
                 selected === 'raw';
+
+            sendButton.textContent =
+                selected === 'security_seed'
+                    ? 'Request seed'
+                    : selected === 'security_key'
+                        ? 'Send key'
+                        : selected === 'security_unlock'
+                            ? 'Request seed and unlock'
+                            : 'Send UDS request';
         }
 
         function decodeDtcResponse(payloadText) {
@@ -7245,6 +7257,20 @@
                     summary.textContent = 'No response';
                     message.textContent = stateNames[data.state] || 'UDS channel is ready.';
                 }
+
+                if (data.security_waiting_for_seed) {
+                    message.textContent =
+                        'Waiting for the SecurityAccess seed.';
+                } else if (data.security_waiting_for_key) {
+                    message.textContent =
+                        'Seed received. The one-time key was sent to the ECU.';
+                } else if (data.security_unlocked) {
+                    message.textContent =
+                        `Security level 0x${Number(data.security_level)
+                            .toString(16)
+                            .padStart(2, '0')
+                            .toUpperCase()} unlocked.`;
+                }
             } catch (error) {
                 status.textContent = 'Unavailable';
                 status.classList.add('error');
@@ -7390,7 +7416,8 @@
                             return;
                     }
                 } else if (kind === 'security_seed' ||
-                           kind === 'security_key') {
+                           kind === 'security_key' ||
+                           kind === 'security_unlock') {
 
                     request.value =
                         parseHexNumber(
@@ -7410,7 +7437,7 @@
                     request.data =
                         normalizeHex(
                             element('uds-security-data').value,
-                            kind === 'security_seed'
+                            kind !== 'security_key'
                         );
 
                     if (request.data === null)
@@ -7426,9 +7453,32 @@
                         );
                     }
 
-                    if (kind === 'security_key' &&
+                    if (kind === 'security_unlock') {
+                        request.key =
+                            normalizeHex(
+                                element('uds-security-key').value,
+                                false
+                            );
+
+                        if (request.key === null) {
+                            throw new Error(
+                                'Manual unlock requires at least one key byte.'
+                            );
+                        }
+
+                        if (request.key.split(' ').length > 64) {
+                            throw new Error(
+                                'Manual key exceeds the 64-byte provider limit.'
+                            );
+                        }
+                    }
+
+                    if ((kind === 'security_key' ||
+                         kind === 'security_unlock') &&
                         !window.confirm(
-                            'Send this calculated security key to the selected ECU?'
+                            kind === 'security_unlock'
+                                ? 'Request a seed and send this one-time key to the selected ECU?'
+                                : 'Send this calculated security key to the selected ECU?'
                         )) {
 
                         return;
@@ -7695,29 +7745,39 @@
             fileSelector.disabled = true;
 
             try {
-                const query = new URLSearchParams({
-                    volume : 'sd',
-                    path : '/firmwares',
-                    offset : '0',
-                    limit : '64'
-                });
-                const response = await fetch(
-                    `/api/files?${query.toString()}`,
-                    {cache : 'no-store'}
-                );
-                const result = await response.json();
+                files = [];
+                let offset = 0;
+                let hasMore = false;
 
-                if (!response.ok)
-                    throw new Error(result.message || `HTTP ${response.status}`);
+                do {
+                    const query = new URLSearchParams({
+                        volume : 'sd',
+                        path : '/firmwares',
+                        offset : String(offset),
+                        limit : '32'
+                    });
+                    const response = await fetch(
+                        `/api/files?${query.toString()}`,
+                        {cache : 'no-store'}
+                    );
+                    const result = await response.json();
 
-                files = (result.entries || [])
-                    .filter(entry =>
+                    if (!response.ok)
+                        throw new Error(result.message || `HTTP ${response.status}`);
+                    if (!Array.isArray(result.entries))
+                        throw new Error('Invalid firmware file-list response');
+
+                    files.push(...result.entries.filter(entry =>
                         entry.type !== 'directory' &&
                         /\.(bin|hex|srec|mot)$/i.test(entry.name)
-                    )
-                    .sort((left, right) =>
-                        left.name.localeCompare(right.name)
-                    );
+                    ));
+                    offset += result.entries.length;
+                    hasMore = result.has_more === true;
+                } while (hasMore && (offset <= 1024));
+
+                files.sort((left, right) =>
+                    left.name.localeCompare(right.name)
+                );
 
                 fileSelector.replaceChildren();
 

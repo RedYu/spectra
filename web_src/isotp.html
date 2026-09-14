@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=26">
-    <script src="spectra.js?v=26" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=35">
+    <script src="spectra.js?v=35" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -274,6 +274,7 @@
                             <option value="routine">Routine Control</option>
                             <option value="security_seed">Security Access · Request Seed</option>
                             <option value="security_key">Security Access · Send Key</option>
+                            <option value="security_unlock">Security Access · Manual unlock</option>
                             <option value="request_download">Request Download</option>
                             <option value="transfer_data">Transfer Data</option>
                             <option value="transfer_exit">Request Transfer Exit</option>
@@ -398,6 +399,11 @@
                 <label id="uds-security-data-field" hidden>
                     <span id="uds-security-data-label">Data record (HEX bytes)</span>
                     <textarea id="uds-security-data" rows="4" spellcheck="false"></textarea>
+                </label>
+
+                <label id="uds-security-key-field" hidden>
+                    Manual key (HEX bytes, used once)
+                    <textarea id="uds-security-key" rows="4" spellcheck="false"></textarea>
                 </label>
 
                 <label id="uds-transfer-data-field" hidden>
