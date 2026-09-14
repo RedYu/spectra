@@ -6,6 +6,7 @@ idf_component_register(
         "test_isotp_session.c"
         "test_uds_protocol.c"
         "test_uds_security_access.c"
+        "test_uds_security_provider.c"
         "test_uds_download.c"
         "test_xcp_protocol.c"
 
