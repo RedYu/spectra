@@ -38,6 +38,17 @@
 #define WEB_UDS_JOURNAL_PATH_MAX_SIZE    (128U)
 #define WEB_UDS_JOURNAL_LINE_MAX_SIZE    (384U)
 
+typedef enum
+{
+    WEB_UDS_SECURITY_IDLE = 0,
+    WEB_UDS_SECURITY_WAITING_SEED,
+    WEB_UDS_SECURITY_CALCULATING_KEY,
+    WEB_UDS_SECURITY_SENDING_KEY,
+    WEB_UDS_SECURITY_UNLOCKED,
+    WEB_UDS_SECURITY_ERROR,
+
+} web_uds_security_state_t;
+
 static SemaphoreHandle_t s_lock = NULL;
 static uint8_t *s_receive_buffer = NULL;
 static uint8_t *s_transmit_buffer = NULL;
@@ -49,10 +60,12 @@ static bool s_client_config_valid = false;
 static uds_security_provider_t s_security_provider;
 static bool s_security_provider_initialized = false;
 static uint8_t s_security_level = 0U;
-static bool s_security_waiting_for_seed = false;
-static bool s_security_waiting_for_key = false;
-static bool s_security_unlocked = false;
+static web_uds_security_state_t s_security_state =
+    WEB_UDS_SECURITY_IDLE;
 static esp_err_t s_security_result = ESP_OK;
+static uint8_t s_security_negative_response_code = 0U;
+static uint32_t s_security_generation = 0U;
+static uint32_t s_security_active_generation = 0U;
 static uint8_t s_security_pending_key[
     UDS_SECURITY_PROVIDER_MANUAL_KEY_SIZE
 ];
@@ -132,11 +145,22 @@ static void web_uds_client_callback(
 
 static void web_uds_security_reset(void);
 
+static uint32_t web_uds_security_next_generation(void);
+
+static bool web_uds_security_busy(void);
+
+static void web_uds_security_finish_error(
+    esp_err_t result,
+    uint8_t negative_response_code
+);
+
 static esp_err_t web_uds_security_unlock(
     const cJSON *root
 );
 
 static void web_uds_security_submit_key(void);
+
+static esp_err_t web_uds_security_cancel(void);
 
 static esp_err_t web_uds_configure(
     const cJSON *root
@@ -452,17 +476,64 @@ static void web_uds_security_reset(void)
         );
     }
 
+    s_security_generation =
+        web_uds_security_next_generation();
+    s_security_active_generation = 0U;
     s_security_level = 0U;
-    s_security_waiting_for_seed = false;
-    s_security_waiting_for_key = false;
-    s_security_unlocked = false;
+    s_security_state = WEB_UDS_SECURITY_IDLE;
     s_security_result = ESP_OK;
+    s_security_negative_response_code = 0U;
     web_uds_erase(
         s_security_pending_key,
         sizeof(s_security_pending_key)
     );
     s_security_pending_key_length = 0U;
     s_security_key_ready = false;
+}
+
+static uint32_t web_uds_security_next_generation(void)
+{
+    uint32_t generation = s_security_generation + 1U;
+
+    if (generation == 0U) {
+        generation = 1U;
+    }
+
+    return generation;
+}
+
+static bool web_uds_security_busy(void)
+{
+    return (s_security_state ==
+            WEB_UDS_SECURITY_WAITING_SEED) ||
+           (s_security_state ==
+            WEB_UDS_SECURITY_CALCULATING_KEY) ||
+           (s_security_state ==
+            WEB_UDS_SECURITY_SENDING_KEY);
+}
+
+static void web_uds_security_finish_error(
+    esp_err_t result,
+    uint8_t negative_response_code
+)
+{
+    if (s_security_provider_initialized) {
+        uds_security_provider_clear_manual_key(
+            &s_security_provider
+        );
+    }
+
+    web_uds_erase(
+        s_security_pending_key,
+        sizeof(s_security_pending_key)
+    );
+
+    s_security_pending_key_length = 0U;
+    s_security_key_ready = false;
+    s_security_state = WEB_UDS_SECURITY_ERROR;
+    s_security_result = result;
+    s_security_negative_response_code =
+        negative_response_code;
 }
 
 static esp_err_t web_uds_security_unlock(
@@ -476,6 +547,7 @@ static esp_err_t web_uds_security_unlock(
     uint32_t security_level = 0U;
 
     if (!s_security_provider_initialized ||
+        web_uds_security_busy() ||
         !web_uds_number(
             root,
             "value",
@@ -542,13 +614,17 @@ static esp_err_t web_uds_security_unlock(
     }
 
     if (result == ESP_OK) {
+        s_security_generation =
+            web_uds_security_next_generation();
+        s_security_active_generation =
+            s_security_generation;
         s_security_level = (uint8_t)security_level;
-        s_security_waiting_for_seed = true;
-        s_security_waiting_for_key = false;
-        s_security_unlocked = false;
+        s_security_state = WEB_UDS_SECURITY_WAITING_SEED;
+        s_security_negative_response_code = 0U;
     } else {
-        uds_security_provider_clear_manual_key(
-            &s_security_provider
+        web_uds_security_finish_error(
+            result,
+            0U
         );
     }
 
@@ -558,7 +634,17 @@ static esp_err_t web_uds_security_unlock(
 
 static void web_uds_security_submit_key(void)
 {
-    if (!s_security_key_ready) {
+    if (!s_security_key_ready ||
+        (s_security_state !=
+         WEB_UDS_SECURITY_CALCULATING_KEY) ||
+        (s_security_active_generation == 0U) ||
+        (s_security_active_generation !=
+         s_security_generation)) {
+
+        if (s_security_key_ready) {
+            web_uds_security_reset();
+        }
+
         return;
     }
 
@@ -578,8 +664,48 @@ static void web_uds_security_submit_key(void)
 
     s_security_pending_key_length = 0U;
     s_security_key_ready = false;
-    s_security_waiting_for_key = result == ESP_OK;
     s_security_result = result;
+
+    if (result == ESP_OK) {
+        s_security_state = WEB_UDS_SECURITY_SENDING_KEY;
+    } else {
+        web_uds_security_finish_error(
+            result,
+            0U
+        );
+    }
+}
+
+static esp_err_t web_uds_security_cancel(void)
+{
+    if (!web_uds_security_busy() ||
+        !s_client_config_valid) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    web_uds_security_reset();
+
+    esp_err_t result =
+        uds_client_close(&s_client);
+
+    if (result == ESP_OK) {
+        result =
+            uds_client_open(
+                &s_client,
+                &s_client_config
+            );
+    }
+
+    if (result != ESP_OK) {
+        web_uds_security_finish_error(
+            result,
+            0U
+        );
+    }
+
+    s_sequence++;
+    return result;
 }
 
 static void web_uds_client_callback(
@@ -632,7 +758,10 @@ static void web_uds_client_callback(
         }
     }
 
-    if (s_security_waiting_for_seed &&
+    if ((s_security_state ==
+         WEB_UDS_SECURITY_WAITING_SEED) &&
+        (s_security_active_generation ==
+         s_security_generation) &&
         (event->type == UDS_CLIENT_EVENT_RESPONSE)) {
 
         const bool valid_seed =
@@ -643,16 +772,20 @@ static void web_uds_client_callback(
             (event->response.payload[0] == s_security_level);
 
         if (!valid_seed) {
-            web_uds_security_reset();
-            s_security_result = ESP_ERR_INVALID_RESPONSE;
+            web_uds_security_finish_error(
+                ESP_ERR_INVALID_RESPONSE,
+                0U
+            );
         } else if (event->response.payload_length == 1U) {
             uds_security_provider_clear_manual_key(
                 &s_security_provider
             );
-            s_security_waiting_for_seed = false;
-            s_security_unlocked = true;
+            s_security_state = WEB_UDS_SECURITY_UNLOCKED;
             s_security_result = ESP_OK;
         } else {
+            s_security_state =
+                WEB_UDS_SECURITY_CALCULATING_KEY;
+
             const esp_err_t result =
                 uds_security_provider_calculate(
                     s_security_level,
@@ -664,20 +797,20 @@ static void web_uds_client_callback(
                     &s_security_provider
                 );
 
-            s_security_waiting_for_seed = false;
             s_security_key_ready = result == ESP_OK;
             s_security_result = result;
 
             if (result != ESP_OK) {
-                web_uds_erase(
-                    s_security_pending_key,
-                    sizeof(s_security_pending_key)
+                web_uds_security_finish_error(
+                    result,
+                    0U
                 );
-                s_security_pending_key_length = 0U;
-                s_security_unlocked = false;
             }
         }
-    } else if (s_security_waiting_for_key &&
+    } else if ((s_security_state ==
+                WEB_UDS_SECURITY_SENDING_KEY) &&
+               (s_security_active_generation ==
+                s_security_generation) &&
                (event->type == UDS_CLIENT_EVENT_RESPONSE)) {
 
         const bool valid_key_response =
@@ -688,13 +821,16 @@ static void web_uds_client_callback(
             (event->response.payload[0] ==
              (uint8_t)(s_security_level + 1U));
 
-        s_security_waiting_for_key = false;
-        s_security_unlocked = valid_key_response;
-        s_security_result = valid_key_response
-            ? ESP_OK
-            : ESP_ERR_INVALID_RESPONSE;
-    } else if ((s_security_waiting_for_seed ||
-                s_security_waiting_for_key) &&
+        if (valid_key_response) {
+            s_security_state = WEB_UDS_SECURITY_UNLOCKED;
+            s_security_result = ESP_OK;
+        } else {
+            web_uds_security_finish_error(
+                ESP_ERR_INVALID_RESPONSE,
+                0U
+            );
+        }
+    } else if (web_uds_security_busy() &&
                ((event->type ==
                  UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) ||
                 (event->type == UDS_CLIENT_EVENT_TIMEOUT) ||
@@ -708,8 +844,10 @@ static void web_uds_client_callback(
                 ? event->result
                 : ESP_FAIL;
 
-        web_uds_security_reset();
-        s_security_result = security_result;
+        web_uds_security_finish_error(
+            security_result,
+            event->response.negative_response_code
+        );
     }
 
     s_sequence++;
@@ -827,6 +965,15 @@ static esp_err_t web_uds_request(
     if (!cJSON_IsString(kind) ||
         (s_client.state == UDS_CLIENT_CLOSED)) {
 
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const bool security_request =
+        (strcmp(kind->valuestring, "security_seed") == 0) ||
+        (strcmp(kind->valuestring, "security_key") == 0) ||
+        (strcmp(kind->valuestring, "security_unlock") == 0);
+
+    if (security_request && web_uds_security_busy()) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1862,25 +2009,43 @@ static esp_err_t web_uds_get_handler(
             "security_level",
             s_security_level
         ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "security_state",
+            s_security_state
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "security_request_generation",
+            s_security_generation
+        ) != NULL) &&
         (cJSON_AddBoolToObject(
             response,
             "security_waiting_for_seed",
-            s_security_waiting_for_seed
+            s_security_state ==
+                WEB_UDS_SECURITY_WAITING_SEED
         ) != NULL) &&
         (cJSON_AddBoolToObject(
             response,
             "security_waiting_for_key",
-            s_security_waiting_for_key
+            s_security_state ==
+                WEB_UDS_SECURITY_SENDING_KEY
         ) != NULL) &&
         (cJSON_AddBoolToObject(
             response,
             "security_unlocked",
-            s_security_unlocked
+            s_security_state ==
+                WEB_UDS_SECURITY_UNLOCKED
         ) != NULL) &&
         (cJSON_AddNumberToObject(
             response,
             "security_result",
             s_security_result
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "security_nrc",
+            s_security_negative_response_code
         ) != NULL) &&
         (cJSON_AddBoolToObject(
             response,
@@ -2025,6 +2190,14 @@ static esp_err_t web_uds_post_handler(
         if (result == ESP_OK) {
             web_uds_download_close_file();
         }
+    } else if (strcmp(
+                   action->valuestring,
+                   "security_cancel"
+               ) == 0) {
+
+        result = s_download_active
+            ? ESP_ERR_INVALID_STATE
+            : web_uds_security_cancel();
     } else if (strcmp(action->valuestring, "close") == 0) {
         web_uds_security_reset();
 

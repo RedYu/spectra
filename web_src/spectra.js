@@ -6851,6 +6851,8 @@
         const status = element('uds-status');
         const message = element('uds-message');
         const sendButton = element('uds-send');
+        const securityCancelButton =
+            element('uds-security-cancel');
         const format = element('uds-format');
         const service = element('uds-service');
         const response = element('uds-response-data');
@@ -6969,6 +6971,7 @@
             element('uds-security-data-field').hidden = !security;
             element('uds-security-key-field').hidden =
                 selected !== 'security_unlock';
+            securityCancelButton.hidden = !security;
             element('uds-security-data-label').textContent =
                 selected === 'security_key'
                     ? 'Calculated key (HEX bytes)'
@@ -7211,6 +7214,10 @@
                     data.state === 2 ||
                     data.state === 3 ||
                     data.state === 4;
+                securityCancelButton.disabled =
+                    !data.security_waiting_for_seed &&
+                    data.security_state !== 2 &&
+                    !data.security_waiting_for_key;
                 if (data.sequence === lastSequence)
                     return;
 
@@ -7270,6 +7277,13 @@
                             .toString(16)
                             .padStart(2, '0')
                             .toUpperCase()} unlocked.`;
+                } else if (data.security_state === 5) {
+                    message.textContent = data.security_nrc
+                        ? `SecurityAccess failed with NRC 0x${Number(data.security_nrc)
+                            .toString(16)
+                            .padStart(2, '0')
+                            .toUpperCase()}.`
+                        : `SecurityAccess failed: result ${data.security_result}.`;
                 }
             } catch (error) {
                 status.textContent = 'Unavailable';
@@ -7307,6 +7321,17 @@
         element('uds-close').addEventListener('click', async () => {
             try {
                 await command({action : 'close'});
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        securityCancelButton.addEventListener('click', async () => {
+            try {
+                await command({action : 'security_cancel'});
+                message.textContent =
+                    'SecurityAccess operation cancelled.';
                 await refresh();
             } catch (error) {
                 message.textContent = error.message;
