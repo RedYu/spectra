@@ -23,6 +23,7 @@
 #include "app_task_priorities.h"
 #include "uds_client.h"
 #include "uds_download.h"
+#include "uds_profile_service.h"
 #include "uds_security_provider.h"
 #include "storage_sd_service.h"
 #include "time_service.h"
@@ -41,6 +42,8 @@
 #define WEB_UDS_JOURNAL_DIRECTORY        "/logs/firmware"
 #define WEB_UDS_JOURNAL_PATH_MAX_SIZE    (128U)
 #define WEB_UDS_JOURNAL_LINE_MAX_SIZE    (384U)
+#define WEB_UDS_PROFILE_LIST_CAPACITY     (16U)
+#define WEB_UDS_QUERY_MAX_SIZE            (192U)
 
 typedef enum
 {
@@ -276,6 +279,18 @@ static void web_uds_tester_present_poll(
 
 static esp_err_t web_uds_get_handler(
     httpd_req_t *request
+);
+
+static esp_err_t web_uds_profile_get_handler(
+    httpd_req_t *request
+);
+
+static esp_err_t web_uds_profile_save(
+    const cJSON *root
+);
+
+static esp_err_t web_uds_profile_remove(
+    const cJSON *root
 );
 
 static esp_err_t web_uds_post_handler(
@@ -2449,10 +2464,356 @@ static bool web_uds_firmware_path_valid(
             (strcmp(extension, ".mot") == 0));
 }
 
+static esp_err_t web_uds_profile_send_list(
+    httpd_req_t *request,
+    size_t offset
+)
+{
+    uds_profile_summary_t *profiles = heap_caps_calloc(
+        WEB_UDS_PROFILE_LIST_CAPACITY,
+        sizeof(*profiles),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+    );
+
+    if (profiles == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t count = 0U;
+    bool has_more = false;
+    esp_err_t result = uds_profile_service_list(
+        offset,
+        profiles,
+        WEB_UDS_PROFILE_LIST_CAPACITY,
+        &count,
+        &has_more
+    );
+    cJSON *response = NULL;
+    cJSON *items = NULL;
+
+    if (result == ESP_OK) {
+        response = cJSON_CreateObject();
+        items = cJSON_CreateArray();
+
+        if ((response == NULL) ||
+            (items == NULL) ||
+            !cJSON_AddItemToObject(
+                response,
+                "profiles",
+                items
+            )) {
+
+            cJSON_Delete(response);
+            cJSON_Delete(items);
+            response = NULL;
+            items = NULL;
+            result = ESP_ERR_NO_MEM;
+        }
+    }
+
+    for (size_t index = 0U;
+         (result == ESP_OK) && (index < count);
+         ++index) {
+
+        cJSON *item = cJSON_CreateObject();
+
+        if ((item == NULL) ||
+            (cJSON_AddStringToObject(
+                item,
+                "file_name",
+                profiles[index].file_name
+            ) == NULL) ||
+            (cJSON_AddStringToObject(
+                item,
+                "name",
+                profiles[index].name
+            ) == NULL) ||
+            (cJSON_AddStringToObject(
+                item,
+                "description",
+                profiles[index].description
+            ) == NULL) ||
+            !cJSON_AddItemToArray(items, item)) {
+
+            cJSON_Delete(item);
+            result = ESP_ERR_NO_MEM;
+        }
+    }
+
+    if ((result == ESP_OK) &&
+        ((cJSON_AddBoolToObject(
+            response,
+            "success",
+            true
+        ) == NULL) ||
+         (cJSON_AddNumberToObject(
+            response,
+            "offset",
+            offset
+        ) == NULL) ||
+         (cJSON_AddBoolToObject(
+            response,
+            "has_more",
+            has_more
+        ) == NULL))) {
+
+        result = ESP_ERR_NO_MEM;
+    }
+
+    heap_caps_free(profiles);
+
+    if (result != ESP_OK) {
+        cJSON_Delete(response);
+        return web_api_send_message(
+            request,
+            (result == ESP_ERR_INVALID_STATE)
+                ? "409 Conflict"
+                : "500 Internal Server Error",
+            false,
+            esp_err_to_name(result)
+        );
+    }
+
+    result = web_api_send_json(request, response);
+    cJSON_Delete(response);
+    return result;
+}
+
+static esp_err_t web_uds_profile_send_one(
+    httpd_req_t *request,
+    const char *file_name
+)
+{
+    uds_ecu_profile_t profile;
+    esp_err_t result = uds_profile_service_load(
+        file_name,
+        &profile
+    );
+    char *json = NULL;
+
+    if (result == ESP_OK) {
+        result = uds_profile_service_encode_json(
+            &profile,
+            &json
+        );
+    }
+
+    cJSON *profile_json =
+        (json != NULL) ? cJSON_Parse(json) : NULL;
+    free(json);
+
+    if ((result == ESP_OK) &&
+        (profile_json == NULL)) {
+
+        result = ESP_ERR_NO_MEM;
+    }
+
+    cJSON *response = NULL;
+
+    if (result == ESP_OK) {
+        response = cJSON_CreateObject();
+
+        if ((response == NULL) ||
+            (cJSON_AddBoolToObject(
+                response,
+                "success",
+                true
+            ) == NULL) ||
+            (cJSON_AddStringToObject(
+                response,
+                "file_name",
+                file_name
+            ) == NULL) ||
+            !cJSON_AddItemToObject(
+                response,
+                "profile",
+                profile_json
+            )) {
+
+            cJSON_Delete(response);
+            cJSON_Delete(profile_json);
+            response = NULL;
+            result = ESP_ERR_NO_MEM;
+        }
+    }
+
+    if (result != ESP_OK) {
+        cJSON_Delete(profile_json);
+        return web_api_send_message(
+            request,
+            (result == ESP_ERR_NOT_FOUND)
+                ? "404 Not Found"
+                : "400 Bad Request",
+            false,
+            esp_err_to_name(result)
+        );
+    }
+
+    result = web_api_send_json(request, response);
+    cJSON_Delete(response);
+    return result;
+}
+
+static esp_err_t web_uds_profile_get_handler(
+    httpd_req_t *request
+)
+{
+    const size_t query_length =
+        httpd_req_get_url_query_len(request);
+
+    if (query_length == 0U) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    if (query_length >= WEB_UDS_QUERY_MAX_SIZE) {
+        return web_api_send_message(
+            request,
+            "400 Bad Request",
+            false,
+            "UDS query is too long"
+        );
+    }
+
+    char query[WEB_UDS_QUERY_MAX_SIZE];
+
+    if (httpd_req_get_url_query_str(
+            request,
+            query,
+            sizeof(query)
+        ) != ESP_OK) {
+
+        return web_api_send_message(
+            request,
+            "400 Bad Request",
+            false,
+            "Invalid UDS query"
+        );
+    }
+
+    char file_name[UDS_PROFILE_FILE_NAME_MAX_LENGTH];
+
+    if (httpd_query_key_value(
+            query,
+            "profile",
+            file_name,
+            sizeof(file_name)
+        ) == ESP_OK) {
+
+        return web_uds_profile_send_one(
+            request,
+            file_name
+        );
+    }
+
+    char profiles[4];
+
+    if (httpd_query_key_value(
+            query,
+            "profiles",
+            profiles,
+            sizeof(profiles)
+        ) == ESP_OK) {
+
+        size_t offset = 0U;
+        char offset_text[16];
+
+        if (httpd_query_key_value(
+                query,
+                "offset",
+                offset_text,
+                sizeof(offset_text)
+            ) == ESP_OK) {
+
+            char *end = NULL;
+            const unsigned long parsed =
+                strtoul(offset_text, &end, 10);
+
+            if ((end == offset_text) ||
+                (*end != '\0') ||
+                (parsed > SIZE_MAX)) {
+
+                return web_api_send_message(
+                    request,
+                    "400 Bad Request",
+                    false,
+                    "Invalid profile-list offset"
+                );
+            }
+
+            offset = (size_t)parsed;
+        }
+
+        return web_uds_profile_send_list(
+            request,
+            offset
+        );
+    }
+
+    return ESP_ERR_NOT_FOUND;
+}
+
+static esp_err_t web_uds_profile_save(
+    const cJSON *root
+)
+{
+    const cJSON *file_name =
+        cJSON_GetObjectItemCaseSensitive(root, "file_name");
+    const cJSON *profile_json =
+        cJSON_GetObjectItemCaseSensitive(root, "profile");
+
+    if (!cJSON_IsString(file_name) ||
+        !cJSON_IsObject(profile_json)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char *json = cJSON_PrintUnformatted(profile_json);
+
+    if (json == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    uds_ecu_profile_t profile;
+    esp_err_t result = uds_profile_service_decode_json(
+        json,
+        &profile
+    );
+
+    free(json);
+
+    if (result == ESP_OK) {
+        result = uds_profile_service_save(
+            file_name->valuestring,
+            &profile
+        );
+    }
+
+    return result;
+}
+
+static esp_err_t web_uds_profile_remove(
+    const cJSON *root
+)
+{
+    const cJSON *file_name =
+        cJSON_GetObjectItemCaseSensitive(root, "file_name");
+
+    return cJSON_IsString(file_name)
+        ? uds_profile_service_remove(file_name->valuestring)
+        : ESP_ERR_INVALID_ARG;
+}
+
 static esp_err_t web_uds_get_handler(
     httpd_req_t *request
 )
 {
+    const esp_err_t profile_result =
+        web_uds_profile_get_handler(request);
+
+    if (profile_result != ESP_ERR_NOT_FOUND) {
+        return profile_result;
+    }
+
     if (xSemaphoreTakeRecursive(
             s_lock,
             pdMS_TO_TICKS(WEB_UDS_LOCK_TIMEOUT_MS)
@@ -2789,6 +3150,34 @@ static esp_err_t web_uds_post_handler(
 
     const cJSON *action =
         cJSON_GetObjectItemCaseSensitive(root, "action");
+
+    if (cJSON_IsString(action) &&
+        ((strcmp(action->valuestring, "profile_save") == 0) ||
+         (strcmp(action->valuestring, "profile_remove") == 0))) {
+
+        result = (strcmp(
+            action->valuestring,
+            "profile_save"
+        ) == 0)
+            ? web_uds_profile_save(root)
+            : web_uds_profile_remove(root);
+
+        cJSON_Delete(root);
+
+        return web_api_send_message(
+            request,
+            (result == ESP_OK)
+                ? "200 OK"
+                : ((result == ESP_ERR_INVALID_ARG) ||
+                   (result == ESP_ERR_INVALID_SIZE))
+                    ? "400 Bad Request"
+                    : "409 Conflict",
+            result == ESP_OK,
+            (result == ESP_OK)
+                ? "UDS profile updated"
+                : esp_err_to_name(result)
+        );
+    }
 
     if (xSemaphoreTakeRecursive(
             s_lock,

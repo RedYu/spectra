@@ -1904,6 +1904,8 @@ esp_err_t storage_sd_service_format(void)
 
     static const char *directories[] = {
         "/config",
+        "/config/uds",
+        "/config/uds/profiles",
         "/dbc",
         "/firmwares",
         "/logs",

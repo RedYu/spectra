@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.ico">
     <title>UDS Programming · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=35">
-    <script src="spectra.js?v=35" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=37">
+    <script src="spectra.js?v=37" defer></script>
 </head>
 
 <body class="page-uds-programming">
@@ -39,6 +39,44 @@
 
             <a class="program-files-link" href="/files">Open file manager</a>
         </div>
+
+        <section class="card program-profile">
+            <div class="program-section-title">
+                <h2>ECU profile</h2>
+                <button id="program-profile-refresh" class="compact">Refresh</button>
+            </div>
+
+            <div class="program-profile-grid">
+                <label>
+                    Stored profile
+                    <select id="program-profile-select">
+                        <option value="">Loading profiles…</option>
+                    </select>
+                </label>
+
+                <label>
+                    JSON file name
+                    <input id="program-profile-file" placeholder="example-ecu.json" spellcheck="false">
+                </label>
+
+                <label>
+                    Profile name
+                    <input id="program-profile-name" placeholder="Example ECU" maxlength="63">
+                </label>
+
+                <label>
+                    Description
+                    <input id="program-profile-description" placeholder="Model, controller and protocol notes" maxlength="127">
+                </label>
+            </div>
+
+            <div class="program-actions">
+                <button id="program-profile-load">Load into form</button>
+                <button id="program-profile-apply" class="primary">Load &amp; apply channel</button>
+                <button id="program-profile-save">Save profile</button>
+                <button id="program-profile-remove" class="danger">Delete profile</button>
+            </div>
+        </section>
 
         <div class="program-layout">
             <section class="card program-setup">

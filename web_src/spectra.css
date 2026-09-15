@@ -2451,6 +2451,17 @@ body:where(.page-uds-programming) {
     align-items: start;
 }
 
+:where(body.page-uds-programming) .program-profile {
+    margin-bottom: 16px;
+}
+
+:where(body.page-uds-programming) .program-profile-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+}
+
 :where(body.page-uds-programming) .card {
     min-width: 0;
     padding: 18px;
@@ -2708,6 +2719,7 @@ body:where(.page-uds-programming) {
     }
 
     :where(body.page-uds-programming) .program-form-grid,
+    :where(body.page-uds-programming) .program-profile-grid,
     :where(body.page-uds-programming) .program-metrics {
         grid-template-columns: minmax(0, 1fr);
     }

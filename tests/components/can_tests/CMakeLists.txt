@@ -8,6 +8,7 @@ idf_component_register(
         "test_uds_security_access.c"
         "test_uds_security_provider.c"
         "test_uds_download.c"
+        "test_uds_ecu_profile.c"
         "test_xcp_protocol.c"
 
     INCLUDE_DIRS

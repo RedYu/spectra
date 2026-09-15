@@ -29,6 +29,7 @@ idf_component_register(
         "can_transmit_service.c"
         "can_logger_binary_format.c"
         "time_service.c"
+        "uds_profile_service.c"
 
         "web_api/web_api_common.c"
         "web_api/web_system_api.c"

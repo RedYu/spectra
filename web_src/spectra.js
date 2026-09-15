@@ -7660,12 +7660,20 @@
         const cancelButton = element('program-cancel');
         const transportFields = element('program-transport-fields');
         const imageFields = element('program-image-fields');
+        const profileSelector = element('program-profile-select');
+        const profileFile = element('program-profile-file');
+        const profileLoadButton = element('program-profile-load');
+        const profileApplyButton = element('program-profile-apply');
+        const profileSaveButton = element('program-profile-save');
+        const profileRemoveButton = element('program-profile-remove');
         let files = [];
+        let profiles = [];
         let lastTransferred = 0;
         let lastSampleTime = 0;
         let measuredSpeed = 0;
         let channelOpen = false;
         let downloadReserved = false;
+        const lastProfileKey = 'spectra.uds.last-profile';
 
         const clientStateNames = [
             'Closed',
@@ -7806,6 +7814,332 @@
                 throw new Error(result.message || `HTTP ${response.status}`);
 
             return result;
+        }
+
+        function rememberProfile(fileName) {
+            try {
+                if (fileName)
+                    localStorage.setItem(lastProfileKey, fileName);
+                else
+                    localStorage.removeItem(lastProfileKey);
+            } catch (_error) {
+                /* Profile selection still works when storage is unavailable. */
+            }
+        }
+
+        function rememberedProfile() {
+            try {
+                return localStorage.getItem(lastProfileKey) || '';
+            } catch (_error) {
+                return '';
+            }
+        }
+
+        function collectRoutine(prefix) {
+            return {
+                enabled : element(`program-${prefix}-enabled`).checked,
+                identifier : parseHex(
+                    element(`program-${prefix}-routine`),
+                    0xffff,
+                    `${prefix} routine ID`
+                ),
+                option_record : parseHexBytes(
+                    element(`program-${prefix}-record`),
+                    false,
+                    `${prefix} option record`
+                ),
+                status_enabled :
+                    element(`program-${prefix}-status-enabled`).checked,
+                status_offset : Number(
+                    element(`program-${prefix}-status-offset`).value
+                ),
+                pending_value : parseHex(
+                    element(`program-${prefix}-status-pending`),
+                    0xff,
+                    `${prefix} pending status`
+                ),
+                success_value : parseHex(
+                    element(`program-${prefix}-status-success`),
+                    0xff,
+                    `${prefix} success status`
+                )
+            };
+        }
+
+        function collectProfile() {
+            const name = element('program-profile-name').value.trim();
+            const description =
+                element('program-profile-description').value.trim();
+            const extended = element('program-extended').checked;
+            const fd = format.value === 'fd';
+            const addressLength =
+                Number(element('program-address-length').value);
+
+            if (!name)
+                throw new Error('Profile name cannot be empty.');
+
+            return {
+                version : 1,
+                name,
+                description,
+                transport : {
+                    bus : Number(element('program-bus').value),
+                    tx_id : parseIdentifier(
+                        element('program-tx-id'),
+                        extended
+                    ),
+                    rx_id : parseIdentifier(
+                        element('program-rx-id'),
+                        extended
+                    ),
+                    extended,
+                    fd,
+                    brs : fd && brs.checked,
+                    link_data_length : fd ? 64 : 8,
+                    block_size : Number(
+                        element('program-block-size').value
+                    ),
+                    st_min : Number(element('program-st-min').value),
+                    p2_ms : Number(element('program-p2').value),
+                    p2_star_ms : Number(
+                        element('program-p2-star').value
+                    ),
+                    tester_present_ms : Number(
+                        element('program-tester-present-interval').value
+                    )
+                },
+                programming : {
+                    session : parseHex(
+                        element('program-session'),
+                        0x7f,
+                        'Diagnostic session'
+                    ),
+                    security_level :
+                        element('program-security-enabled').checked
+                            ? parseHex(
+                                element('program-security-level'),
+                                0x7d,
+                                'Security level'
+                            )
+                            : 0,
+                    data_format : parseHex(
+                        element('program-data-format'),
+                        0xff,
+                        'Data format identifier'
+                    ),
+                    default_address : parseAddress(
+                        element('program-address'),
+                        addressLength
+                    ),
+                    address_length : addressLength,
+                    size_length : Number(
+                        element('program-size-length').value
+                    ),
+                    erase : collectRoutine('erase'),
+                    verify : collectRoutine('verify'),
+                    routine_poll_interval_ms : Number(
+                        element('program-routine-poll-interval').value
+                    ),
+                    maximum_routine_polls : Number(
+                        element('program-routine-poll-maximum').value
+                    ),
+                    reset_enabled :
+                        element('program-reset-enabled').checked,
+                    reset_type : parseHex(
+                        element('program-reset-type'),
+                        0x7f,
+                        'ECU reset type'
+                    ),
+                    restore_default_session :
+                        element('program-restore-session').checked
+                }
+            };
+        }
+
+        function setHexValue(id, value, width) {
+            element(id).value = Number(value)
+                .toString(16)
+                .padStart(width, '0')
+                .toUpperCase();
+        }
+
+        function applyRoutine(prefix, routine) {
+            element(`program-${prefix}-enabled`).checked =
+                routine.enabled === true;
+            setHexValue(
+                `program-${prefix}-routine`,
+                routine.identifier,
+                4
+            );
+            element(`program-${prefix}-record`).value =
+                routine.option_record || '';
+            element(`program-${prefix}-status-enabled`).checked =
+                routine.status_enabled === true;
+            element(`program-${prefix}-status-offset`).value =
+                routine.status_offset;
+            setHexValue(
+                `program-${prefix}-status-pending`,
+                routine.pending_value,
+                2
+            );
+            setHexValue(
+                `program-${prefix}-status-success`,
+                routine.success_value,
+                2
+            );
+        }
+
+        function applyProfile(profile) {
+            const transport = profile.transport;
+            const programming = profile.programming;
+
+            element('program-profile-name').value = profile.name || '';
+            element('program-profile-description').value =
+                profile.description || '';
+            element('program-bus').value = String(transport.bus);
+            format.value = transport.fd ? 'fd' : 'classic';
+            element('program-extended').checked =
+                transport.extended === true;
+            brs.disabled = !transport.fd;
+            brs.checked = transport.brs === true;
+            setHexValue('program-tx-id', transport.tx_id, 3);
+            setHexValue('program-rx-id', transport.rx_id, 3);
+            element('program-block-size').value = transport.block_size;
+            element('program-st-min').value = transport.st_min;
+            element('program-p2').value = transport.p2_ms;
+            element('program-p2-star').value = transport.p2_star_ms;
+            element('program-tester-present-interval').value =
+                transport.tester_present_ms;
+
+            setHexValue('program-session', programming.session, 2);
+            element('program-security-enabled').checked =
+                programming.security_level !== 0;
+            element('program-security-key').value = '';
+            setHexValue(
+                'program-security-level',
+                programming.security_level || 1,
+                2
+            );
+            setHexValue('program-data-format', programming.data_format, 2);
+            element('program-address').value =
+                programming.default_address || '0';
+            element('program-address-length').value =
+                String(programming.address_length);
+            element('program-size-length').value =
+                String(programming.size_length);
+            applyRoutine('erase', programming.erase);
+            applyRoutine('verify', programming.verify);
+            element('program-routine-poll-interval').value =
+                programming.routine_poll_interval_ms;
+            element('program-routine-poll-maximum').value =
+                programming.maximum_routine_polls;
+            element('program-reset-enabled').checked =
+                programming.reset_enabled === true;
+            setHexValue('program-reset-type', programming.reset_type, 2);
+            element('program-restore-session').checked =
+                programming.restore_default_session === true;
+        }
+
+        async function loadProfiles() {
+            const previous =
+                profileSelector.value || rememberedProfile();
+            profiles = [];
+            profileSelector.disabled = true;
+            let offset = 0;
+            let hasMore = false;
+
+            try {
+                do {
+                    const query = new URLSearchParams({
+                        profiles : '1',
+                        offset : String(offset)
+                    });
+                    const response = await fetch(
+                        `/api/uds?${query.toString()}`,
+                        {cache : 'no-store'}
+                    );
+                    const result = await response.json();
+
+                    if (!response.ok || !result.success)
+                        throw new Error(
+                            result.message || `HTTP ${response.status}`
+                        );
+
+                    profiles.push(...result.profiles);
+                    offset += result.profiles.length;
+                    hasMore = result.has_more === true;
+                } while (hasMore && (offset <= 1024));
+
+                profileSelector.replaceChildren(
+                    new Option('Select ECU profile…', '')
+                );
+
+                for (const profile of profiles) {
+                    profileSelector.add(
+                        new Option(profile.name, profile.file_name)
+                    );
+                }
+
+                if (profiles.some(profile => profile.file_name === previous)) {
+                    profileSelector.value = previous;
+                    profileFile.value = previous;
+                } else if (previous) {
+                    rememberProfile('');
+                }
+            } catch (error) {
+                profileSelector.replaceChildren(
+                    new Option('Profile storage unavailable', '')
+                );
+                message.textContent = error.message;
+            } finally {
+                profileSelector.disabled = false;
+            }
+        }
+
+        async function loadSelectedProfile() {
+            const fileName = profileSelector.value;
+
+            if (!fileName)
+                throw new Error('Select an ECU profile first.');
+
+            const query = new URLSearchParams({profile : fileName});
+            const response = await fetch(
+                `/api/uds?${query.toString()}`,
+                {cache : 'no-store'}
+            );
+            const result = await response.json();
+
+            if (!response.ok || !result.success)
+                throw new Error(result.message || `HTTP ${response.status}`);
+
+            profileFile.value = result.file_name;
+            applyProfile(result.profile);
+            rememberProfile(result.file_name);
+            message.textContent = `Loaded ECU profile ${result.profile.name}.`;
+        }
+
+        async function configureChannel() {
+            const extended = element('program-extended').checked;
+            const fd = format.value === 'fd';
+
+            await command({
+                action : 'configure',
+                bus : Number(element('program-bus').value),
+                tx_id : parseIdentifier(element('program-tx-id'), extended),
+                rx_id : parseIdentifier(element('program-rx-id'), extended),
+                extended,
+                fd,
+                brs : fd && brs.checked,
+                link_data_length : fd ? 64 : 8,
+                block_size : Number(element('program-block-size').value),
+                st_min : Number(element('program-st-min').value),
+                p2_ms : Number(element('program-p2').value),
+                p2_star_ms : Number(element('program-p2-star').value),
+                tester_present_enabled : true,
+                tester_present_interval_ms : Number(
+                    element('program-tester-present-interval').value
+                )
+            });
         }
 
         function updateFileInfo() {
@@ -8012,6 +8346,15 @@
                 cancelButton.disabled = !active;
                 closeButton.disabled = active || !data.open;
                 element('program-refresh-files').disabled = data.download_active;
+                element('program-profile-refresh').disabled =
+                    data.download_active;
+                profileLoadButton.disabled =
+                    data.download_active || !profileSelector.value;
+                profileApplyButton.disabled =
+                    data.download_active || !profileSelector.value;
+                profileSaveButton.disabled = data.download_active;
+                profileRemoveButton.disabled =
+                    data.download_active || !profileSelector.value;
                 updateProgress(data);
 
                 if (data.download_state === 13)
@@ -8035,29 +8378,87 @@
         });
         fileSelector.addEventListener('change', updateFileInfo);
         element('program-refresh-files').addEventListener('click', loadFiles);
+        element('program-profile-refresh').addEventListener(
+            'click',
+            loadProfiles
+        );
+        profileSelector.addEventListener('change', () => {
+            profileFile.value = profileSelector.value;
+
+            profileLoadButton.disabled = !profileSelector.value;
+            profileApplyButton.disabled = !profileSelector.value;
+            profileRemoveButton.disabled = !profileSelector.value;
+            rememberProfile(profileSelector.value);
+        });
+        profileLoadButton.addEventListener('click', async () => {
+            try {
+                await loadSelectedProfile();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+        profileApplyButton.addEventListener('click', async () => {
+            try {
+                await loadSelectedProfile();
+                await configureChannel();
+                message.textContent =
+                    `Applied ECU profile ${profileSelector.value}.`;
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+        profileSaveButton.addEventListener('click', async () => {
+            try {
+                let fileName = profileFile.value.trim();
+
+                if (!fileName)
+                    throw new Error('Profile JSON file name cannot be empty.');
+                if (!fileName.toLowerCase().endsWith('.json'))
+                    fileName += '.json';
+                else
+                    fileName = `${fileName.slice(0, -5)}.json`;
+
+                await command({
+                    action : 'profile_save',
+                    file_name : fileName,
+                    profile : collectProfile()
+                });
+                profileFile.value = fileName;
+                await loadProfiles();
+                profileSelector.value = fileName;
+                rememberProfile(fileName);
+                message.textContent = `Saved ECU profile ${fileName}.`;
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+        profileRemoveButton.addEventListener('click', async () => {
+            const fileName = profileSelector.value;
+
+            if (!fileName ||
+                !window.confirm(`Delete ECU profile ${fileName}?`)) {
+
+                return;
+            }
+
+            try {
+                await command({
+                    action : 'profile_remove',
+                    file_name : fileName
+                });
+                profileFile.value = '';
+                rememberProfile('');
+                await loadProfiles();
+                message.textContent = `Deleted ECU profile ${fileName}.`;
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
 
         applyButton.addEventListener('click', async () => {
             try {
-                const extended = element('program-extended').checked;
-                const fd = format.value === 'fd';
-
-                await command({
-                    action : 'configure',
-                    bus : Number(element('program-bus').value),
-                    tx_id : parseIdentifier(element('program-tx-id'), extended),
-                    rx_id : parseIdentifier(element('program-rx-id'), extended),
-                    extended,
-                    fd,
-                    brs : fd && brs.checked,
-                    link_data_length : fd ? 64 : 8,
-                    block_size : Number(element('program-block-size').value),
-                    st_min : Number(element('program-st-min').value),
-                    p2_ms : Number(element('program-p2').value),
-                    p2_star_ms : Number(element('program-p2-star').value),
-                    tester_present_enabled : true,
-                    tester_present_interval_ms :
-                        Number(element('program-tester-present-interval').value)
-                });
+                await configureChannel();
                 message.textContent = 'UDS channel configured.';
                 await refresh();
             } catch (error) {
@@ -8213,6 +8614,7 @@
             }
         });
 
+        loadProfiles();
         loadFiles();
         refresh();
         setInterval(refresh, 300);

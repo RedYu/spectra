@@ -129,6 +129,34 @@ counter, acknowledged blocks, retries, last NRC, and journal path. Manual
 RequestDownload, TransferData, and RequestTransferExit controls remain on the
 ISO-TP diagnostics page for protocol testing.
 
+`uds_ecu_profile` defines a validated device-independent ECU profile model.
+It groups CAN and ISO-TP addressing, CAN FD options, P2/P2* and TesterPresent
+timing, programming-session parameters, SecurityAccess level, memory-format
+defaults, erase and verification routines, routine-result policy, ECU reset,
+and default-session restoration. Profiles initialize with conservative
+physical-addressing defaults and reject incompatible settings such as CAN FD
+on the Primary TWAI interface, extended identifiers outside 29 bits, invalid
+STmin values, even SecurityAccess seed levels, and ambiguous routine status
+values. Security keys and seed-to-key implementations are deliberately not
+part of a profile; a stored profile may select a provider in a later storage
+layer, but secret material must remain outside the profile file.
+
+`uds_profile_service` stores each validated profile as a separate versioned
+JSON file in `/config/uds/profiles`. File names are restricted to safe local
+characters and the `.json` extension. Writes use a temporary file and publish
+the final name only after the JSON has been flushed and synchronized. Invalid,
+oversized, or unsupported profile files are rejected when loaded and omitted
+from profile listings. Formatting an SD card recreates the profile directory.
+The existing `/api/uds` handler exposes profile listing and loading through
+GET query parameters, plus validated save and remove actions through POST. It
+does not consume additional HTTP URI-handler slots. The UDS Programming page
+can load a profile into its editable form, save the current form as a profile,
+apply its transport configuration to the UDS channel in one operation, or
+delete a selected profile. The browser remembers only the last selected profile
+file name and restores that selection when the page is opened again. A one-time
+SecurityAccess key is never loaded from or written to a profile or browser
+storage.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
