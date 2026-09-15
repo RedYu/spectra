@@ -30,6 +30,102 @@ static void uds_download_schedule_completion(
     uds_download_t *download
 );
 
+static esp_err_t uds_download_select_segment(
+    uds_download_t *download,
+    uint32_t index
+);
+
+static esp_err_t uds_download_validate_segments(
+    uds_download_t *download
+);
+
+static esp_err_t uds_download_select_segment(
+    uds_download_t *download,
+    uint32_t index
+)
+{
+    uint64_t address = download->config.memory_address;
+    uint64_t size = download->config.memory_size;
+    esp_err_t result = ESP_OK;
+
+    if (download->config.segment_count != 0U) {
+        result = download->config.segment(
+            index,
+            &address,
+            &size,
+            download->config.segment_context
+        );
+    }
+
+    if ((result != ESP_OK) || (size == 0U)) {
+        return (result != ESP_OK)
+            ? result
+            : ESP_ERR_INVALID_SIZE;
+    }
+
+    download->segment_index = index;
+    download->segment_memory_address = address;
+    download->segment_memory_size = size;
+    download->segment_transferred_size = 0U;
+    download->block_sequence_counter = 1U;
+    download->maximum_block_length = 0U;
+    download->block_data_capacity = 0U;
+    download->current_block_size = 0U;
+    download->current_block_retry = 0U;
+    return ESP_OK;
+}
+
+static esp_err_t uds_download_validate_segments(
+    uds_download_t *download
+)
+{
+    download->segment_count =
+        (download->config.segment_count != 0U)
+            ? download->config.segment_count
+            : 1U;
+
+    uint64_t total_size = 0U;
+    uint64_t previous_end = 0U;
+
+    for (uint32_t index = 0U;
+         index < download->segment_count;
+         ++index) {
+
+        uint64_t address = download->config.memory_address;
+        uint64_t size = download->config.memory_size;
+        esp_err_t result = ESP_OK;
+
+        if (download->config.segment_count != 0U) {
+            result = download->config.segment(
+                index,
+                &address,
+                &size,
+                download->config.segment_context
+            );
+        }
+
+        if ((result != ESP_OK) ||
+            (size == 0U) ||
+            (address > (UINT64_MAX - size)) ||
+            ((index != 0U) && (address < previous_end)) ||
+            (total_size > (UINT64_MAX - size))) {
+
+            return (result != ESP_OK)
+                ? result
+                : ESP_ERR_INVALID_ARG;
+        }
+
+        total_size += size;
+        previous_end = address + size;
+    }
+
+    if (total_size != download->config.memory_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    return uds_download_select_segment(download, 0U);
+}
+
 static esp_err_t uds_download_submit_action(
     uds_download_t *download,
     uint64_t now_us
@@ -178,6 +274,10 @@ esp_err_t uds_download_open(
         (config->transfer_buffer == NULL) ||
         (config->transfer_capacity == 0U) ||
         (config->memory_size == 0U) ||
+        (((config->segment_count == 0U) &&
+          (config->segment != NULL)) ||
+         ((config->segment_count != 0U) &&
+          (config->segment == NULL))) ||
         ((config->exit_parameter_record == NULL) &&
          (config->exit_parameter_record_length != 0U)) ||
         (config->exit_parameter_record_length >
@@ -232,7 +332,15 @@ esp_err_t uds_download_open(
             ? config->maximum_routine_polls
             : UDS_DOWNLOAD_DEFAULT_MAXIMUM_ROUTINE_POLLS;
 
-    const esp_err_t result =
+    esp_err_t result = uds_download_validate_segments(download);
+
+    if (result != ESP_OK) {
+        download->state = UDS_DOWNLOAD_CLOSED;
+        download->last_result = result;
+        return result;
+    }
+
+    result =
         uds_client_open(
             &download->client,
             &download->config.client
@@ -306,7 +414,18 @@ esp_err_t uds_download_start(
     download->operation_result = ESP_OK;
     download->operation_negative_response_code = 0U;
 
-    const esp_err_t result =
+    esp_err_t result = uds_download_select_segment(
+        download,
+        0U
+    );
+
+    if (result != ESP_OK) {
+        uds_download_fail(download, result);
+        download->last_result = result;
+        return result;
+    }
+
+    result =
         uds_download_submit_action(download, now_us);
 
     if (result == ESP_OK) {
@@ -427,8 +546,8 @@ esp_err_t uds_download_poll(
     if (download->state == UDS_DOWNLOAD_TRANSFERRING) {
         if (!download->retry_pending) {
             const uint64_t remaining =
-                download->config.memory_size -
-                download->transferred_size;
+                download->segment_memory_size -
+                download->segment_transferred_size;
             size_t requested = download->block_data_capacity;
 
             if (remaining < requested) {
@@ -556,9 +675,9 @@ static esp_err_t uds_download_submit_action(
                 uds_client_request_download(
                     &download->client,
                     download->config.data_format_identifier,
-                    download->config.memory_address,
+                    download->segment_memory_address,
                     download->config.memory_address_length,
-                    download->config.memory_size,
+                    download->segment_memory_size,
                     download->config.memory_size_length,
                     now_us
                 );
@@ -667,6 +786,11 @@ esp_err_t uds_download_get_progress(
         .default_session_restored =
             download->default_session_restored,
         .routine_poll_count = download->routine_poll_count,
+        .segment_index = download->segment_index,
+        .segment_count = download->segment_count,
+        .segment_transferred_size =
+            download->segment_transferred_size,
+        .segment_total_size = download->segment_memory_size,
     };
 
     return ESP_OK;
@@ -944,13 +1068,15 @@ static void uds_download_client_callback(
         } else {
             download->transferred_size +=
                 download->current_block_size;
+            download->segment_transferred_size +=
+                download->current_block_size;
             download->current_block_size = 0U;
             download->current_block_retry = 0U;
             download->last_negative_response_code = 0U;
             download->acknowledged_blocks++;
 
-            if (download->transferred_size ==
-                download->config.memory_size) {
+            if (download->segment_transferred_size ==
+                download->segment_memory_size) {
 
                 download->state =
                     UDS_DOWNLOAD_REQUESTING_TRANSFER_EXIT;
@@ -973,7 +1099,28 @@ static void uds_download_client_callback(
             );
 
         if (result == ESP_OK) {
-            uds_download_schedule_after_transfer(download);
+            if ((download->segment_index + 1U) <
+                download->segment_count) {
+
+                const esp_err_t segment_result =
+                    uds_download_select_segment(
+                        download,
+                        download->segment_index + 1U
+                    );
+
+                if (segment_result == ESP_OK) {
+                    download->state =
+                        UDS_DOWNLOAD_REQUESTING_DOWNLOAD;
+                    download->action_pending = true;
+                } else {
+                    uds_download_fail(
+                        download,
+                        segment_result
+                    );
+                }
+            } else {
+                uds_download_schedule_after_transfer(download);
+            }
         } else {
             uds_download_fail(download, result);
         }

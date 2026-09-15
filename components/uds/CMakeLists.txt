@@ -8,6 +8,7 @@ idf_component_register(
         "uds_download.c"
         "uds_ecu_profile.c"
         "uds_did_catalog.c"
+        "firmware_image.c"
 
     INCLUDE_DIRS
         "include"

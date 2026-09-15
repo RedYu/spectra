@@ -10,6 +10,7 @@ idf_component_register(
         "test_uds_download.c"
         "test_uds_ecu_profile.c"
         "test_uds_did_catalog.c"
+        "test_firmware_image.c"
         "test_xcp_protocol.c"
 
     INCLUDE_DIRS

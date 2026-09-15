@@ -44,11 +44,19 @@ typedef enum
 
 } uds_download_state_t;
 
+/* Offset is logical across all segments and excludes address gaps. */
 typedef esp_err_t (*uds_download_read_cb_t)(
     uint64_t offset,
     uint8_t *buffer,
     size_t capacity,
     size_t *read_size,
+    void *context
+);
+
+typedef esp_err_t (*uds_download_segment_cb_t)(
+    uint32_t index,
+    uint64_t *address,
+    uint64_t *size,
     void *context
 );
 
@@ -88,8 +96,14 @@ typedef struct
     uint8_t data_format_identifier;
     uint64_t memory_address;
     uint8_t memory_address_length;
+    /* Total transferred data size across every segment. */
     uint64_t memory_size;
     uint8_t memory_size_length;
+    /* Zero selects one contiguous memory_address/memory_size range. */
+    uint32_t segment_count;
+    /* Returns ordered, non-overlapping address ranges. */
+    uds_download_segment_cb_t segment;
+    void *segment_context;
     const uint8_t *exit_parameter_record;
     size_t exit_parameter_record_length;
     uint8_t maximum_block_retries;
@@ -135,6 +149,10 @@ typedef struct
     bool security_unlocked;
     bool default_session_restored;
     uint32_t routine_poll_count;
+    uint32_t segment_index;
+    uint32_t segment_count;
+    uint64_t segment_transferred_size;
+    uint64_t segment_total_size;
 
 } uds_download_progress_t;
 
@@ -146,6 +164,9 @@ typedef struct
     void *client_callback_context;
     uds_download_state_t state;
     uint64_t transferred_size;
+    uint64_t segment_transferred_size;
+    uint64_t segment_memory_address;
+    uint64_t segment_memory_size;
     uint64_t maximum_block_length;
     size_t block_data_capacity;
     size_t current_block_size;
@@ -156,6 +177,8 @@ typedef struct
     uint32_t acknowledged_blocks;
     uint32_t retry_count;
     uint32_t routine_poll_count;
+    uint32_t segment_index;
+    uint32_t segment_count;
     uint64_t started_at_us;
     uint64_t operation_timeout_us;
     bool action_pending;

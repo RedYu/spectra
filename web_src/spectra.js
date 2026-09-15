@@ -7226,15 +7226,15 @@
                 `/api/uds?${query.toString()}`,
                 {cache : 'no-store'}
             );
-            const result = await reply.json();
+            const catalog = await reply.json();
 
-            if (!reply.ok || !result.success)
-                throw new Error(result.message || `HTTP ${reply.status}`);
+            if (!reply.ok)
+                throw new Error(catalog.message || `HTTP ${reply.status}`);
 
-            didCatalogFile.value = result.file_name;
-            displayDidCatalog(result.did_catalog);
+            didCatalogFile.value = fileName;
+            displayDidCatalog(catalog);
             setDidCatalogMessage(
-                `Loaded DID catalog ${result.did_catalog.name}.`
+                `Loaded DID catalog ${catalog.name}.`
             );
         }
 
@@ -8140,12 +8140,25 @@
                     }
 
                     const catalog = collectDidCatalog();
-
-                    await command({
-                        action : 'did_catalog_save',
-                        file_name : fileName,
-                        did_catalog : catalog
+                    const query = new URLSearchParams({
+                        did_catalog : fileName
                     });
+                    const reply = await fetch(
+                        `/api/uds?${query.toString()}`,
+                        {
+                            method : 'POST',
+                            headers : {
+                                'Content-Type' : 'application/json'
+                            },
+                            body : JSON.stringify(catalog)
+                        }
+                    );
+                    const result = await reply.json();
+
+                    if (!reply.ok || !result.success)
+                        throw new Error(
+                            result.message || `HTTP ${reply.status}`
+                        );
 
                     didCatalogFile.value = fileName;
                     await refreshDidCatalogs(fileName);
@@ -8666,13 +8679,13 @@
             );
             const result = await response.json();
 
-            if (!response.ok || !result.success)
+            if (!response.ok)
                 throw new Error(result.message || `HTTP ${response.status}`);
 
-            profileFile.value = result.file_name;
-            applyProfile(result.profile);
-            rememberProfile(result.file_name);
-            message.textContent = `Loaded ECU profile ${result.profile.name}.`;
+            profileFile.value = fileName;
+            applyProfile(result);
+            rememberProfile(fileName);
+            message.textContent = `Loaded ECU profile ${result.name}.`;
         }
 
         async function configureChannel() {
@@ -8740,7 +8753,9 @@
 
                     files.push(...result.entries.filter(entry =>
                         entry.type !== 'directory' &&
-                        /\.(bin|hex|srec|mot)$/i.test(entry.name)
+                        /\.(bin|hex|ihex|srec|s19|s28|s37|mot)$/i.test(
+                            entry.name
+                        )
                     ));
                     offset += result.entries.length;
                     hasMore = result.has_more === true;
@@ -8824,6 +8839,13 @@
                 downloadStateNames[data.download_state] || 'Unknown state';
             element('program-transferred').textContent =
                 `${formatBytes(transferred)} / ${formatBytes(total)}`;
+            element('program-segment').textContent =
+                data.download_segment_count
+                    ? `${Number(data.download_segment_index) + 1} / ` +
+                      `${data.download_segment_count} · ` +
+                      `${formatBytes(data.download_segment_transferred || 0)} / ` +
+                      `${formatBytes(data.download_segment_total || 0)}`
+                    : '—';
             element('program-speed').textContent = measuredSpeed
                 ? `${formatBytes(measuredSpeed)}/s`
                 : '—';
@@ -8976,11 +8998,22 @@
                 else
                     fileName = `${fileName.slice(0, -5)}.json`;
 
-                await command({
-                    action : 'profile_save',
-                    file_name : fileName,
-                    profile : collectProfile()
-                });
+                const query = new URLSearchParams({profile : fileName});
+                const response = await fetch(
+                    `/api/uds?${query.toString()}`,
+                    {
+                        method : 'POST',
+                        headers : {'Content-Type' : 'application/json'},
+                        body : JSON.stringify(collectProfile())
+                    }
+                );
+                const result = await response.json();
+
+                if (!response.ok || !result.success)
+                    throw new Error(
+                        result.message || `HTTP ${response.status}`
+                    );
+
                 profileFile.value = fileName;
                 await loadProfiles();
                 profileSelector.value = fileName;

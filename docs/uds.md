@@ -105,9 +105,14 @@ HTTP requests only read progress or request cancellation. The 512-byte transfer
 buffer is allocated in PSRAM and the SD file is closed on completion,
 cancellation, or error.
 
-Automatic Web downloads accept only regular `.bin`, `.hex`, `.srec`, or `.mot`
-files directly inside `/firmwares`. Empty files and images larger than 64 MiB
-are rejected before a diagnostic request is sent. TransferData retries the same
+Automatic Web downloads accept BIN, Intel HEX, and Motorola S-record images
+directly inside `/firmwares`. BIN uses the configured base address. Text-image
+formats are completely validated before the diagnostic session changes and use
+their embedded addresses. Adjacent data records are combined; every address
+gap creates another RequestDownload, TransferData, and RequestTransferExit
+sequence without repeating session entry, SecurityAccess, erase, or final
+verification. Empty files and images larger than 64 MiB are rejected before a
+diagnostic request is sent. TransferData retries the same
 payload with the same block sequence counter up to three times after a response
 timeout, `busyRepeatRequest` (`0x21`), or `wrongBlockSequenceCounter` (`0x73`).
 The complete automatic transfer is limited to ten minutes. Progress reports the
@@ -181,10 +186,14 @@ SD card recreates the catalog directory.
 
 The existing `/api/uds` GET handler also exposes DID catalogs without using an
 additional HTTP URI slot. `did_catalogs=1` returns a paginated summary list and
-`did_catalog=<file>` returns one validated catalog. POST actions
-`did_catalog_save` and `did_catalog_remove` validate all input before changing
-the SD card. Catalog request bodies are bounded to the catalog file limit plus
-the small API envelope, and their HTTP receive buffer is allocated in PSRAM.
+`did_catalog=<file>` returns one validated catalog directly. A POST to the same
+`did_catalog=<file>` query stores the raw catalog document, while the
+`did_catalog_remove` action removes it. All input is validated before changing
+the SD card. Catalog request bodies are bounded to the catalog file limit and
+their HTTP receive buffer is allocated in PSRAM. Direct transfer avoids
+building an API wrapper and avoids serializing and parsing the complete catalog
+a second time. The API logs Internal heap availability before and after catalog
+list, load, and save operations for on-device verification.
 The ISO-TP diagnostics page provides a catalog editor for adding, changing,
 loading, saving, and removing up to 128 DID definitions. Its Use action copies
 the selected DID directly into the ReadDataByIdentifier request form. Positive
@@ -194,6 +203,11 @@ supports signed and unsigned integers, IEEE 32-bit and 64-bit floating point,
 ASCII, UTF-8, and raw bytes, applies byte order, scale, offset, and unit, and
 keeps the original bytes visible. Unknown DIDs and length mismatches remain
 visible without being interpreted.
+
+Stored ECU profiles use the same low-memory transfer pattern. GET and POST
+requests with `profile=<file>` exchange the validated profile document
+directly, and the request or file buffer resides in PSRAM. This avoids a
+second complete cJSON tree and API wrapper during profile load and save.
 
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate

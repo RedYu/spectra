@@ -7,6 +7,7 @@
 
 #include <ctype.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,12 +16,14 @@
 
 #include "cJSON.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "app_task_priorities.h"
+#include "firmware_image.h"
 #include "uds_client.h"
 #include "uds_did_catalog_service.h"
 #include "uds_download.h"
@@ -31,8 +34,7 @@
 #include "web_api_common.h"
 
 #define WEB_UDS_BUFFER_SIZE       (1024U)
-#define WEB_UDS_BODY_MAX_SIZE \
-    (UDS_DID_CATALOG_FILE_MAX_SIZE + 1024U)
+#define WEB_UDS_BODY_MAX_SIZE     (4096U)
 #define WEB_UDS_LOCK_TIMEOUT_MS   (100U)
 #define WEB_UDS_WORKER_TASK_STACK_SIZE    (4096U)
 #define WEB_UDS_WORKER_PERIOD_MS          (10U)
@@ -41,11 +43,13 @@
 #define WEB_UDS_TESTER_PRESENT_MAX_INTERVAL_MS     (10000U)
 #define WEB_UDS_FIRMWARE_DIRECTORY       "/firmwares/"
 #define WEB_UDS_FIRMWARE_MAX_SIZE        (64U * 1024U * 1024U)
+#define WEB_UDS_FIRMWARE_INITIAL_SEGMENTS  (16U)
+#define WEB_UDS_FIRMWARE_MAX_SEGMENTS      (4096U)
 #define WEB_UDS_JOURNAL_DIRECTORY        "/logs/firmware"
 #define WEB_UDS_JOURNAL_PATH_MAX_SIZE    (128U)
 #define WEB_UDS_JOURNAL_LINE_MAX_SIZE    (384U)
-#define WEB_UDS_PROFILE_LIST_CAPACITY     (16U)
-#define WEB_UDS_DID_CATALOG_LIST_CAPACITY (16U)
+#define WEB_UDS_PROFILE_LIST_CAPACITY      (8U)
+#define WEB_UDS_DID_CATALOG_LIST_CAPACITY  (8U)
 #define WEB_UDS_QUERY_MAX_SIZE            (192U)
 
 typedef enum
@@ -67,6 +71,15 @@ typedef struct
     uint8_t success_value;
 
 } web_uds_routine_status_policy_t;
+
+typedef struct
+{
+    uint64_t address;
+    uint64_t size;
+
+} web_uds_firmware_segment_t;
+
+static const char *TAG = "web_uds_api";
 
 static SemaphoreHandle_t s_lock = NULL;
 static uint8_t *s_receive_buffer = NULL;
@@ -94,7 +107,15 @@ static uds_download_t s_download;
 static bool s_download_active = false;
 static FILE *s_download_file = NULL;
 static FILE *s_download_journal = NULL;
-static uint64_t s_download_file_offset = 0U;
+static uint64_t s_download_source_file_offset = 0U;
+static uint64_t s_download_image_offset = 0U;
+static firmware_image_reader_t *s_download_image_reader = NULL;
+static firmware_image_block_t s_download_image_block;
+static size_t s_download_image_block_offset = 0U;
+static web_uds_firmware_segment_t *s_download_segments = NULL;
+static uint32_t s_download_segment_count = 0U;
+static uint32_t s_download_stream_segment = 0U;
+static uint64_t s_download_stream_segment_offset = 0U;
 static uint64_t s_download_started_at_us = 0U;
 static uint64_t s_download_finished_at_us = 0U;
 static uint32_t s_download_logged_retries = 0U;
@@ -227,6 +248,28 @@ static esp_err_t web_uds_download_read(
     void *context
 );
 
+static esp_err_t web_uds_firmware_source_read(
+    uint64_t offset,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *read_size,
+    void *context
+);
+
+static esp_err_t web_uds_download_segment(
+    uint32_t index,
+    uint64_t *address,
+    uint64_t *size,
+    void *context
+);
+
+static esp_err_t web_uds_prepare_firmware_image(
+    const char *path,
+    uint64_t file_size,
+    uint64_t binary_address,
+    firmware_image_info_t *info
+);
+
 static uds_download_routine_result_t
 web_uds_download_evaluate_routine_result(
     uint16_t routine_identifier,
@@ -288,8 +331,8 @@ static esp_err_t web_uds_profile_get_handler(
     httpd_req_t *request
 );
 
-static esp_err_t web_uds_profile_save(
-    const cJSON *root
+static esp_err_t web_uds_profile_post_handler(
+    httpd_req_t *request
 );
 
 static esp_err_t web_uds_profile_remove(
@@ -300,8 +343,8 @@ static esp_err_t web_uds_did_catalog_get_handler(
     httpd_req_t *request
 );
 
-static esp_err_t web_uds_did_catalog_save(
-    const cJSON *root
+static esp_err_t web_uds_did_catalog_post_handler(
+    httpd_req_t *request
 );
 
 static esp_err_t web_uds_did_catalog_remove(
@@ -457,6 +500,117 @@ static esp_err_t web_uds_receive_json(
     return (*root != NULL)
         ? ESP_OK
         : ESP_ERR_INVALID_ARG;
+}
+
+static void web_uds_log_did_catalog_memory(
+    const char *operation,
+    const char *stage
+)
+{
+    const uint32_t capabilities =
+        MALLOC_CAP_INTERNAL |
+        MALLOC_CAP_8BIT;
+
+    ESP_LOGI(
+        TAG,
+        "DID catalog %s %s: internal=%u, largest=%u, minimum=%u",
+        operation,
+        stage,
+        (unsigned int)heap_caps_get_free_size(capabilities),
+        (unsigned int)heap_caps_get_largest_free_block(capabilities),
+        (unsigned int)heap_caps_get_minimum_free_size(capabilities)
+    );
+}
+
+static esp_err_t web_uds_receive_catalog_json(
+    httpd_req_t *request,
+    char **json
+)
+{
+    if ((request == NULL) ||
+        (json == NULL) ||
+        (request->content_len == 0U) ||
+        (request->content_len >
+         UDS_DID_CATALOG_FILE_MAX_SIZE)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    *json = heap_caps_malloc(
+        request->content_len + 1U,
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+
+    if (*json == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t received = 0U;
+
+    while (received < request->content_len) {
+        const int count = httpd_req_recv(
+            request,
+            *json + received,
+            request->content_len - received
+        );
+
+        if (count <= 0) {
+            heap_caps_free(*json);
+            *json = NULL;
+            return ESP_FAIL;
+        }
+
+        received += (size_t)count;
+    }
+
+    (*json)[received] = '\0';
+    return ESP_OK;
+}
+
+static esp_err_t web_uds_receive_profile_json(
+    httpd_req_t *request,
+    char **json
+)
+{
+    if ((request == NULL) ||
+        (json == NULL) ||
+        (request->content_len == 0U) ||
+        (request->content_len > UDS_PROFILE_FILE_MAX_SIZE)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    *json = heap_caps_malloc(
+        request->content_len + 1U,
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+
+    if (*json == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t received = 0U;
+
+    while (received < request->content_len) {
+        const int count = httpd_req_recv(
+            request,
+            *json + received,
+            request->content_len - received
+        );
+
+        if (count <= 0) {
+            heap_caps_free(*json);
+            *json = NULL;
+            return ESP_FAIL;
+        }
+
+        received += (size_t)count;
+    }
+
+    (*json)[received] = '\0';
+    return ESP_OK;
 }
 
 static esp_err_t web_uds_parse_hex(
@@ -1578,13 +1732,12 @@ static esp_err_t web_uds_request(
             return ESP_ERR_INVALID_ARG;
         }
 
-        uint8_t parameters[WEB_UDS_BUFFER_SIZE - 1U];
         size_t parameter_size = 0U;
         const esp_err_t parse_result =
             web_uds_parse_hex(
                 data->valuestring,
-                parameters,
-                sizeof(parameters),
+                s_response_buffer,
+                WEB_UDS_BUFFER_SIZE - 1U,
                 &parameter_size
             );
 
@@ -1595,7 +1748,7 @@ static esp_err_t web_uds_request(
         return uds_client_request(
             &s_client,
             (uint8_t)value,
-            parameters,
+            s_response_buffer,
             parameter_size,
             now_us
         );
@@ -1614,24 +1767,300 @@ static esp_err_t web_uds_download_read(
 {
     (void)context;
 
-    if ((s_download_file == NULL) ||
-        (offset != s_download_file_offset)) {
+    if ((s_download_image_reader == NULL) ||
+        (offset != s_download_image_offset)) {
 
         return ESP_ERR_INVALID_STATE;
     }
 
-    const esp_err_t result =
-        storage_sd_service_read(
+    *read_size = 0U;
+
+    while (*read_size < capacity) {
+        if (s_download_image_block_offset >=
+            s_download_image_block.size) {
+
+            const esp_err_t result = firmware_image_next(
+                s_download_image_reader,
+                &s_download_image_block
+            );
+
+            if (result == ESP_ERR_NOT_FOUND) {
+                break;
+            }
+
+            if (result != ESP_OK) {
+                return result;
+            }
+
+            s_download_image_block_offset = 0U;
+
+            if ((s_download_stream_segment >=
+                 s_download_segment_count) ||
+                (s_download_image_block.address !=
+                 (s_download_segments[
+                    s_download_stream_segment
+                 ].address +
+                  s_download_stream_segment_offset))) {
+
+                return ESP_ERR_INVALID_RESPONSE;
+            }
+        }
+
+        size_t available =
+            s_download_image_block.size -
+            s_download_image_block_offset;
+        const size_t remaining = capacity - *read_size;
+
+        if (available > remaining) {
+            available = remaining;
+        }
+
+        memcpy(
+            buffer + *read_size,
+            s_download_image_block.data +
+                s_download_image_block_offset,
+            available
+        );
+        s_download_image_block_offset += available;
+        *read_size += available;
+        s_download_stream_segment_offset += available;
+
+        if (s_download_stream_segment_offset ==
+            s_download_segments[
+                s_download_stream_segment
+            ].size) {
+
+            s_download_stream_segment++;
+            s_download_stream_segment_offset = 0U;
+        }
+    }
+
+    if (*read_size == 0U) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    s_download_image_offset += *read_size;
+    return ESP_OK;
+}
+
+static esp_err_t web_uds_firmware_source_read(
+    uint64_t offset,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *read_size,
+    void *context
+)
+{
+    (void)context;
+
+    if ((s_download_file == NULL) ||
+        (offset > LONG_MAX)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t result = ESP_OK;
+
+    if (offset != s_download_source_file_offset) {
+        result = storage_sd_service_seek(
+            s_download_file,
+            (long)offset,
+            SEEK_SET
+        );
+    }
+
+    if (result == ESP_OK) {
+        result = storage_sd_service_read(
             s_download_file,
             buffer,
             capacity,
             read_size
         );
-
-    if (result == ESP_OK) {
-        s_download_file_offset += *read_size;
     }
 
+    if (result == ESP_OK) {
+        s_download_source_file_offset = offset + *read_size;
+    }
+
+    return result;
+}
+
+static esp_err_t web_uds_download_segment(
+    uint32_t index,
+    uint64_t *address,
+    uint64_t *size,
+    void *context
+)
+{
+    (void)context;
+
+    if ((address == NULL) ||
+        (size == NULL) ||
+        (s_download_segments == NULL) ||
+        (index >= s_download_segment_count)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *address = s_download_segments[index].address;
+    *size = s_download_segments[index].size;
+    return ESP_OK;
+}
+
+static esp_err_t web_uds_prepare_firmware_image(
+    const char *path,
+    uint64_t file_size,
+    uint64_t binary_address,
+    firmware_image_info_t *info
+)
+{
+    firmware_image_format_t format;
+    esp_err_t result = firmware_image_format_from_name(
+        path,
+        &format
+    );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    s_download_image_reader = heap_caps_calloc(
+        1U,
+        sizeof(*s_download_image_reader),
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+
+    if (s_download_image_reader == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    const firmware_image_config_t config = {
+        .format = format,
+        .read = web_uds_firmware_source_read,
+        .file_size = file_size,
+        .binary_address = binary_address,
+    };
+
+    result = firmware_image_open(
+        s_download_image_reader,
+        &config
+    );
+
+    size_t segment_capacity =
+        WEB_UDS_FIRMWARE_INITIAL_SEGMENTS;
+    s_download_segments = heap_caps_calloc(
+        segment_capacity,
+        sizeof(*s_download_segments),
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+
+    if (s_download_segments == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    memset(info, 0, sizeof(*info));
+    firmware_image_block_t block;
+
+    while ((result == ESP_OK) &&
+           ((result = firmware_image_next(
+                s_download_image_reader,
+                &block
+            )) == ESP_OK)) {
+
+        if (info->block_count == 0U) {
+            info->lowest_address = block.address;
+        }
+
+        if ((info->block_count == 0U) ||
+            ((s_download_segments[
+                info->segment_count - 1U
+            ].address +
+              s_download_segments[
+                info->segment_count - 1U
+            ].size) != block.address)) {
+
+            if (info->segment_count == segment_capacity) {
+                if (segment_capacity >=
+                    WEB_UDS_FIRMWARE_MAX_SEGMENTS) {
+
+                    return ESP_ERR_INVALID_SIZE;
+                }
+
+                size_t new_capacity = segment_capacity * 2U;
+
+                if (new_capacity > WEB_UDS_FIRMWARE_MAX_SEGMENTS) {
+                    new_capacity = WEB_UDS_FIRMWARE_MAX_SEGMENTS;
+                }
+
+                web_uds_firmware_segment_t *segments =
+                    heap_caps_realloc(
+                        s_download_segments,
+                        new_capacity *
+                            sizeof(*s_download_segments),
+                        MALLOC_CAP_SPIRAM |
+                        MALLOC_CAP_8BIT
+                    );
+
+                if (segments == NULL) {
+                    return ESP_ERR_NO_MEM;
+                }
+
+                s_download_segments = segments;
+                segment_capacity = new_capacity;
+            }
+
+            s_download_segments[info->segment_count].address =
+                block.address;
+            s_download_segments[info->segment_count].size =
+                block.size;
+            info->segment_count++;
+        } else {
+            web_uds_firmware_segment_t *segment =
+                &s_download_segments[info->segment_count - 1U];
+
+            segment->size += block.size;
+        }
+
+        if (info->data_size > (UINT64_MAX - block.size)) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        info->data_size += block.size;
+        info->highest_address =
+            block.address + block.size - 1U;
+        info->block_count++;
+    }
+
+    if ((result != ESP_ERR_NOT_FOUND) ||
+        !s_download_image_reader->terminated ||
+        (info->block_count == 0U) ||
+        (info->segment_count == 0U)) {
+
+        return (result != ESP_ERR_NOT_FOUND)
+            ? result
+            : ESP_ERR_INVALID_RESPONSE;
+    }
+
+    info->entry_address =
+        s_download_image_reader->entry_address;
+    info->entry_address_valid =
+        s_download_image_reader->entry_address_valid;
+    s_download_segment_count = info->segment_count;
+    result = firmware_image_open(
+        s_download_image_reader,
+        &config
+    );
+    s_download_image_offset = 0U;
+    memset(
+        &s_download_image_block,
+        0,
+        sizeof(s_download_image_block)
+    );
+    s_download_image_block_offset = 0U;
+    s_download_stream_segment = 0U;
+    s_download_stream_segment_offset = 0U;
     return result;
 }
 
@@ -1673,6 +2102,22 @@ static void web_uds_download_close_file(void)
     if (s_download_file != NULL) {
         (void)storage_sd_service_close(&s_download_file);
     }
+
+    heap_caps_free(s_download_image_reader);
+    heap_caps_free(s_download_segments);
+    s_download_image_reader = NULL;
+    s_download_segments = NULL;
+    s_download_segment_count = 0U;
+    s_download_source_file_offset = 0U;
+    s_download_image_offset = 0U;
+    s_download_image_block_offset = 0U;
+    s_download_stream_segment = 0U;
+    s_download_stream_segment_offset = 0U;
+    memset(
+        &s_download_image_block,
+        0,
+        sizeof(s_download_image_block)
+    );
 }
 
 static esp_err_t web_uds_download_write_journal(
@@ -2028,7 +2473,9 @@ static esp_err_t web_uds_download_start(
         !web_uds_firmware_path_valid(path->valuestring) ||
         !web_uds_number(root, "data_format", UINT8_MAX, &data_format) ||
         !web_uds_number(root, "address_length", 8U, &address_length) ||
+        (address_length == 0U) ||
         !web_uds_number(root, "size_length", 8U, &size_length) ||
+        (size_length == 0U) ||
         !web_uds_number(
             root,
             "programming_session",
@@ -2304,11 +2751,10 @@ static esp_err_t web_uds_download_start(
     }
 
     result =
-        web_uds_download_open_journal(
+        storage_sd_service_open(
             path->valuestring,
-            (uint64_t)information.st_size,
-            address,
-            (uint8_t)data_format
+            "rb",
+            &s_download_file
         );
 
     if (result != ESP_OK) {
@@ -2318,24 +2764,49 @@ static esp_err_t web_uds_download_start(
         return result;
     }
 
-    result =
-        storage_sd_service_open(
+    firmware_image_info_t image_info = {0};
+    result = web_uds_prepare_firmware_image(
+        path->valuestring,
+        (uint64_t)information.st_size,
+        address,
+        &image_info
+    );
+
+    const uint64_t maximum_address =
+        (address_length == 8U)
+            ? UINT64_MAX
+            : (1ULL << (address_length * 8U)) - 1ULL;
+    const uint64_t maximum_size =
+        (size_length == 8U)
+            ? UINT64_MAX
+            : (1ULL << (size_length * 8U)) - 1ULL;
+
+    for (uint32_t index = 0U;
+         (result == ESP_OK) &&
+         (index < s_download_segment_count);
+         ++index) {
+
+        const web_uds_firmware_segment_t *segment =
+            &s_download_segments[index];
+
+        if ((segment->address > maximum_address) ||
+            (segment->size > maximum_size)) {
+
+            result = ESP_ERR_INVALID_SIZE;
+        }
+    }
+
+    if (result == ESP_OK) {
+        result = web_uds_download_open_journal(
             path->valuestring,
-            "rb",
-            &s_download_file
+            image_info.data_size,
+            image_info.lowest_address,
+            (uint8_t)data_format
         );
+    }
 
     if (result != ESP_OK) {
-        uds_download_progress_t progress = {
-            .state = UDS_DOWNLOAD_ERROR,
-            .total_size = (uint64_t)information.st_size,
-            .last_result = result,
-        };
-
-        web_uds_download_finalize_journal(
-            &progress,
-            "failed"
-        );
+        web_uds_download_close_file();
         uds_security_provider_clear_manual_key(
             &s_security_provider
         );
@@ -2355,8 +2826,10 @@ static esp_err_t web_uds_download_start(
             .data_format_identifier = (uint8_t)data_format,
             .memory_address = address,
             .memory_address_length = (uint8_t)address_length,
-            .memory_size = (uint64_t)information.st_size,
+            .memory_size = image_info.data_size,
             .memory_size_length = (uint8_t)size_length,
+            .segment_count = s_download_segment_count,
+            .segment = web_uds_download_segment,
             .maximum_block_retries = 3U,
             .operation_timeout_us = 600000000ULL,
             .programming_session_type =
@@ -2416,7 +2889,6 @@ static esp_err_t web_uds_download_start(
     }
 
     if (result == ESP_OK) {
-        s_download_file_offset = 0U;
         result =
             uds_download_start(
                 &s_download,
@@ -2474,13 +2946,11 @@ static bool web_uds_firmware_path_valid(
         return false;
     }
 
-    const char *extension = strrchr(path, '.');
-
-    return (extension != NULL) &&
-           ((strcmp(extension, ".bin") == 0) ||
-            (strcmp(extension, ".hex") == 0) ||
-            (strcmp(extension, ".srec") == 0) ||
-            (strcmp(extension, ".mot") == 0));
+    firmware_image_format_t format;
+    return firmware_image_format_from_name(
+        path,
+        &format
+    ) == ESP_OK;
 }
 
 static esp_err_t web_uds_profile_send_list(
@@ -2603,61 +3073,14 @@ static esp_err_t web_uds_profile_send_one(
     const char *file_name
 )
 {
-    uds_ecu_profile_t profile;
-    esp_err_t result = uds_profile_service_load(
-        file_name,
-        &profile
-    );
     char *json = NULL;
-
-    if (result == ESP_OK) {
-        result = uds_profile_service_encode_json(
-            &profile,
-            &json
-        );
-    }
-
-    cJSON *profile_json =
-        (json != NULL) ? cJSON_Parse(json) : NULL;
-    free(json);
-
-    if ((result == ESP_OK) &&
-        (profile_json == NULL)) {
-
-        result = ESP_ERR_NO_MEM;
-    }
-
-    cJSON *response = NULL;
-
-    if (result == ESP_OK) {
-        response = cJSON_CreateObject();
-
-        if ((response == NULL) ||
-            (cJSON_AddBoolToObject(
-                response,
-                "success",
-                true
-            ) == NULL) ||
-            (cJSON_AddStringToObject(
-                response,
-                "file_name",
-                file_name
-            ) == NULL) ||
-            !cJSON_AddItemToObject(
-                response,
-                "profile",
-                profile_json
-            )) {
-
-            cJSON_Delete(response);
-            cJSON_Delete(profile_json);
-            response = NULL;
-            result = ESP_ERR_NO_MEM;
-        }
-    }
+    esp_err_t result = uds_profile_service_load_json(
+        file_name,
+        &json
+    );
 
     if (result != ESP_OK) {
-        cJSON_Delete(profile_json);
+        heap_caps_free(json);
         return web_api_send_message(
             request,
             (result == ESP_ERR_NOT_FOUND)
@@ -2668,8 +3091,15 @@ static esp_err_t web_uds_profile_send_one(
         );
     }
 
-    result = web_api_send_json(request, response);
-    cJSON_Delete(response);
+    httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    result = httpd_resp_send(
+        request,
+        json,
+        HTTPD_RESP_USE_STRLEN
+    );
+
+    heap_caps_free(json);
     return result;
 }
 
@@ -2771,43 +3201,65 @@ static esp_err_t web_uds_profile_get_handler(
     return ESP_ERR_NOT_FOUND;
 }
 
-static esp_err_t web_uds_profile_save(
-    const cJSON *root
+static esp_err_t web_uds_profile_post_handler(
+    httpd_req_t *request
 )
 {
-    const cJSON *file_name =
-        cJSON_GetObjectItemCaseSensitive(root, "file_name");
-    const cJSON *profile_json =
-        cJSON_GetObjectItemCaseSensitive(root, "profile");
+    const size_t query_length =
+        httpd_req_get_url_query_len(request);
 
-    if (!cJSON_IsString(file_name) ||
-        !cJSON_IsObject(profile_json)) {
+    if ((query_length == 0U) ||
+        (query_length >= WEB_UDS_QUERY_MAX_SIZE)) {
 
-        return ESP_ERR_INVALID_ARG;
+        return ESP_ERR_NOT_FOUND;
     }
 
-    char *json = cJSON_PrintUnformatted(profile_json);
+    char query[WEB_UDS_QUERY_MAX_SIZE];
+    char file_name[UDS_PROFILE_FILE_NAME_MAX_LENGTH];
 
-    if (json == NULL) {
-        return ESP_ERR_NO_MEM;
+    if ((httpd_req_get_url_query_str(
+            request,
+            query,
+            sizeof(query)
+        ) != ESP_OK) ||
+        (httpd_query_key_value(
+            query,
+            "profile",
+            file_name,
+            sizeof(file_name)
+        ) != ESP_OK)) {
+
+        return ESP_ERR_NOT_FOUND;
     }
 
-    uds_ecu_profile_t profile;
-    esp_err_t result = uds_profile_service_decode_json(
-        json,
-        &profile
+    char *json = NULL;
+    esp_err_t result = web_uds_receive_profile_json(
+        request,
+        &json
     );
 
-    free(json);
-
     if (result == ESP_OK) {
-        result = uds_profile_service_save(
-            file_name->valuestring,
-            &profile
+        result = uds_profile_service_save_json(
+            file_name,
+            json
         );
     }
 
-    return result;
+    heap_caps_free(json);
+
+    return web_api_send_message(
+        request,
+        (result == ESP_OK)
+            ? "200 OK"
+            : ((result == ESP_ERR_INVALID_ARG) ||
+               (result == ESP_ERR_INVALID_SIZE))
+                ? "400 Bad Request"
+                : "409 Conflict",
+        result == ESP_OK,
+        (result == ESP_OK)
+            ? "UDS profile updated"
+            : esp_err_to_name(result)
+    );
 }
 
 static esp_err_t web_uds_profile_remove(
@@ -2827,6 +3279,8 @@ static esp_err_t web_uds_did_catalog_send_list(
     size_t offset
 )
 {
+    web_uds_log_did_catalog_memory("list", "before");
+
     uds_did_catalog_summary_t *catalogs = heap_caps_calloc(
         WEB_UDS_DID_CATALOG_LIST_CAPACITY,
         sizeof(*catalogs),
@@ -2928,6 +3382,7 @@ static esp_err_t web_uds_did_catalog_send_list(
 
     if (result != ESP_OK) {
         cJSON_Delete(response);
+        web_uds_log_did_catalog_memory("list", "after");
         return web_api_send_message(
             request,
             (result == ESP_ERR_INVALID_STATE)
@@ -2940,6 +3395,7 @@ static esp_err_t web_uds_did_catalog_send_list(
 
     result = web_api_send_json(request, response);
     cJSON_Delete(response);
+    web_uds_log_did_catalog_memory("list", "after");
     return result;
 }
 
@@ -2948,83 +3404,18 @@ static esp_err_t web_uds_did_catalog_send_one(
     const char *file_name
 )
 {
-    uds_did_definition_t *definitions = heap_caps_calloc(
-        UDS_DID_CATALOG_DEFINITION_MAX_COUNT,
-        sizeof(*definitions),
-        MALLOC_CAP_SPIRAM |
-        MALLOC_CAP_8BIT
-    );
+    web_uds_log_did_catalog_memory("load", "before");
 
-    if (definitions == NULL) {
-        return web_api_send_message(
-            request,
-            "500 Internal Server Error",
-            false,
-            "Unable to allocate DID catalog storage"
-        );
-    }
-
-    uds_did_catalog_document_t document = {
-        .definitions = definitions,
-        .capacity = UDS_DID_CATALOG_DEFINITION_MAX_COUNT,
-    };
-    esp_err_t result = uds_did_catalog_service_load(
-        file_name,
-        &document
-    );
     char *json = NULL;
-
-    if (result == ESP_OK) {
-        result = uds_did_catalog_service_encode_json(
-            &document,
-            &json
-        );
-    }
-
-    heap_caps_free(definitions);
-
-    cJSON *catalog_json = (json != NULL)
-        ? cJSON_Parse(json)
-        : NULL;
-    free(json);
-
-    if ((result == ESP_OK) &&
-        (catalog_json == NULL)) {
-
-        result = ESP_ERR_NO_MEM;
-    }
-
-    cJSON *response = NULL;
-
-    if (result == ESP_OK) {
-        response = cJSON_CreateObject();
-
-        if ((response == NULL) ||
-            (cJSON_AddBoolToObject(
-                response,
-                "success",
-                true
-            ) == NULL) ||
-            (cJSON_AddStringToObject(
-                response,
-                "file_name",
-                file_name
-            ) == NULL) ||
-            !cJSON_AddItemToObject(
-                response,
-                "did_catalog",
-                catalog_json
-            )) {
-
-            cJSON_Delete(response);
-            cJSON_Delete(catalog_json);
-            response = NULL;
-            result = ESP_ERR_NO_MEM;
-        }
-    }
+    esp_err_t result = uds_did_catalog_service_load_json(
+        file_name,
+        &json
+    );
 
     if (result != ESP_OK) {
-        cJSON_Delete(catalog_json);
+        heap_caps_free(json);
+        web_uds_log_did_catalog_memory("load", "after");
+
         return web_api_send_message(
             request,
             (result == ESP_ERR_NOT_FOUND)
@@ -3035,8 +3426,16 @@ static esp_err_t web_uds_did_catalog_send_one(
         );
     }
 
-    result = web_api_send_json(request, response);
-    cJSON_Delete(response);
+    httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    result = httpd_resp_send(
+        request,
+        json,
+        HTTPD_RESP_USE_STRLEN
+    );
+
+    heap_caps_free(json);
+    web_uds_log_did_catalog_memory("load", "after");
     return result;
 }
 
@@ -3126,59 +3525,68 @@ static esp_err_t web_uds_did_catalog_get_handler(
     );
 }
 
-static esp_err_t web_uds_did_catalog_save(
-    const cJSON *root
+static esp_err_t web_uds_did_catalog_post_handler(
+    httpd_req_t *request
 )
 {
-    const cJSON *file_name =
-        cJSON_GetObjectItemCaseSensitive(root, "file_name");
-    const cJSON *catalog_json =
-        cJSON_GetObjectItemCaseSensitive(root, "did_catalog");
+    const size_t query_length =
+        httpd_req_get_url_query_len(request);
 
-    if (!cJSON_IsString(file_name) ||
-        !cJSON_IsObject(catalog_json)) {
+    if ((query_length == 0U) ||
+        (query_length >= WEB_UDS_QUERY_MAX_SIZE)) {
 
-        return ESP_ERR_INVALID_ARG;
+        return ESP_ERR_NOT_FOUND;
     }
 
-    char *json = cJSON_PrintUnformatted(catalog_json);
+    char query[WEB_UDS_QUERY_MAX_SIZE];
+    char file_name[UDS_DID_CATALOG_FILE_NAME_MAX_LENGTH];
 
-    if (json == NULL) {
-        return ESP_ERR_NO_MEM;
+    if ((httpd_req_get_url_query_str(
+            request,
+            query,
+            sizeof(query)
+        ) != ESP_OK) ||
+        (httpd_query_key_value(
+            query,
+            "did_catalog",
+            file_name,
+            sizeof(file_name)
+        ) != ESP_OK)) {
+
+        return ESP_ERR_NOT_FOUND;
     }
 
-    uds_did_definition_t *definitions = heap_caps_calloc(
-        UDS_DID_CATALOG_DEFINITION_MAX_COUNT,
-        sizeof(*definitions),
-        MALLOC_CAP_SPIRAM |
-        MALLOC_CAP_8BIT
+    web_uds_log_did_catalog_memory("save", "before");
+
+    char *json = NULL;
+    esp_err_t result = web_uds_receive_catalog_json(
+        request,
+        &json
     );
-
-    if (definitions == NULL) {
-        free(json);
-        return ESP_ERR_NO_MEM;
-    }
-
-    uds_did_catalog_document_t document = {
-        .definitions = definitions,
-        .capacity = UDS_DID_CATALOG_DEFINITION_MAX_COUNT,
-    };
-    esp_err_t result = uds_did_catalog_service_decode_json(
-        json,
-        &document
-    );
-
-    free(json);
 
     if (result == ESP_OK) {
-        result = uds_did_catalog_service_save(
-            file_name->valuestring,
-            &document
+        result = uds_did_catalog_service_save_json(
+            file_name,
+            json
         );
     }
 
-    heap_caps_free(definitions);
-    return result;
+    heap_caps_free(json);
+    web_uds_log_did_catalog_memory("save", "after");
+
+    return web_api_send_message(
+        request,
+        (result == ESP_OK)
+            ? "200 OK"
+            : ((result == ESP_ERR_INVALID_ARG) ||
+               (result == ESP_ERR_INVALID_SIZE))
+                ? "400 Bad Request"
+                : "409 Conflict",
+        result == ESP_OK,
+        (result == ESP_OK)
+            ? "UDS DID catalog updated"
+            : esp_err_to_name(result)
+    );
 }
 
 static esp_err_t web_uds_did_catalog_remove(
@@ -3446,6 +3854,26 @@ static esp_err_t web_uds_get_handler(
         ) != NULL) &&
         (cJSON_AddNumberToObject(
             response,
+            "download_segment_index",
+            download_progress.segment_index
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_segment_count",
+            download_progress.segment_count
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_segment_transferred",
+            (double)download_progress.segment_transferred_size
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_segment_total",
+            (double)download_progress.segment_total_size
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
             "download_block_size",
             download_progress.block_data_capacity
         ) != NULL) &&
@@ -3532,6 +3960,20 @@ static esp_err_t web_uds_post_handler(
     httpd_req_t *request
 )
 {
+    const esp_err_t profile_result =
+        web_uds_profile_post_handler(request);
+
+    if (profile_result != ESP_ERR_NOT_FOUND) {
+        return profile_result;
+    }
+
+    const esp_err_t did_catalog_result =
+        web_uds_did_catalog_post_handler(request);
+
+    if (did_catalog_result != ESP_ERR_NOT_FOUND) {
+        return did_catalog_result;
+    }
+
     cJSON *root = NULL;
     esp_err_t result =
         web_uds_receive_json(request, &root);
@@ -3549,29 +3991,15 @@ static esp_err_t web_uds_post_handler(
         cJSON_GetObjectItemCaseSensitive(root, "action");
 
     if (cJSON_IsString(action) &&
-        ((strcmp(action->valuestring, "profile_save") == 0) ||
-         (strcmp(action->valuestring, "profile_remove") == 0) ||
-         (strcmp(action->valuestring, "did_catalog_save") == 0) ||
+        ((strcmp(action->valuestring, "profile_remove") == 0) ||
          (strcmp(action->valuestring, "did_catalog_remove") == 0))) {
 
         if (strcmp(
                 action->valuestring,
-                "profile_save"
+                "profile_remove"
             ) == 0) {
 
-            result = web_uds_profile_save(root);
-        } else if (strcmp(
-                       action->valuestring,
-                       "profile_remove"
-                   ) == 0) {
-
             result = web_uds_profile_remove(root);
-        } else if (strcmp(
-                       action->valuestring,
-                       "did_catalog_save"
-                   ) == 0) {
-
-            result = web_uds_did_catalog_save(root);
         } else {
             result = web_uds_did_catalog_remove(root);
         }
@@ -3750,13 +4178,15 @@ esp_err_t web_uds_api_register(
         s_security_provider_initialized = true;
 
         const BaseType_t task_result =
-            xTaskCreate(
+            xTaskCreateWithCaps(
                 web_uds_worker_task,
                 "uds_worker",
                 WEB_UDS_WORKER_TASK_STACK_SIZE,
                 NULL,
                 APP_TASK_PRIORITY_WEB_CAN,
-                &s_worker_task
+                &s_worker_task,
+                MALLOC_CAP_SPIRAM |
+                MALLOC_CAP_8BIT
             );
 
         if (task_result != pdPASS) {

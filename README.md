@@ -81,6 +81,12 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Browser CAN stream test page
 - Browser CAN Logger with identifier and event tables
 - Browser CAN Analyzer for live traffic and SCL recordings
+- Configurable per-channel browser history with utilization indicators
+- CSV, SCL, and ASC export of retained browser traffic
+- Resizable identifier and event panels
+- DBC Explorer with local and SD-card database loading
+- Grouped message browser, signal selection, live physical-value decoding,
+  history graphs, and byte/bit frame inspection
 
 ### CAN recording
 
@@ -97,14 +103,29 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 
 - ISO-TP over Classical CAN and CAN FD
 - Single, First, Consecutive, and Flow Control frame processing
-- Configurable IDs, block size, STmin, timeouts, CAN FD, and BRS
+- Configurable physical addressing, IDs, block size, STmin, timeouts, CAN FD,
+  BRS, padding, and complete-message buffers
 - UDS client with P2/P2* timing and NRC `0x78` handling
-- Diagnostic Session Control, ECU Reset, Tester Present, and Read Data By Identifier
+- Diagnostic Session Control, ECU Reset, Tester Present, SecurityAccess,
+  Read/Write Data By Identifier, DTC reading/clearing, and RoutineControl
+- RequestDownload, TransferData, and RequestTransferExit primitives
+- Non-blocking ECU programming pipeline with retry, cancellation, progress,
+  long-running routine polling, reset, and session restoration
+- ECU programming from BIN, Intel HEX, and Motorola S-record images stored
+  under `/sdcard/firmwares`
+- Persistent ECU profiles and DID catalogs stored as separate JSON files
+- Typed DID decoding with byte order, scale, offset, units, ASCII, UTF-8,
+  floating-point, signed, unsigned, and raw-byte values
+- Timestamped ECU programming journals under `/sdcard/logs/firmware`
 - Raw UDS service requests through the Web interface
-- XCP on CAN packet and command foundation
+- Dedicated ISO-TP/UDS diagnostics and UDS Programming pages
+- Stateful multi-session XCP master over CAN
 - XCP RES, ERR, EV, SERV, and DAQ packet classification
-- CONNECT response and standard XCP error decoding
-- CONNECT, DISCONNECT, GET_STATUS, SYNCH, and SHORT_UPLOAD encoding
+- CONNECT and discovery response decoding with standard XCP errors
+- CONNECT, DISCONNECT, GET_STATUS, GET_COMM_MODE_INFO, GET_ID, SET_MTA,
+  UPLOAD, SHORT_UPLOAD, DOWNLOAD, DOWNLOAD_NEXT, and raw CTO execution
+- Controlled XCP memory reads and bounded writes with explicit address policy
+- Dedicated browser XCP console
 
 ### Storage and configuration
 
@@ -118,6 +139,9 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Core-dump export from flash to SD card
 - Graceful service shutdown and SD-card unmounting
 - Browser-based internal-storage and SD-card file manager
+- Folder and empty-file creation, uploads, deletion, and text-file preview
+- SD-card formatting followed by recreation of application directories
+- Directory-first sorting and tree navigation
 - Resumable HTTP Range downloads with asynchronous SD-card buffering
 
 ### Connectivity
@@ -158,8 +182,12 @@ The detailed firmware architecture is documented in
 [docs/architecture.md](docs/architecture.md).
 The shared CAN types and validation rules are documented in
 [docs/can-frame-model.md](docs/can-frame-model.md).
-The diagnostic protocol foundations are documented in
-[docs/uds.md](docs/uds.md) and [docs/xcp.md](docs/xcp.md).
+The diagnostic protocols are documented in
+[docs/isotp.md](docs/isotp.md), [docs/uds.md](docs/uds.md), and
+[docs/xcp.md](docs/xcp.md). Hardware acceptance filters and the HTTP API are
+described in [docs/can-hardware-filters.md](docs/can-hardware-filters.md) and
+[docs/web-api.md](docs/web-api.md). Streaming firmware image readers are
+described in [docs/firmware-images.md](docs/firmware-images.md).
 
 ```text
 CAN bus                     CAN FD bus
@@ -344,6 +372,14 @@ http://spectra.device/can_analyzer
 http://spectra.device/isotp
 ```
 
+Additional diagnostic and analysis tools are available at:
+
+```text
+http://spectra.device/dbc
+http://spectra.device/uds_programming
+http://spectra.device/xcp
+```
+
 CAN events are sent in a compact versioned binary protocol using little-endian multibyte fields. JSON control commands configure subscriptions and pause or resume streaming without reconnecting.
 
 ### REST API
@@ -355,6 +391,7 @@ Detailed request and response documentation is available in
 | --- | --- | --- |
 | `GET` | `/api/system` | Read system, CPU, memory, storage, and reset information |
 | `GET` | `/api/diagnostics` | Read heap, FreeRTOS tasks, SD speed, CAN overflow/drop, queues, WebSocket, and logger diagnostics |
+| `POST` | `/api/diagnostics/sd-benchmark` | Start an asynchronous SD-card benchmark |
 | `POST` | `/api/system/restart` | Request a graceful device restart |
 | `GET` | `/api/network` | Read Wi-Fi, USB RNDIS, DNS, and mDNS information |
 | `POST` | `/api/network/wifi/scan` | Start a Wi-Fi network scan |
@@ -370,6 +407,7 @@ Detailed request and response documentation is available in
 | `GET`, `POST` | `/api/can/filters` | Read and apply hardware CAN receive filters |
 | `GET`, `POST` | `/api/isotp` | Configure an ISO-TP channel and exchange payloads |
 | `GET`, `POST` | `/api/uds` | Configure the UDS client and execute diagnostic requests |
+| `GET`, `POST` | `/api/xcp` | Configure XCP sessions and execute XCP commands |
 
 ## Storage and configuration
 
@@ -458,24 +496,33 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] Binary CAN event WebSocket stream
 - [x] High-throughput ASC and SCL CAN logger
 - [x] Browser CAN Logger and CAN Analyzer
+- [x] Configurable browser buffers and CSV, SCL, and ASC export
+- [x] DBC Explorer with live signal decoding, graphs, and bit inspection
 - [x] Resumable SD-card downloads using HTTP Range
 - [x] ISO-TP transport over Classical CAN and CAN FD
-- [x] Initial UDS client and browser diagnostics
-- [x] XCP packet parser and basic CTO command encoders
+- [x] UDS client, browser diagnostics, DID catalogs, and ECU profiles
+- [x] Automatic UDS ECU programming with routine polling and journals
+- [x] Streaming BIN, Intel HEX, and Motorola S-record readers and validators
+- [x] Stateful XCP master, browser console, discovery, upload, and bounded writes
 - [x] Embedded Web UI and REST API
+- [x] Device diagnostics with health analysis, task/queue telemetry, reports,
+  history reset, and SD benchmark control
+- [x] Browser file creation, upload, deletion, preview, and SD formatting
 - [x] USB RNDIS, Wi-Fi, DNS, and mDNS connectivity
 - [x] Internal and SD-card storage services
 - [x] Graceful shutdown and restart
 
 ### Planned
 
-- [ ] CSV conversion and export for recorded CAN logs
-- [ ] BLF support
-- [ ] DBC parsing
-- [ ] Additional UDS services and OBD-II workflows
-- [ ] Stateful XCP master, DAQ/STIM, calibration, and programming support
+- [ ] BLF import and export
+- [ ] Additional UDS services, functional addressing, and OBD-II workflows
+- [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
+- [ ] Persistent resume after interrupted ECU programming
+- [ ] Add BHEX parsing after selecting and documenting the required variant
+- [ ] XCP multi-packet block transfer, DAQ/STIM, calibration-page control,
+  seed/key access, and programming
 - [ ] CAN traffic replay
-- [ ] Live signal dashboards
+- [ ] Persistent customizable live signal dashboards
 - [ ] OTA firmware updates
 - [ ] Device registration and authentication
 - [ ] Remote backend integration
