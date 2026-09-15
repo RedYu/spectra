@@ -31,7 +31,11 @@
 #define WEB_UDS_BUFFER_SIZE       (1024U)
 #define WEB_UDS_BODY_MAX_SIZE     (4096U)
 #define WEB_UDS_LOCK_TIMEOUT_MS   (100U)
-#define WEB_UDS_DOWNLOAD_TASK_STACK_SIZE (4096U)
+#define WEB_UDS_WORKER_TASK_STACK_SIZE    (4096U)
+#define WEB_UDS_WORKER_PERIOD_MS          (10U)
+#define WEB_UDS_TESTER_PRESENT_DEFAULT_INTERVAL_MS (2000U)
+#define WEB_UDS_TESTER_PRESENT_MIN_INTERVAL_MS     (250U)
+#define WEB_UDS_TESTER_PRESENT_MAX_INTERVAL_MS     (10000U)
 #define WEB_UDS_FIRMWARE_DIRECTORY       "/firmwares/"
 #define WEB_UDS_FIRMWARE_MAX_SIZE        (64U * 1024U * 1024U)
 #define WEB_UDS_JOURNAL_DIRECTORY        "/logs/firmware"
@@ -84,7 +88,19 @@ static char s_download_journal_path[
     WEB_UDS_JOURNAL_PATH_MAX_SIZE
 ] = {0};
 static uint8_t *s_download_transfer_buffer = NULL;
-static TaskHandle_t s_download_task = NULL;
+static TaskHandle_t s_worker_task = NULL;
+static bool s_tester_present_enabled = true;
+static bool s_tester_present_session_active = false;
+static bool s_tester_present_request_pending = false;
+static bool s_tester_present_deferred = false;
+static uint8_t s_diagnostic_session = 1U;
+static uint8_t s_pending_diagnostic_session = 0U;
+static uint64_t s_tester_present_interval_us =
+    (uint64_t)WEB_UDS_TESTER_PRESENT_DEFAULT_INTERVAL_MS * 1000ULL;
+static uint64_t s_tester_present_deadline_us = 0U;
+static uint32_t s_tester_present_sent = 0U;
+static uint32_t s_tester_present_deferred_count = 0U;
+static esp_err_t s_tester_present_last_result = ESP_OK;
 static uint32_t s_sequence = 0U;
 static uds_client_event_type_t s_last_event =
     UDS_CLIENT_EVENT_TRANSMITTED;
@@ -209,8 +225,18 @@ static bool web_uds_firmware_path_valid(
     const char *path
 );
 
-static void web_uds_download_task(
+static void web_uds_worker_task(
     void *context
+);
+
+static void web_uds_tester_present_stop(void);
+
+static void web_uds_tester_present_note_activity(
+    uint64_t now_us
+);
+
+static void web_uds_tester_present_poll(
+    uint64_t now_us
 );
 
 static esp_err_t web_uds_get_handler(
@@ -727,6 +753,19 @@ static void web_uds_client_callback(
         return;
     }
 
+    const uint64_t now_us = esp_timer_get_time();
+
+    if (s_tester_present_request_pending &&
+        (s_client.request_service_id == UDS_SERVICE_TESTER_PRESENT)) {
+
+        s_tester_present_request_pending = false;
+        s_tester_present_last_result = event->result;
+        web_uds_tester_present_note_activity(now_us);
+        s_sequence++;
+        xSemaphoreGiveRecursive(s_lock);
+        return;
+    }
+
     s_last_event = event->type;
     s_last_result = event->result;
     s_transport_error = event->transport_error;
@@ -756,6 +795,42 @@ static void web_uds_client_callback(
                 s_response_size
             );
         }
+    }
+
+    if ((s_client.request_service_id ==
+         UDS_SERVICE_DIAGNOSTIC_SESSION_CONTROL) &&
+        (((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
+          event->response.positive) ||
+         ((event->type == UDS_CLIENT_EVENT_TRANSMITTED) &&
+          (s_pending_diagnostic_session != 0U)))) {
+
+        const uint8_t session =
+            (event->type == UDS_CLIENT_EVENT_RESPONSE) &&
+            (event->response.payload_length != 0U)
+                ? (event->response.payload[0] & 0x7FU)
+                : s_pending_diagnostic_session;
+
+        s_diagnostic_session = session;
+        s_tester_present_session_active = session != 1U;
+        s_pending_diagnostic_session = 0U;
+        web_uds_tester_present_note_activity(now_us);
+    } else if ((s_client.request_service_id ==
+                UDS_SERVICE_DIAGNOSTIC_SESSION_CONTROL) &&
+               ((event->type == UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) ||
+                (event->type == UDS_CLIENT_EVENT_TIMEOUT) ||
+                (event->type == UDS_CLIENT_EVENT_TRANSPORT_ERROR) ||
+                (event->type == UDS_CLIENT_EVENT_PROTOCOL_ERROR))) {
+
+        s_pending_diagnostic_session = 0U;
+        web_uds_tester_present_note_activity(now_us);
+    } else if ((s_client.request_service_id ==
+                UDS_SERVICE_ECU_RESET) &&
+               ((event->type == UDS_CLIENT_EVENT_RESPONSE) ||
+                (event->type == UDS_CLIENT_EVENT_TRANSMITTED))) {
+
+        web_uds_tester_present_stop();
+    } else {
+        web_uds_tester_present_note_activity(now_us);
     }
 
     if ((s_security_state ==
@@ -854,6 +929,72 @@ static void web_uds_client_callback(
     xSemaphoreGiveRecursive(s_lock);
 }
 
+static void web_uds_tester_present_stop(void)
+{
+    s_tester_present_session_active = false;
+    s_tester_present_request_pending = false;
+    s_tester_present_deferred = false;
+    s_diagnostic_session = 1U;
+    s_pending_diagnostic_session = 0U;
+    s_tester_present_deadline_us = 0U;
+}
+
+static void web_uds_tester_present_note_activity(
+    uint64_t now_us
+)
+{
+    if (s_tester_present_enabled &&
+        s_tester_present_session_active) {
+
+        s_tester_present_deadline_us =
+            now_us + s_tester_present_interval_us;
+    }
+
+    s_tester_present_deferred = false;
+}
+
+static void web_uds_tester_present_poll(
+    uint64_t now_us
+)
+{
+    if (!s_tester_present_enabled ||
+        !s_tester_present_session_active ||
+        (s_client.state == UDS_CLIENT_CLOSED) ||
+        (now_us < s_tester_present_deadline_us)) {
+
+        return;
+    }
+
+    if (uds_client_busy(&s_client)) {
+        if (!s_tester_present_deferred) {
+            s_tester_present_deferred = true;
+            s_tester_present_deferred_count++;
+        }
+
+        return;
+    }
+
+    s_tester_present_request_pending = true;
+    const esp_err_t result =
+        uds_client_tester_present(
+            &s_client,
+            true,
+            now_us
+        );
+
+    s_tester_present_last_result = result;
+
+    if (result == ESP_OK) {
+        s_tester_present_sent++;
+        s_tester_present_deadline_us =
+            now_us + s_tester_present_interval_us;
+    } else {
+        s_tester_present_request_pending = false;
+        s_tester_present_deadline_us =
+            now_us + 100000ULL;
+    }
+}
+
 static esp_err_t web_uds_configure(
     const cJSON *root
 )
@@ -866,9 +1007,31 @@ static esp_err_t web_uds_configure(
     uint32_t st_min = 0U;
     uint32_t p2_ms = 0U;
     uint32_t p2_star_ms = 0U;
+    uint32_t tester_present_interval_ms =
+        WEB_UDS_TESTER_PRESENT_DEFAULT_INTERVAL_MS;
     bool extended = false;
     bool can_fd = false;
     bool brs = false;
+    bool tester_present_enabled = true;
+
+    const cJSON *tester_present_interval =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "tester_present_interval_ms"
+        );
+
+    if ((tester_present_interval != NULL) &&
+        (!web_uds_number(
+            root,
+            "tester_present_interval_ms",
+            WEB_UDS_TESTER_PRESENT_MAX_INTERVAL_MS,
+            &tester_present_interval_ms
+        ) ||
+         (tester_present_interval_ms <
+          WEB_UDS_TESTER_PRESENT_MIN_INTERVAL_MS))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
 
     if (!web_uds_number(root, "bus", 1U, &bus) ||
         !web_uds_number(
@@ -896,6 +1059,12 @@ static esp_err_t web_uds_configure(
         !web_uds_boolean(root, "extended", false, &extended) ||
         !web_uds_boolean(root, "fd", false, &can_fd) ||
         !web_uds_boolean(root, "brs", false, &brs) ||
+        !web_uds_boolean(
+            root,
+            "tester_present_enabled",
+            true,
+            &tester_present_enabled
+        ) ||
         (p2_ms == 0U) || (p2_star_ms == 0U)) {
 
         return ESP_ERR_INVALID_ARG;
@@ -945,6 +1114,10 @@ static esp_err_t web_uds_configure(
     if (result == ESP_OK) {
         s_client_config = config;
         s_client_config_valid = true;
+        s_tester_present_enabled = tester_present_enabled;
+        s_tester_present_interval_us =
+            (uint64_t)tester_present_interval_ms * 1000ULL;
+        web_uds_tester_present_stop();
         s_last_result = ESP_OK;
         s_response_size = 0U;
         s_negative_response_code = 0U;
@@ -1283,12 +1456,20 @@ static esp_err_t web_uds_request(
             return ESP_ERR_INVALID_ARG;
         }
 
-        return uds_client_diagnostic_session_control(
-            &s_client,
-            (uint8_t)value,
-            suppress,
-            now_us
-        );
+        s_pending_diagnostic_session = (uint8_t)value;
+        const esp_err_t result =
+            uds_client_diagnostic_session_control(
+                &s_client,
+                (uint8_t)value,
+                suppress,
+                now_us
+            );
+
+        if (result != ESP_OK) {
+            s_pending_diagnostic_session = 0U;
+        }
+
+        return result;
     }
 
     if (strcmp(kind->valuestring, "reset") == 0) {
@@ -1621,7 +1802,7 @@ static void web_uds_download_finalize_journal(
     (void)storage_sd_service_close(&s_download_journal);
 }
 
-static void web_uds_download_task(
+static void web_uds_worker_task(
     void *context
 )
 {
@@ -1668,27 +1849,24 @@ static void web_uds_download_task(
                     outcome
                 );
                 web_uds_download_close_file();
-                s_download_task = NULL;
             }
-        }
+        } else if (s_client.state != UDS_CLIENT_CLOSED) {
+            const uint64_t now_us = esp_timer_get_time();
 
-        const bool finished =
-            !running || (s_download_task == NULL);
-
-        if (finished) {
-            s_download_task = NULL;
+            (void)uds_client_poll(
+                &s_client,
+                now_us
+            );
+            web_uds_security_submit_key();
+            web_uds_tester_present_poll(now_us);
         }
 
         xSemaphoreGiveRecursive(s_lock);
 
-        if (finished) {
-            break;
-        }
-
-        vTaskDelay(1U);
+        vTaskDelay(
+            pdMS_TO_TICKS(WEB_UDS_WORKER_PERIOD_MS)
+        );
     }
-
-    vTaskDelete(NULL);
 }
 
 static esp_err_t web_uds_download_start(
@@ -1798,33 +1976,6 @@ static esp_err_t web_uds_download_start(
 
     if (result == ESP_OK) {
         s_download_active = true;
-        const BaseType_t task_result =
-            xTaskCreate(
-                web_uds_download_task,
-                "uds_download",
-                WEB_UDS_DOWNLOAD_TASK_STACK_SIZE,
-                NULL,
-                APP_TASK_PRIORITY_WEB_CAN,
-                &s_download_task
-            );
-
-        if (task_result != pdPASS) {
-            s_download_active = false;
-            result = ESP_ERR_NO_MEM;
-            (void)uds_download_close(&s_download);
-            uds_download_progress_t progress = {0};
-            (void)uds_download_get_progress(
-                &s_download,
-                &progress
-            );
-            progress.last_result = result;
-            web_uds_download_finalize_journal(
-                &progress,
-                "failed"
-            );
-            web_uds_download_close_file();
-            (void)uds_client_open(&s_client, &s_client_config);
-        }
     } else {
         uds_download_progress_t progress = {0};
         (void)uds_download_get_progress(
@@ -1912,14 +2063,15 @@ static esp_err_t web_uds_get_handler(
                         : "failed"
             );
         }
-    } else if (s_client.state != UDS_CLIENT_CLOSED) {
-        (void)uds_client_poll(
-            &s_client,
-            esp_timer_get_time()
-        );
-
-        web_uds_security_submit_key();
     }
+
+    const uint64_t now_us = esp_timer_get_time();
+    const uint64_t tester_present_due_ms =
+        s_tester_present_session_active &&
+        (s_tester_present_deadline_us > now_us)
+            ? (s_tester_present_deadline_us - now_us + 999ULL) /
+              1000ULL
+            : 0U;
 
     char *payload =
         web_uds_format_hex(
@@ -2046,6 +2198,46 @@ static esp_err_t web_uds_get_handler(
             response,
             "security_nrc",
             s_security_negative_response_code
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "tester_present_enabled",
+            s_tester_present_enabled
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "tester_present_active",
+            s_tester_present_session_active
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "diagnostic_session",
+            s_diagnostic_session
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "tester_present_interval_ms",
+            s_tester_present_interval_us / 1000ULL
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "tester_present_due_ms",
+            tester_present_due_ms
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "tester_present_sent",
+            s_tester_present_sent
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "tester_present_deferred",
+            s_tester_present_deferred_count
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "tester_present_result",
+            s_tester_present_last_result
         ) != NULL) &&
         (cJSON_AddBoolToObject(
             response,
@@ -2200,6 +2392,7 @@ static esp_err_t web_uds_post_handler(
             : web_uds_security_cancel();
     } else if (strcmp(action->valuestring, "close") == 0) {
         web_uds_security_reset();
+        web_uds_tester_present_stop();
 
         if (s_download_active) {
             uds_download_progress_t progress = {0};
@@ -2310,6 +2503,20 @@ esp_err_t web_uds_api_register(
         }
 
         s_security_provider_initialized = true;
+
+        const BaseType_t task_result =
+            xTaskCreate(
+                web_uds_worker_task,
+                "uds_worker",
+                WEB_UDS_WORKER_TASK_STACK_SIZE,
+                NULL,
+                APP_TASK_PRIORITY_WEB_CAN,
+                &s_worker_task
+            );
+
+        if (task_result != pdPASS) {
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     const httpd_uri_t get = {

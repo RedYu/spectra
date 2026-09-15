@@ -247,12 +247,25 @@
                         STmin
                         <input id="uds-st-min" type="number" min="0" max="255" value="0">
                     </label>
+
+                    <label>
+                        Tester Present interval
+                        <span class="input-with-unit">
+                            <input id="uds-tester-present-interval" type="number" min="250" max="10000" value="2000">
+                            <span>ms</span>
+                        </span>
+                    </label>
                 </div>
 
                 <div class="isotp-options">
                     <label><input id="uds-extended" type="checkbox">29-bit identifiers</label>
                     <label><input id="uds-brs" type="checkbox" disabled>CAN FD bit-rate switch</label>
+                    <label><input id="uds-tester-present-enabled" type="checkbox" checked>Automatic Tester Present outside default session</label>
                 </div>
+
+                <p id="uds-tester-present-status" class="note">
+                    Tester Present is waiting for a non-default diagnostic session.
+                </p>
 
                 <div class="isotp-actions">
                     <button id="uds-open" class="primary">Apply UDS channel</button>

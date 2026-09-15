@@ -115,11 +115,16 @@ Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
 
+Automatic suppressed-response Tester Present keeps a confirmed non-default
+diagnostic session alive at a configurable interval. A persistent UDS worker
+owns client polling, so keep-alive and timeout handling do not depend on an
+open browser page. Normal requests take priority; a due keep-alive is deferred
+while the client has an outstanding request.
+
 ## Current limitations
 
 - one outstanding request per client;
 - physical addressing only through the selected ISO-TP channel;
-- no periodic Tester Present scheduler;
 - no built-in OEM security-access algorithms;
 - no typed DID value or routine-result decoders yet;
 - no persistent resume after reset or interrupted ECU programming;

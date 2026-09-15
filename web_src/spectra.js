@@ -7209,6 +7209,26 @@
                     'error',
                     data.state === 6 || data.state === 7
                 );
+                const testerPresentStatus =
+                    element('uds-tester-present-status');
+
+                if (!data.tester_present_enabled) {
+                    testerPresentStatus.textContent =
+                        'Automatic Tester Present is disabled.';
+                } else if (data.tester_present_active) {
+                    testerPresentStatus.textContent =
+                        `Session 0x${Number(data.diagnostic_session)
+                            .toString(16)
+                            .padStart(2, '0')
+                            .toUpperCase()} · Tester Present every ` +
+                        `${data.tester_present_interval_ms} ms · ` +
+                        `next in ${data.tester_present_due_ms} ms · ` +
+                        `${data.tester_present_sent} sent · ` +
+                        `${data.tester_present_deferred} deferred.`;
+                } else {
+                    testerPresentStatus.textContent =
+                        'Tester Present is waiting for a non-default diagnostic session.';
+                }
                 sendButton.disabled =
                     !data.open ||
                     data.state === 2 ||
@@ -7310,7 +7330,11 @@
                     block_size : Number(element('uds-block-size').value),
                     st_min : Number(element('uds-st-min').value),
                     p2_ms : Number(element('uds-p2').value),
-                    p2_star_ms : Number(element('uds-p2-star').value)
+                    p2_star_ms : Number(element('uds-p2-star').value),
+                    tester_present_enabled :
+                        element('uds-tester-present-enabled').checked,
+                    tester_present_interval_ms :
+                        Number(element('uds-tester-present-interval').value)
                 });
                 await refresh();
             } catch (error) {
@@ -7988,7 +8012,10 @@
                     block_size : Number(element('program-block-size').value),
                     st_min : Number(element('program-st-min').value),
                     p2_ms : Number(element('program-p2').value),
-                    p2_star_ms : Number(element('program-p2-star').value)
+                    p2_star_ms : Number(element('program-p2-star').value),
+                    tester_present_enabled : true,
+                    tester_present_interval_ms :
+                        Number(element('program-tester-present-interval').value)
                 });
                 message.textContent = 'UDS channel configured.';
                 await refresh();
