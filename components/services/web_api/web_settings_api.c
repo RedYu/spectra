@@ -390,11 +390,15 @@ static esp_err_t web_settings_api_get_handler(
             settings->wifi_ap.ssid
         ) != NULL);
 
+    /*
+     * The SoftAP password is accepted for update but must never be
+     * returned by GET /api/settings.
+     */
     valid = valid &&
-        (cJSON_AddStringToObject(
+        (cJSON_AddBoolToObject(
             wifi_ap,
-            "password",
-            settings->wifi_ap.password
+            "password_configured",
+            settings->wifi_ap.password[0] != '\0'
         ) != NULL);
 
     valid = valid &&

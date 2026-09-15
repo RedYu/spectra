@@ -52,6 +52,24 @@ esp_err_t uds_profile_service_encode_json(
 );
 
 /**
+ * @brief Load and validate raw profile JSON from the SD card.
+ *
+ * The caller releases the returned PSRAM buffer with heap_caps_free().
+ */
+esp_err_t uds_profile_service_load_json(
+    const char *file_name,
+    char **json
+);
+
+/**
+ * @brief Validate and store raw profile JSON.
+ */
+esp_err_t uds_profile_service_save_json(
+    const char *file_name,
+    const char *json
+);
+
+/**
  * @brief Load and validate one JSON ECU profile from the SD card.
  */
 esp_err_t uds_profile_service_load(

@@ -281,3 +281,58 @@ TEST_CASE(
         )
     );
 }
+
+TEST_CASE(
+    "UDS DID catalog streaming parser decodes escapes",
+    "[uds]"
+)
+{
+    const char json[] =
+        "{\"description\":\"Engine \\\"live\\\" data\","
+        "\"definitions\":[{\"offset\":-40,"
+        "\"scale\":0.1,\"data_length\":2,"
+        "\"byte_order\":\"big_endian\","
+        "\"data_type\":\"unsigned\","
+        "\"description\":\"Coolant temperature\","
+        "\"unit\":\"\\u00B0C\",\"name\":\"ECT\","
+        "\"identifier\":5}],\"name\":\"Powertrain\","
+        "\"version\":1}";
+    uds_did_definition_t definition;
+    uds_did_catalog_document_t document = {
+        .definitions = &definition,
+        .capacity = 1U,
+    };
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_did_catalog_service_decode_json(
+            json,
+            &document
+        )
+    );
+    TEST_ASSERT_EQUAL_STRING(
+        "Engine \"live\" data",
+        document.description
+    );
+    TEST_ASSERT_EQUAL_STRING("\xC2\xB0" "C", definition.unit);
+    TEST_ASSERT_EQUAL_HEX16(5U, definition.identifier);
+}
+
+TEST_CASE(
+    "UDS DID catalog streaming parser rejects duplicate fields",
+    "[uds]"
+)
+{
+    const char json[] =
+        "{\"version\":1,\"version\":1,\"name\":\"Duplicate\","
+        "\"description\":\"\",\"definitions\":[]}";
+    uds_did_catalog_document_t document = {0};
+
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_did_catalog_service_decode_json(
+            json,
+            &document
+        )
+    );
+}

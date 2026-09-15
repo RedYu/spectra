@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "esp_heap_caps.h"
 
 #include "storage_sd_service.h"
 
@@ -888,9 +889,11 @@ static esp_err_t uds_profile_read_file(
             : ESP_ERR_INVALID_SIZE;
     }
 
-    char *buffer = calloc(
+    char *buffer = heap_caps_calloc(
         (size_t)information.st_size + 1U,
-        1U
+        1U,
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
     );
 
     if (buffer == NULL) {
@@ -926,7 +929,7 @@ static esp_err_t uds_profile_read_file(
     }
 
     if (result != ESP_OK) {
-        free(buffer);
+        heap_caps_free(buffer);
         return result;
     }
 
@@ -967,8 +970,64 @@ esp_err_t uds_profile_service_load(
         result = uds_profile_service_decode_json(json, profile);
     }
 
-    free(json);
+    heap_caps_free(json);
     return result;
+}
+
+esp_err_t uds_profile_service_load_json(
+    const char *file_name,
+    char **json
+)
+{
+    if (json == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *json = NULL;
+    char path[192];
+    esp_err_t result = uds_profile_build_path(
+        file_name,
+        "",
+        path,
+        sizeof(path)
+    );
+
+    if (result == ESP_OK) {
+        result = uds_profile_read_file(path, json);
+    }
+
+    if (result == ESP_OK) {
+        uds_ecu_profile_t profile;
+        result = uds_profile_service_decode_json(
+            *json,
+            &profile
+        );
+    }
+
+    if (result != ESP_OK) {
+        heap_caps_free(*json);
+        *json = NULL;
+    }
+
+    return result;
+}
+
+esp_err_t uds_profile_service_save_json(
+    const char *file_name,
+    const char *json
+)
+{
+    if (json == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uds_ecu_profile_t profile;
+    const esp_err_t result =
+        uds_profile_service_decode_json(json, &profile);
+
+    return (result == ESP_OK)
+        ? uds_profile_service_save(file_name, &profile)
+        : result;
 }
 
 esp_err_t uds_profile_service_save(

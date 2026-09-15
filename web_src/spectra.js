@@ -1032,6 +1032,8 @@
                 document.getElementById("status")
         };
 
+        let apCredentialsConfigured = false;
+        let loadedApSsid = "";
         let credentialsConfigured = false;
         let loadedStaSsid = "";
 
@@ -1654,11 +1656,16 @@
             elements.wifiApSsid.value =
                 wifiAp.ssid || "";
 
-            elements.wifiApPassword.value =
-                wifiAp.password || "";
+            elements.wifiApPassword.value = "";
 
             elements.wifiApOpen.checked =
-                wifiAp.password === "";
+                wifiAp.password_configured !== true;
+
+            loadedApSsid =
+                wifiAp.ssid || "";
+
+            apCredentialsConfigured =
+                wifiAp.password_configured === true;
 
             elements.wifiStaEnabled.checked =
                 wifiSta.enabled === true;
@@ -1754,6 +1761,13 @@
                 const password =
                     elements.wifiApPassword.value;
 
+                const networkChanged =
+                    ssid !== loadedApSsid;
+
+                const needsCredentials =
+                    !apCredentialsConfigured ||
+                    networkChanged;
+
                 if (ssid.length === 0) {
                     throw new Error(
                         "SoftAP SSID cannot be empty"
@@ -1761,6 +1775,16 @@
                 }
 
                 if (!elements.wifiApOpen.checked &&
+                    needsCredentials &&
+                    password.length === 0) {
+
+                    throw new Error(
+                        "Enter a SoftAP password after changing the SSID"
+                    );
+                }
+
+                if (!elements.wifiApOpen.checked &&
+                    password.length > 0 &&
                     ((password.length < 8) ||
                      (password.length > 63))) {
 
@@ -1812,6 +1836,26 @@
         }
 
         function createSettingsPayload() {
+            const wifiAp = {
+                enabled:
+                    elements.wifiApEnabled.checked
+            };
+
+            const wifiApSsid =
+                elements.wifiApSsid.value.trim();
+
+            const wifiApPassword =
+                elements.wifiApPassword.value;
+
+            if (elements.wifiApOpen.checked) {
+                wifiAp.ssid = wifiApSsid;
+                wifiAp.password = "";
+
+            } else if (wifiApPassword.length > 0) {
+                wifiAp.ssid = wifiApSsid;
+                wifiAp.password = wifiApPassword;
+            }
+
             const wifiSta = {
                 enabled:
                     elements.wifiStaEnabled.checked
@@ -1898,18 +1942,8 @@
                 },
 
                 network: {
-                    wifi_ap: {
-                        enabled:
-                            elements.wifiApEnabled.checked,
-
-                        ssid:
-                            elements.wifiApSsid.value.trim(),
-
-                        password:
-                            elements.wifiApOpen.checked
-                                ? ""
-                                : elements.wifiApPassword.value
-                    },
+                    wifi_ap:
+                        wifiAp,
 
                     wifi_sta:
                         wifiSta,

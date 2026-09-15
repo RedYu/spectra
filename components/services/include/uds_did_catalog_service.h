@@ -78,11 +78,29 @@ esp_err_t uds_did_catalog_service_load(
 );
 
 /**
+ * @brief Load and validate a catalog while preserving its JSON text.
+ *
+ * The returned PSRAM buffer must be released with heap_caps_free().
+ */
+esp_err_t uds_did_catalog_service_load_json(
+    const char *file_name,
+    char **json
+);
+
+/**
  * @brief Validate and persist a catalog as a separate JSON file.
  */
 esp_err_t uds_did_catalog_service_save(
     const char *file_name,
     const uds_did_catalog_document_t *document
+);
+
+/**
+ * @brief Validate and persist an existing catalog JSON document.
+ */
+esp_err_t uds_did_catalog_service_save_json(
+    const char *file_name,
+    const char *json
 );
 
 /**
