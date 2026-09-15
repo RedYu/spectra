@@ -88,6 +88,8 @@ static atomic_bool s_running =
     ATOMIC_VAR_INIT(false);
 
 static battery_service_info_t s_info;
+static uint8_t s_low_level_percent = 15U;
+static uint8_t s_critical_level_percent = 5U;
 
 static esp_err_t battery_service_lock(void)
 {
@@ -277,6 +279,14 @@ static void battery_service_update(void)
     } else {
         s_info.level_percent = 0U;
     }
+
+    s_info.low_level =
+        s_info.battery_present &&
+        (s_info.level_percent <= s_low_level_percent);
+
+    s_info.critical_level =
+        s_info.battery_present &&
+        (s_info.level_percent <= s_critical_level_percent);
 
     s_info.last_update_ms =
         battery_service_get_time_ms();
@@ -538,4 +548,37 @@ bool battery_service_is_running(void)
     return atomic_load(
         &s_running
     );
+}
+
+esp_err_t battery_service_set_thresholds(
+    uint8_t low_level_percent,
+    uint8_t critical_level_percent
+)
+{
+    if ((low_level_percent > 100U) ||
+        (critical_level_percent >= low_level_percent)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t result = battery_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    s_low_level_percent = low_level_percent;
+    s_critical_level_percent = critical_level_percent;
+
+    if (s_info.measurement_valid &&
+        s_info.battery_present) {
+
+        s_info.low_level =
+            s_info.level_percent <= s_low_level_percent;
+        s_info.critical_level =
+            s_info.level_percent <= s_critical_level_percent;
+    }
+
+    battery_service_unlock();
+    return ESP_OK;
 }

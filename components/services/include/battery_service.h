@@ -38,6 +38,8 @@ typedef struct
      * Approximate battery charge level from 0 to 100 percent.
      */
     uint8_t level_percent;
+    bool low_level;
+    bool critical_level;
 
     /**
      * Time of the latest successful measurement.
@@ -86,6 +88,16 @@ esp_err_t battery_service_get_info(
  * @brief Check whether battery monitoring is running.
  */
 bool battery_service_is_running(void);
+
+/**
+ * @brief Configure battery warning thresholds.
+ *
+ * Critical must be lower than Low.
+ */
+esp_err_t battery_service_set_thresholds(
+    uint8_t low_level_percent,
+    uint8_t critical_level_percent
+);
 
 #ifdef __cplusplus
 }

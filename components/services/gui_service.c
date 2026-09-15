@@ -29,6 +29,7 @@
 #include "screen_manager.h"
 #include "settings_model.h"
 #include "settings_service.h"
+#include "display_backlight.h"
 
 #define GUI_TASK_STACK_SIZE       (8192U)
 #define GUI_TASK_PRIORITY \
@@ -50,6 +51,14 @@ static QueueHandle_t s_boot_queue = NULL;
 static bool s_initialized = false;
 static atomic_bool s_started =
     ATOMIC_VAR_INIT(false);
+static atomic_uint s_normal_brightness =
+    ATOMIC_VAR_INIT(80U);
+static atomic_uint s_dim_brightness =
+    ATOMIC_VAR_INIT(20U);
+static atomic_uint s_dim_timeout_s =
+    ATOMIC_VAR_INIT(30U);
+static atomic_uint s_off_timeout_s =
+    ATOMIC_VAR_INIT(120U);
 
 /*
  * TODO:
@@ -58,6 +67,49 @@ static atomic_bool s_started =
  */
 
 static void gui_service_process_boot_progress(void);
+
+static void gui_service_process_display_idle(void)
+{
+    lv_display_t *display = lv_display_get_default();
+
+    if (display == NULL) {
+        return;
+    }
+
+    const uint32_t inactive_ms =
+        lv_display_get_inactive_time(display);
+    const uint32_t dim_timeout_s =
+        atomic_load(&s_dim_timeout_s);
+    const uint32_t off_timeout_s =
+        atomic_load(&s_off_timeout_s);
+    uint8_t brightness = (uint8_t)atomic_load(
+        &s_normal_brightness
+    );
+
+    if ((off_timeout_s != 0U) &&
+        (inactive_ms >= (off_timeout_s * 1000U))) {
+
+        brightness = DISPLAY_BRIGHTNESS_OFF;
+
+    } else if ((dim_timeout_s != 0U) &&
+               (inactive_ms >= (dim_timeout_s * 1000U))) {
+
+        brightness = (uint8_t)atomic_load(
+            &s_dim_brightness
+        );
+
+        const uint8_t normal_brightness =
+            (uint8_t)atomic_load(&s_normal_brightness);
+
+        if (brightness > normal_brightness) {
+            brightness = normal_brightness;
+        }
+    }
+
+    if (display_backlight_get_brightness() != brightness) {
+        (void)display_backlight_set_brightness(brightness);
+    }
+}
 
 esp_err_t gui_service_set_boot_progress(
     uint8_t progress,
@@ -374,6 +426,7 @@ static void gui_task(
 
     while (true) {
         gui_service_process_boot_progress();
+        gui_service_process_display_idle();
 
         uint32_t delay_ms =
             lvgl_port_handler();
@@ -401,6 +454,32 @@ static void gui_task(
             delay_ticks
         );
     }
+}
+
+esp_err_t gui_service_set_display_idle_policy(
+    uint8_t normal_brightness,
+    uint8_t dim_brightness,
+    uint32_t dim_timeout_s,
+    uint32_t off_timeout_s
+)
+{
+    if ((normal_brightness < DISPLAY_BRIGHTNESS_MIN) ||
+        (normal_brightness > DISPLAY_BRIGHTNESS_MAX) ||
+        ((dim_brightness != DISPLAY_BRIGHTNESS_OFF) &&
+         ((dim_brightness < DISPLAY_BRIGHTNESS_MIN) ||
+          (dim_brightness > DISPLAY_BRIGHTNESS_MAX))) ||
+        ((dim_timeout_s != 0U) &&
+         (off_timeout_s != 0U) &&
+         (off_timeout_s <= dim_timeout_s))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    atomic_store(&s_normal_brightness, normal_brightness);
+    atomic_store(&s_dim_brightness, dim_brightness);
+    atomic_store(&s_dim_timeout_s, dim_timeout_s);
+    atomic_store(&s_off_timeout_s, off_timeout_s);
+    return ESP_OK;
 }
 
 esp_err_t gui_service_start(void)

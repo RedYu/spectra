@@ -17,6 +17,16 @@ extern "C" {
 #endif
 
 #define TIME_SERVICE_TIMEZONE_MAX_LENGTH (64U)
+#define TIME_SERVICE_SERVER_MAX_LENGTH   (64U)
+
+typedef struct
+{
+    bool synchronization_enabled;
+    char timezone[TIME_SERVICE_TIMEZONE_MAX_LENGTH];
+    char primary_server[TIME_SERVICE_SERVER_MAX_LENGTH];
+    char secondary_server[TIME_SERVICE_SERVER_MAX_LENGTH];
+
+} time_service_config_t;
 
 /**
  * @brief Current system-time synchronization information.
@@ -31,6 +41,9 @@ typedef struct
     time_t last_synchronization_time;
 
     char timezone[TIME_SERVICE_TIMEZONE_MAX_LENGTH];
+    char primary_server[TIME_SERVICE_SERVER_MAX_LENGTH];
+    char secondary_server[TIME_SERVICE_SERVER_MAX_LENGTH];
+    bool synchronization_enabled;
 
 } time_service_info_t;
 
@@ -85,6 +98,20 @@ bool time_service_is_synchronized(void);
 esp_err_t time_service_set_timezone(
     const char *timezone
 );
+
+/**
+ * @brief Apply timezone and SNTP server configuration.
+ *
+ * An active SNTP client is restarted when its configuration changes.
+ */
+esp_err_t time_service_configure(
+    const time_service_config_t *config
+);
+
+/**
+ * @brief Restart SNTP to request a new synchronization immediately.
+ */
+esp_err_t time_service_synchronize_now(void);
 
 /**
  * @brief Convert the current system time to local calendar time.

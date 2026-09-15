@@ -22,6 +22,23 @@ extern "C" {
 #define SETTINGS_DISPLAY_BRIGHTNESS_MIN            (10U)
 #define SETTINGS_DISPLAY_BRIGHTNESS_MAX            (100U)
 #define SETTINGS_DISPLAY_BRIGHTNESS_DEFAULT        (80U)
+#define SETTINGS_DISPLAY_DIM_BRIGHTNESS_DEFAULT    (20U)
+#define SETTINGS_DISPLAY_DIM_TIMEOUT_DEFAULT_S     (30U)
+#define SETTINGS_DISPLAY_OFF_TIMEOUT_DEFAULT_S     (120U)
+#define SETTINGS_DISPLAY_IDLE_TIMEOUT_MAX_S        (3600U)
+
+#define SETTINGS_BATTERY_LOW_LEVEL_DEFAULT         (15U)
+#define SETTINGS_BATTERY_CRITICAL_LEVEL_DEFAULT    (5U)
+
+#define SETTINGS_TIMEZONE_MAX_LENGTH                (64U)
+#define SETTINGS_NTP_SERVER_MAX_LENGTH              (64U)
+#define SETTINGS_TIME_SYNCHRONIZATION_DEFAULT       (true)
+#define SETTINGS_TIMEZONE_DEFAULT \
+    ("CET-1CEST,M3.5.0,M10.5.0/3")
+#define SETTINGS_NTP_PRIMARY_SERVER_DEFAULT \
+    ("pool.ntp.org")
+#define SETTINGS_NTP_SECONDARY_SERVER_DEFAULT \
+    ("time.cloudflare.com")
 
 #define SETTINGS_SOUND_ENABLED_DEFAULT             (true)
 #define SETTINGS_SOUND_VOLUME_MIN                  (0U)
@@ -151,8 +168,28 @@ typedef struct
 typedef struct
 {
     uint8_t brightness;
+    uint8_t dim_brightness;
+    uint32_t dim_timeout_s;
+    uint32_t off_timeout_s;
 
 } display_settings_t;
+
+typedef struct
+{
+    uint8_t low_level_percent;
+    uint8_t critical_level_percent;
+
+} battery_settings_t;
+
+typedef struct
+{
+    bool synchronization_enabled;
+
+    char timezone[SETTINGS_TIMEZONE_MAX_LENGTH];
+    char primary_server[SETTINGS_NTP_SERVER_MAX_LENGTH];
+    char secondary_server[SETTINGS_NTP_SERVER_MAX_LENGTH];
+
+} time_settings_t;
 
 /**
  * @brief Audible-feedback settings.
@@ -270,6 +307,8 @@ typedef struct
 
     device_settings_t device;
     display_settings_t display;
+    battery_settings_t battery;
+    time_settings_t time;
     sound_settings_t sound;
     logging_settings_t logging;
     ui_settings_t ui;

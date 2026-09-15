@@ -100,6 +100,24 @@ static esp_err_t settings_model_validate(
         SETTINGS_DEVICE_TARGET_MAX_LENGTH - 1U
     ] = '\0';
 
+    settings->time.timezone[
+        SETTINGS_TIMEZONE_MAX_LENGTH - 1U
+    ] = '\0';
+
+    settings->time.primary_server[
+        SETTINGS_NTP_SERVER_MAX_LENGTH - 1U
+    ] = '\0';
+
+    settings->time.secondary_server[
+        SETTINGS_NTP_SERVER_MAX_LENGTH - 1U
+    ] = '\0';
+
+    if ((settings->time.timezone[0] == '\0') ||
+        (settings->time.primary_server[0] == '\0')) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
     settings->wifi_ap.ssid[
         SETTINGS_WIFI_AP_SSID_MAX_LENGTH - 1U
     ] = '\0';
@@ -143,6 +161,34 @@ static esp_err_t settings_model_validate(
 
         settings->display.brightness =
             SETTINGS_DISPLAY_BRIGHTNESS_MAX;
+    }
+
+    if ((settings->display.dim_brightness != 0U) &&
+        ((settings->display.dim_brightness <
+          SETTINGS_DISPLAY_BRIGHTNESS_MIN) ||
+         (settings->display.dim_brightness >
+          SETTINGS_DISPLAY_BRIGHTNESS_MAX))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((settings->display.dim_timeout_s >
+         SETTINGS_DISPLAY_IDLE_TIMEOUT_MAX_S) ||
+        (settings->display.off_timeout_s >
+         SETTINGS_DISPLAY_IDLE_TIMEOUT_MAX_S) ||
+        ((settings->display.dim_timeout_s != 0U) &&
+         (settings->display.off_timeout_s != 0U) &&
+         (settings->display.off_timeout_s <=
+          settings->display.dim_timeout_s))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((settings->battery.low_level_percent > 100U) ||
+        (settings->battery.critical_level_percent >=
+         settings->battery.low_level_percent)) {
+
+        return ESP_ERR_INVALID_ARG;
     }
 
     if (settings->sound.volume_percent >
@@ -365,6 +411,42 @@ esp_err_t settings_model_set_defaults(
 
     settings->display.brightness =
         SETTINGS_DISPLAY_BRIGHTNESS_DEFAULT;
+
+    settings->display.dim_brightness =
+        SETTINGS_DISPLAY_DIM_BRIGHTNESS_DEFAULT;
+
+    settings->display.dim_timeout_s =
+        SETTINGS_DISPLAY_DIM_TIMEOUT_DEFAULT_S;
+
+    settings->display.off_timeout_s =
+        SETTINGS_DISPLAY_OFF_TIMEOUT_DEFAULT_S;
+
+    settings->battery.low_level_percent =
+        SETTINGS_BATTERY_LOW_LEVEL_DEFAULT;
+
+    settings->battery.critical_level_percent =
+        SETTINGS_BATTERY_CRITICAL_LEVEL_DEFAULT;
+
+    settings->time.synchronization_enabled =
+        SETTINGS_TIME_SYNCHRONIZATION_DEFAULT;
+
+    (void)strlcpy(
+        settings->time.timezone,
+        SETTINGS_TIMEZONE_DEFAULT,
+        sizeof(settings->time.timezone)
+    );
+
+    (void)strlcpy(
+        settings->time.primary_server,
+        SETTINGS_NTP_PRIMARY_SERVER_DEFAULT,
+        sizeof(settings->time.primary_server)
+    );
+
+    (void)strlcpy(
+        settings->time.secondary_server,
+        SETTINGS_NTP_SECONDARY_SERVER_DEFAULT,
+        sizeof(settings->time.secondary_server)
+    );
 
     settings->sound.enabled =
         SETTINGS_SOUND_ENABLED_DEFAULT;

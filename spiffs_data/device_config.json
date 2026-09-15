@@ -5,7 +5,20 @@
         "name": "Modern Automotive CAN Analyzer"
     },
     "display": {
-        "brightness": 80
+        "brightness": 80,
+        "dim_brightness": 20,
+        "dim_timeout_s": 30,
+        "off_timeout_s": 120
+    },
+    "battery": {
+        "low_level_percent": 15,
+        "critical_level_percent": 5
+    },
+    "time": {
+        "synchronization_enabled": true,
+        "timezone": "CET-1CEST,M3.5.0,M10.5.0/3",
+        "primary_server": "pool.ntp.org",
+        "secondary_server": "time.cloudflare.com"
     },
     "sound": {
         "enabled": true,

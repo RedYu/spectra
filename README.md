@@ -35,6 +35,8 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - AXP313A power-management support
 - ETA6003 battery charger integration
 - ADC-based battery-voltage monitoring
+- Configurable Low and Critical battery-level thresholds
+- Configurable display dimming and backlight-off idle timers
 - Passive buzzer with configurable volume and asynchronous signals
 - Internal SPIFFS and removable SD-card storage
 - Selected task stacks and buffers allocated in PSRAM
@@ -131,7 +133,7 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 
 - JSON-based settings model and service
 - Primary and Secondary CAN settings in the GUI and Web API
-- Wi-Fi, display, sound, logging, and UI settings
+- Wi-Fi, display, battery, sound, time, logging, and UI settings
 - Settings persistence before controlled restart and shutdown
 - UART and optional SD-card file logging
 - Configurable per-tag ESP-IDF log levels
@@ -155,7 +157,7 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Embedded Web UI and REST API
 - Internet connectivity checks through the Spectra backend
 - Human-readable Wi-Fi disconnection reasons
-- SNTP synchronization with a configurable POSIX timezone
+- SNTP synchronization with configurable servers and POSIX timezone
 
 ## Hardware
 

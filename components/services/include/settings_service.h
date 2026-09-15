@@ -64,6 +64,23 @@ esp_err_t settings_service_set_brightness(
 );
 
 /**
+ * @brief Configure and immediately apply system time synchronization.
+ *
+ * The setting is not automatically saved to persistent storage.
+ */
+esp_err_t settings_service_set_time(
+    const time_settings_t *time
+);
+
+/**
+ * @brief Configure display idle behavior and battery warning levels.
+ */
+esp_err_t settings_service_set_power_preferences(
+    const display_settings_t *display,
+    const battery_settings_t *battery
+);
+
+/**
  * @brief Enable or disable SD-card logging.
  *
  * Updates the settings model and applies the requested logging state.

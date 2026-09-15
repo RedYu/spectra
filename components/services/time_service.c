@@ -28,6 +28,7 @@ static const char *TAG = "time_service";
 
 static atomic_bool s_running = false;
 static atomic_bool s_synchronized = false;
+static atomic_bool s_sntp_enabled = true;
 static atomic_uint s_synchronization_count = 0U;
 
 static esp_event_handler_instance_t s_sync_event_instance = NULL;
@@ -36,6 +37,34 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static time_t s_last_synchronization_time = 0;
 static char s_timezone[TIME_SERVICE_TIMEZONE_MAX_LENGTH] =
     TIME_SERVICE_DEFAULT_TIMEZONE;
+static char s_primary_server[TIME_SERVICE_SERVER_MAX_LENGTH] =
+    TIME_SERVICE_PRIMARY_SERVER;
+static char s_secondary_server[TIME_SERVICE_SERVER_MAX_LENGTH] =
+    TIME_SERVICE_SECONDARY_SERVER;
+
+static void time_service_reset_synchronization_state(void)
+{
+    atomic_store(&s_synchronized, false);
+
+    portENTER_CRITICAL(&s_lock);
+    s_last_synchronization_time = 0;
+    portEXIT_CRITICAL(&s_lock);
+}
+
+static esp_err_t time_service_start_sntp(void)
+{
+    esp_sntp_config_t config =
+        ESP_NETIF_SNTP_DEFAULT_CONFIG(s_primary_server);
+
+#if CONFIG_LWIP_SNTP_MAX_SERVERS >= 2
+    if (s_secondary_server[0] != '\0') {
+        config.num_of_servers = 2U;
+        config.servers[1] = s_secondary_server;
+    }
+#endif
+
+    return esp_netif_sntp_init(&config);
+}
 
 static bool time_service_text_valid(
     const char *text,
@@ -130,17 +159,11 @@ esp_err_t time_service_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    atomic_store(&s_synchronized, false);
+    time_service_reset_synchronization_state();
     atomic_store(&s_synchronization_count, 0U);
 
-    portENTER_CRITICAL(&s_lock);
-    s_last_synchronization_time = 0;
-    portEXIT_CRITICAL(&s_lock);
-
     esp_err_t result =
-        time_service_set_timezone(
-            TIME_SERVICE_DEFAULT_TIMEZONE
-        );
+        time_service_set_timezone(s_timezone);
 
     if (result != ESP_OK) {
         atomic_store(&s_running, false);
@@ -160,22 +183,9 @@ esp_err_t time_service_start(void)
         return result;
     }
 
-    const esp_sntp_config_t config =
-#if CONFIG_LWIP_SNTP_MAX_SERVERS >= 2
-        ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(
-            2U,
-            ESP_SNTP_SERVER_LIST(
-                TIME_SERVICE_PRIMARY_SERVER,
-                TIME_SERVICE_SECONDARY_SERVER
-            )
-        );
-#else
-        ESP_NETIF_SNTP_DEFAULT_CONFIG(
-            TIME_SERVICE_PRIMARY_SERVER
-        );
-#endif
-
-    result = esp_netif_sntp_init(&config);
+    if (atomic_load(&s_sntp_enabled)) {
+        result = time_service_start_sntp();
+    }
 
     if (result != ESP_OK) {
         (void)esp_event_handler_instance_unregister(
@@ -189,22 +199,21 @@ esp_err_t time_service_start(void)
         return result;
     }
     
-#if CONFIG_LWIP_SNTP_MAX_SERVERS >= 2
-    ESP_LOGI(
-        TAG,
-        "SNTP started: servers=%s,%s, timezone=%s",
-        TIME_SERVICE_PRIMARY_SERVER,
-        TIME_SERVICE_SECONDARY_SERVER,
-        s_timezone
-    );
-#else
-    ESP_LOGI(
-        TAG,
-        "SNTP started: server=%s, timezone=%s",
-        TIME_SERVICE_PRIMARY_SERVER,
-        s_timezone
-    );
-#endif
+    if (atomic_load(&s_sntp_enabled)) {
+        ESP_LOGI(
+            TAG,
+            "SNTP started: primary=%s, secondary=%s, timezone=%s",
+            s_primary_server,
+            s_secondary_server,
+            s_timezone
+        );
+    } else {
+        ESP_LOGI(
+            TAG,
+            "SNTP disabled: timezone=%s",
+            s_timezone
+        );
+    }
 
     return ESP_OK;
 }
@@ -225,7 +234,9 @@ void time_service_stop(void)
         s_sync_event_instance = NULL;
     }
 
-    esp_netif_sntp_deinit();
+    if (atomic_load(&s_sntp_enabled)) {
+        esp_netif_sntp_deinit();
+    }
 
     ESP_LOGI(TAG, "Time service stopped");
 }
@@ -280,6 +291,86 @@ esp_err_t time_service_set_timezone(
     return ESP_OK;
 }
 
+esp_err_t time_service_configure(
+    const time_service_config_t *config
+)
+{
+    if ((config == NULL) ||
+        !time_service_text_valid(
+            config->timezone,
+            sizeof(config->timezone)
+        ) ||
+        !time_service_text_valid(
+            config->primary_server,
+            sizeof(config->primary_server)
+        ) ||
+        (memchr(
+            config->secondary_server,
+            '\0',
+            sizeof(config->secondary_server)
+        ) == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t result =
+        time_service_set_timezone(config->timezone);
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    const bool was_enabled =
+        atomic_load(&s_sntp_enabled);
+
+    if (time_service_is_running() && was_enabled) {
+        esp_netif_sntp_deinit();
+    }
+
+    portENTER_CRITICAL(&s_lock);
+    (void)strlcpy(
+        s_primary_server,
+        config->primary_server,
+        sizeof(s_primary_server)
+    );
+    (void)strlcpy(
+        s_secondary_server,
+        config->secondary_server,
+        sizeof(s_secondary_server)
+    );
+    portEXIT_CRITICAL(&s_lock);
+
+    atomic_store(
+        &s_sntp_enabled,
+        config->synchronization_enabled
+    );
+
+    if (time_service_is_running() &&
+        config->synchronization_enabled) {
+
+        time_service_reset_synchronization_state();
+        result = time_service_start_sntp();
+
+        if (result != ESP_OK) {
+            atomic_store(&s_sntp_enabled, false);
+        }
+    }
+
+    return result;
+}
+
+esp_err_t time_service_synchronize_now(void)
+{
+    if (!time_service_is_running() ||
+        !atomic_load(&s_sntp_enabled)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    time_service_reset_synchronization_state();
+    return esp_netif_sntp_start();
+}
+
 esp_err_t time_service_get_local_time(
     struct tm *time_info
 )
@@ -328,7 +419,22 @@ esp_err_t time_service_get_info(
         s_timezone,
         sizeof(info->timezone)
     );
+
+    (void)strlcpy(
+        info->primary_server,
+        s_primary_server,
+        sizeof(info->primary_server)
+    );
+
+    (void)strlcpy(
+        info->secondary_server,
+        s_secondary_server,
+        sizeof(info->secondary_server)
+    );
     portEXIT_CRITICAL(&s_lock);
+
+    info->synchronization_enabled =
+        atomic_load(&s_sntp_enabled);
 
     return ESP_OK;
 }

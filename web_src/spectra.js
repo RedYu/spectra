@@ -897,11 +897,50 @@
             brightnessValue:
                 document.getElementById("brightness-value"),
 
+            displayDimBrightness:
+                document.getElementById("display-dim-brightness"),
+
+            displayDimTimeout:
+                document.getElementById("display-dim-timeout"),
+
+            displayOffTimeout:
+                document.getElementById("display-off-timeout"),
+
+            batteryLowLevel:
+                document.getElementById("battery-low-level"),
+
+            batteryCriticalLevel:
+                document.getElementById("battery-critical-level"),
+
             animations:
                 document.getElementById("animations"),
 
             theme:
                 document.getElementById("theme"),
+
+            timeLocal:
+                document.getElementById("time-local"),
+
+            timeUtc:
+                document.getElementById("time-utc"),
+
+            timeSyncStatus:
+                document.getElementById("time-sync-status"),
+
+            timeSyncEnabled:
+                document.getElementById("time-sync-enabled"),
+
+            timeTimezone:
+                document.getElementById("time-timezone"),
+
+            timePrimaryServer:
+                document.getElementById("time-primary-server"),
+
+            timeSecondaryServer:
+                document.getElementById("time-secondary-server"),
+
+            timeSyncNow:
+                document.getElementById("time-sync-now"),
 
             sdLogging:
                 document.getElementById("sd-logging"),
@@ -1056,6 +1095,20 @@
             
             elements.theme.disabled =
                 operationBusy;
+
+            elements.displayDimBrightness.disabled = operationBusy;
+            elements.displayDimTimeout.disabled = operationBusy;
+            elements.displayOffTimeout.disabled = operationBusy;
+            elements.batteryLowLevel.disabled = operationBusy;
+            elements.batteryCriticalLevel.disabled = operationBusy;
+
+            elements.timeSyncEnabled.disabled = operationBusy;
+            elements.timeTimezone.disabled = operationBusy;
+            elements.timePrimaryServer.disabled = operationBusy;
+            elements.timeSecondaryServer.disabled = operationBusy;
+            elements.timeSyncNow.disabled =
+                operationBusy ||
+                !elements.timeSyncEnabled.checked;
 
             elements.clearStaCredentials.disabled =
                 operationBusy ||
@@ -1588,6 +1641,12 @@
             const ui =
                 settings.ui || {};
 
+            const time =
+                settings.time || {};
+
+            const battery =
+                settings.battery || {};
+
             const network =
                 settings.network || {};
 
@@ -1627,6 +1686,21 @@
             elements.brightness.value =
                 display.brightness ?? 80;
 
+            elements.displayDimBrightness.value =
+                display.dim_brightness ?? 20;
+
+            elements.displayDimTimeout.value =
+                display.dim_timeout_s ?? 30;
+
+            elements.displayOffTimeout.value =
+                display.off_timeout_s ?? 120;
+
+            elements.batteryLowLevel.value =
+                battery.low_level_percent ?? 15;
+
+            elements.batteryCriticalLevel.value =
+                battery.critical_level_percent ?? 5;
+
             elements.animations.checked =
                 ui.animations_enabled === true;
 
@@ -1634,6 +1708,34 @@
                 ui.theme === "dark"
                     ? "dark"
                     : "light";
+
+            elements.timeLocal.textContent =
+                time.local_time || "Unavailable";
+
+            elements.timeUtc.textContent =
+                time.utc_time
+                    ? `UTC ${time.utc_time}`
+                    : "—";
+
+            elements.timeSyncEnabled.checked =
+                time.synchronization_enabled !== false;
+
+            elements.timeTimezone.value =
+                time.timezone ||
+                "CET-1CEST,M3.5.0,M10.5.0/3";
+
+            elements.timePrimaryServer.value =
+                time.primary_server || "pool.ntp.org";
+
+            elements.timeSecondaryServer.value =
+                time.secondary_server || "";
+
+            elements.timeSyncStatus.textContent =
+                time.synchronized
+                    ? `Synchronized · ${time.synchronization_count || 1} update(s)`
+                    : time.time_valid
+                        ? "Clock is valid, awaiting SNTP synchronization"
+                        : "Clock has not been synchronized";
 
             elements.sdLogging.checked =
                 logging.sd_enabled === true;
@@ -1754,6 +1856,74 @@
         }
 
         function validateSettings() {
+            const dimBrightness =
+                Number(elements.displayDimBrightness.value);
+
+            const dimTimeout =
+                Number(elements.displayDimTimeout.value);
+
+            const offTimeout =
+                Number(elements.displayOffTimeout.value);
+
+            const batteryLow =
+                Number(elements.batteryLowLevel.value);
+
+            const batteryCritical =
+                Number(elements.batteryCriticalLevel.value);
+
+            if (!Number.isInteger(dimBrightness) ||
+                (dimBrightness < 0) ||
+                (dimBrightness > 100) ||
+                ((dimBrightness > 0) && (dimBrightness < 10))) {
+
+                throw new Error(
+                    "Idle brightness must be 0 or 10 to 100 percent"
+                );
+            }
+
+            if (!Number.isInteger(dimTimeout) ||
+                (dimTimeout < 0) ||
+                (dimTimeout > 3600) ||
+                !Number.isInteger(offTimeout) ||
+                (offTimeout < 0) ||
+                (offTimeout > 3600)) {
+
+                throw new Error(
+                    "Display idle timeouts must be 0 to 3600 seconds"
+                );
+            }
+
+            if ((dimTimeout > 0) &&
+                (offTimeout > 0) &&
+                (offTimeout <= dimTimeout)) {
+
+                throw new Error(
+                    "Backlight off timeout must be greater than dim timeout"
+                );
+            }
+
+            if (!Number.isInteger(batteryLow) ||
+                !Number.isInteger(batteryCritical) ||
+                (batteryLow < 1) ||
+                (batteryLow > 100) ||
+                (batteryCritical < 0) ||
+                (batteryCritical >= batteryLow)) {
+
+                throw new Error(
+                    "Critical battery level must be lower than Low level"
+                );
+            }
+
+            if (elements.timeTimezone.value.trim().length === 0) {
+                throw new Error("POSIX timezone cannot be empty");
+            }
+
+            if (elements.timeSyncEnabled.checked &&
+                elements.timePrimaryServer.value.trim().length === 0) {
+
+                throw new Error("Primary NTP server cannot be empty");
+            }
+
             if (elements.wifiApEnabled.checked) {
                 const ssid =
                     elements.wifiApSsid.value.trim();
@@ -1907,7 +2077,24 @@
             return {
                 display: {
                     brightness:
-                        Number(elements.brightness.value)
+                        Number(elements.brightness.value),
+
+                    dim_brightness:
+                        Number(elements.displayDimBrightness.value),
+
+                    dim_timeout_s:
+                        Number(elements.displayDimTimeout.value),
+
+                    off_timeout_s:
+                        Number(elements.displayOffTimeout.value)
+                },
+
+                battery: {
+                    low_level_percent:
+                        Number(elements.batteryLowLevel.value),
+
+                    critical_level_percent:
+                        Number(elements.batteryCriticalLevel.value)
                 },
 
                 logging: {
@@ -2235,9 +2422,53 @@
             }
         }
 
+        async function synchronizeTimeNow() {
+            setBusy(true);
+            setStatus("Requesting time synchronization...");
+
+            try {
+                await fetchJson(
+                    "/api/settings",
+                    {
+                        method: "PUT",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            synchronize_time: true
+                        })
+                    }
+                );
+
+                setStatus(
+                    "SNTP synchronization requested",
+                    "success"
+                );
+
+                window.setTimeout(loadSettings, 1000);
+            } catch (error) {
+                setStatus(
+                    `Failed to synchronize time: ${error.message}`,
+                    "error"
+                );
+            } finally {
+                setBusy(false);
+            }
+        }
+
         elements.brightness.addEventListener(
             "input",
             updateBrightness
+        );
+
+        elements.timeSyncEnabled.addEventListener(
+            "change",
+            updateActionStates
+        );
+
+        elements.timeSyncNow.addEventListener(
+            "click",
+            synchronizeTimeNow
         );
 
         elements.wifiApEnabled.addEventListener(
@@ -8511,6 +8742,20 @@
                     tester_present_ms : Number(
                         element('program-tester-present-interval').value
                     )
+                },
+
+                time: {
+                    synchronization_enabled:
+                        elements.timeSyncEnabled.checked,
+
+                    timezone:
+                        elements.timeTimezone.value.trim(),
+
+                    primary_server:
+                        elements.timePrimaryServer.value.trim(),
+
+                    secondary_server:
+                        elements.timeSecondaryServer.value.trim()
                 },
                 programming : {
                     session : parseHex(

@@ -8,7 +8,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "cJSON.h"
 #include "esp_log.h"
@@ -16,6 +18,7 @@
 
 #include "settings_model.h"
 #include "settings_service.h"
+#include "time_service.h"
 #include "web_api_common.h"
 
 #define WEB_SETTINGS_API_BODY_MAX_SIZE  (2048U)
@@ -204,6 +207,18 @@ static esp_err_t web_settings_api_get_handler(
             "display"
         );
 
+    cJSON *time_object =
+        cJSON_AddObjectToObject(
+            response,
+            "time"
+        );
+
+    cJSON *battery =
+        cJSON_AddObjectToObject(
+            response,
+            "battery"
+        );
+
     cJSON *logging =
         cJSON_AddObjectToObject(
             response,
@@ -279,6 +294,8 @@ static esp_err_t web_settings_api_get_handler(
     bool valid =
         (device != NULL) &&
         (display != NULL) &&
+        (time_object != NULL) &&
+        (battery != NULL) &&
         (logging != NULL) &&
         (tag_levels != NULL) &&
         (ui != NULL) &&
@@ -323,6 +340,108 @@ static esp_err_t web_settings_api_get_handler(
             display,
             "brightness",
             settings->display.brightness
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            display,
+            "dim_brightness",
+            settings->display.dim_brightness
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            display,
+            "dim_timeout_s",
+            settings->display.dim_timeout_s
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            display,
+            "off_timeout_s",
+            settings->display.off_timeout_s
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddNumberToObject(
+            battery,
+            "low_level_percent",
+            settings->battery.low_level_percent
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            battery,
+            "critical_level_percent",
+            settings->battery.critical_level_percent
+        ) != NULL);
+
+    time_service_info_t time_info = {0};
+    const esp_err_t time_result =
+        time_service_get_info(&time_info);
+    char local_time_text[32] = {0};
+    char utc_time_text[32] = {0};
+    const time_t now = time(NULL);
+    struct tm calendar_time = {0};
+
+    if (time_result == ESP_OK && time_info.time_valid) {
+        if (localtime_r(&now, &calendar_time) != NULL) {
+            (void)strftime(
+                local_time_text,
+                sizeof(local_time_text),
+                "%Y-%m-%dT%H:%M:%S%z",
+                &calendar_time
+            );
+        }
+
+        if (gmtime_r(&now, &calendar_time) != NULL) {
+            (void)strftime(
+                utc_time_text,
+                sizeof(utc_time_text),
+                "%Y-%m-%dT%H:%M:%SZ",
+                &calendar_time
+            );
+        }
+    }
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            time_object,
+            "synchronization_enabled",
+            settings->time.synchronization_enabled
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            time_object,
+            "timezone",
+            settings->time.timezone
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            time_object,
+            "primary_server",
+            settings->time.primary_server
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            time_object,
+            "secondary_server",
+            settings->time.secondary_server
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            time_object,
+            "time_valid",
+            time_info.time_valid
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            time_object,
+            "synchronized",
+            time_info.synchronized
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            time_object,
+            "synchronization_count",
+            time_info.synchronization_count
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            time_object,
+            "local_time",
+            local_time_text
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            time_object,
+            "utc_time",
+            utc_time_text
         ) != NULL);
 
     valid = valid &&
@@ -652,6 +771,233 @@ static esp_err_t web_settings_api_put_handler(
         }
     }
 
+    const cJSON *battery =
+        cJSON_GetObjectItemCaseSensitive(root, "battery");
+    const cJSON *dim_brightness = display != NULL
+        ? cJSON_GetObjectItemCaseSensitive(
+            display,
+            "dim_brightness"
+        )
+        : NULL;
+    const cJSON *dim_timeout_s = display != NULL
+        ? cJSON_GetObjectItemCaseSensitive(
+            display,
+            "dim_timeout_s"
+        )
+        : NULL;
+    const cJSON *off_timeout_s = display != NULL
+        ? cJSON_GetObjectItemCaseSensitive(
+            display,
+            "off_timeout_s"
+        )
+        : NULL;
+
+    if ((battery != NULL) ||
+        (dim_brightness != NULL) ||
+        (dim_timeout_s != NULL) ||
+        (off_timeout_s != NULL)) {
+
+        app_settings_t *current =
+            web_settings_api_allocate_settings();
+
+        if (current == NULL) {
+            result = ESP_ERR_NO_MEM;
+            goto apply_failed;
+        }
+
+        result = settings_model_get(current);
+
+        if (result != ESP_OK) {
+            heap_caps_free(current);
+            goto apply_failed;
+        }
+
+        if ((dim_brightness != NULL) &&
+            (!cJSON_IsNumber(dim_brightness) ||
+             (dim_brightness->valuedouble !=
+              (double)dim_brightness->valueint) ||
+             (dim_brightness->valueint < 0) ||
+             (dim_brightness->valueint > 100) ||
+             ((dim_brightness->valueint > 0) &&
+              (dim_brightness->valueint < 10)))) {
+
+            heap_caps_free(current);
+            goto invalid_settings;
+        }
+
+        if ((dim_timeout_s != NULL) &&
+            (!cJSON_IsNumber(dim_timeout_s) ||
+             (dim_timeout_s->valuedouble !=
+              (double)dim_timeout_s->valueint) ||
+             (dim_timeout_s->valueint < 0) ||
+             (dim_timeout_s->valuedouble >
+              SETTINGS_DISPLAY_IDLE_TIMEOUT_MAX_S))) {
+
+            heap_caps_free(current);
+            goto invalid_settings;
+        }
+
+        if ((off_timeout_s != NULL) &&
+            (!cJSON_IsNumber(off_timeout_s) ||
+             (off_timeout_s->valuedouble !=
+              (double)off_timeout_s->valueint) ||
+             (off_timeout_s->valueint < 0) ||
+             (off_timeout_s->valuedouble >
+              SETTINGS_DISPLAY_IDLE_TIMEOUT_MAX_S))) {
+
+            heap_caps_free(current);
+            goto invalid_settings;
+        }
+
+        if (dim_brightness != NULL) {
+            current->display.dim_brightness =
+                (uint8_t)dim_brightness->valueint;
+        }
+        if (dim_timeout_s != NULL) {
+            current->display.dim_timeout_s =
+                (uint32_t)dim_timeout_s->valuedouble;
+        }
+        if (off_timeout_s != NULL) {
+            current->display.off_timeout_s =
+                (uint32_t)off_timeout_s->valuedouble;
+        }
+
+        if (battery != NULL) {
+            const cJSON *low = cJSON_GetObjectItemCaseSensitive(
+                battery,
+                "low_level_percent"
+            );
+            const cJSON *critical = cJSON_GetObjectItemCaseSensitive(
+                battery,
+                "critical_level_percent"
+            );
+
+            if (!cJSON_IsObject(battery) ||
+                !cJSON_IsNumber(low) ||
+                !cJSON_IsNumber(critical) ||
+                (low->valuedouble != (double)low->valueint) ||
+                (critical->valuedouble !=
+                 (double)critical->valueint) ||
+                (low->valueint < 1) ||
+                (low->valueint > 100) ||
+                (critical->valueint < 0) ||
+                (critical->valueint >= low->valueint)) {
+
+                heap_caps_free(current);
+                goto invalid_settings;
+            }
+
+            current->battery.low_level_percent =
+                (uint8_t)low->valueint;
+            current->battery.critical_level_percent =
+                (uint8_t)critical->valueint;
+        }
+
+        result = settings_service_set_power_preferences(
+            &current->display,
+            &current->battery
+        );
+        heap_caps_free(current);
+
+        if (result != ESP_OK) {
+            goto apply_failed;
+        }
+
+        applied = true;
+    }
+
+    const cJSON *time_object =
+        cJSON_GetObjectItemCaseSensitive(root, "time");
+
+    if (time_object != NULL) {
+        const cJSON *synchronization_enabled =
+            cJSON_GetObjectItemCaseSensitive(
+                time_object,
+                "synchronization_enabled"
+            );
+        const cJSON *timezone =
+            cJSON_GetObjectItemCaseSensitive(
+                time_object,
+                "timezone"
+            );
+        const cJSON *primary_server =
+            cJSON_GetObjectItemCaseSensitive(
+                time_object,
+                "primary_server"
+            );
+        const cJSON *secondary_server =
+            cJSON_GetObjectItemCaseSensitive(
+                time_object,
+                "secondary_server"
+            );
+
+        if (!cJSON_IsObject(time_object) ||
+            !cJSON_IsBool(synchronization_enabled) ||
+            !cJSON_IsString(timezone) ||
+            !cJSON_IsString(primary_server) ||
+            !cJSON_IsString(secondary_server) ||
+            (timezone->valuestring == NULL) ||
+            (primary_server->valuestring == NULL) ||
+            (secondary_server->valuestring == NULL) ||
+            (strlen(timezone->valuestring) >=
+             SETTINGS_TIMEZONE_MAX_LENGTH) ||
+            (strlen(primary_server->valuestring) >=
+             SETTINGS_NTP_SERVER_MAX_LENGTH) ||
+            (strlen(secondary_server->valuestring) >=
+             SETTINGS_NTP_SERVER_MAX_LENGTH)) {
+
+            goto invalid_settings;
+        }
+
+        time_settings_t time_settings = {
+            .synchronization_enabled =
+                cJSON_IsTrue(synchronization_enabled),
+        };
+        (void)strlcpy(
+            time_settings.timezone,
+            timezone->valuestring,
+            sizeof(time_settings.timezone)
+        );
+        (void)strlcpy(
+            time_settings.primary_server,
+            primary_server->valuestring,
+            sizeof(time_settings.primary_server)
+        );
+        (void)strlcpy(
+            time_settings.secondary_server,
+            secondary_server->valuestring,
+            sizeof(time_settings.secondary_server)
+        );
+
+        result = settings_service_set_time(&time_settings);
+
+        if (result != ESP_OK) {
+            goto apply_failed;
+        }
+
+        applied = true;
+    }
+
+    const cJSON *synchronize_time =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "synchronize_time"
+        );
+
+    if (synchronize_time != NULL) {
+        if (!cJSON_IsTrue(synchronize_time)) {
+            goto invalid_settings;
+        }
+
+        result = time_service_synchronize_now();
+
+        if (result != ESP_OK) {
+            goto apply_failed;
+        }
+
+        applied = true;
+    }
+
     const cJSON *logging =
         cJSON_GetObjectItemCaseSensitive(
             root,
@@ -934,13 +1280,7 @@ static esp_err_t web_settings_api_put_handler(
                     "password"
                 );
 
-            /*
-             * Both credentials must be provided together to avoid
-             * unintentionally replacing only one credential.
-             */
-            if ((ssid != NULL) ||
-                (password != NULL)) {
-
+            if (password != NULL) {
                 if (!cJSON_IsString(ssid) ||
                     !cJSON_IsString(password) ||
                     (ssid->valuestring == NULL) ||
@@ -949,17 +1289,44 @@ static esp_err_t web_settings_api_put_handler(
                     goto invalid_settings;
                 }
 
-                result =
-                    settings_service_set_wifi_ap_credentials(
-                        ssid->valuestring,
-                        password->valuestring
-                    );
+                result = settings_service_set_wifi_ap_credentials(
+                    ssid->valuestring,
+                    password->valuestring
+                );
 
                 if (result != ESP_OK) {
                     goto apply_failed;
                 }
 
                 applied = true;
+
+            } else if (ssid != NULL) {
+                if (!cJSON_IsString(ssid) ||
+                    (ssid->valuestring == NULL)) {
+
+                    goto invalid_settings;
+                }
+
+                app_settings_t *current =
+                    web_settings_api_allocate_settings();
+
+                if (current == NULL) {
+                    result = ESP_ERR_NO_MEM;
+                    goto apply_failed;
+                }
+
+                result = settings_model_get(current);
+                const bool unchanged =
+                    (result == ESP_OK) &&
+                    (strcmp(
+                        current->wifi_ap.ssid,
+                        ssid->valuestring
+                    ) == 0);
+                heap_caps_free(current);
+
+                if ((result != ESP_OK) || !unchanged) {
+                    goto invalid_settings;
+                }
             }
 
             const cJSON *enabled =

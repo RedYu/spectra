@@ -20,12 +20,15 @@
 #include "app_config.h"
 #include "board_config.h"
 #include "gui_config.h"
+#include "gui_service.h"
 #include "buzzer_service.h"
+#include "battery_service.h"
 #include "storage_sd_service.h"
 #include "display_backlight.h"
 #include "settings_model.h"
 #include "storage_service.h"
 #include "logging_service.h"
+#include "time_service.h"
 #include "wifi_service.h"
 #include "wifi_credentials_service.h"
 #include "usb_network_service.h"
@@ -750,6 +753,170 @@ static esp_err_t parse_config(
     parsed_settings->display.brightness =
         (uint8_t)brightness->valueint;
 
+    const cJSON *dim_brightness =
+        cJSON_GetObjectItemCaseSensitive(
+            display,
+            "dim_brightness"
+        );
+    const cJSON *dim_timeout_s =
+        cJSON_GetObjectItemCaseSensitive(
+            display,
+            "dim_timeout_s"
+        );
+    const cJSON *off_timeout_s =
+        cJSON_GetObjectItemCaseSensitive(
+            display,
+            "off_timeout_s"
+        );
+
+    if (dim_brightness != NULL) {
+        if (!cJSON_IsNumber(dim_brightness) ||
+            (dim_brightness->valuedouble !=
+             (double)dim_brightness->valueint) ||
+            (dim_brightness->valueint < 0) ||
+            (dim_brightness->valueint >
+             (int)SETTINGS_DISPLAY_BRIGHTNESS_MAX)) {
+
+            result = ESP_ERR_INVALID_ARG;
+            goto cleanup;
+        }
+        parsed_settings->display.dim_brightness =
+            (uint8_t)dim_brightness->valueint;
+    }
+
+    if (dim_timeout_s != NULL) {
+        if (!cJSON_IsNumber(dim_timeout_s) ||
+            (dim_timeout_s->valuedouble !=
+             (double)dim_timeout_s->valueint) ||
+            (dim_timeout_s->valueint < 0) ||
+            (dim_timeout_s->valueint >
+             (int)SETTINGS_DISPLAY_IDLE_TIMEOUT_MAX_S)) {
+
+            result = ESP_ERR_INVALID_ARG;
+            goto cleanup;
+        }
+        parsed_settings->display.dim_timeout_s =
+            (uint32_t)dim_timeout_s->valueint;
+    }
+
+    if (off_timeout_s != NULL) {
+        if (!cJSON_IsNumber(off_timeout_s) ||
+            (off_timeout_s->valuedouble !=
+             (double)off_timeout_s->valueint) ||
+            (off_timeout_s->valueint < 0) ||
+            (off_timeout_s->valueint >
+             (int)SETTINGS_DISPLAY_IDLE_TIMEOUT_MAX_S)) {
+
+            result = ESP_ERR_INVALID_ARG;
+            goto cleanup;
+        }
+        parsed_settings->display.off_timeout_s =
+            (uint32_t)off_timeout_s->valueint;
+    }
+
+    const cJSON *battery =
+        cJSON_GetObjectItemCaseSensitive(root, "battery");
+
+    if (battery != NULL) {
+        const cJSON *low_level =
+            cJSON_GetObjectItemCaseSensitive(
+                battery,
+                "low_level_percent"
+            );
+        const cJSON *critical_level =
+            cJSON_GetObjectItemCaseSensitive(
+                battery,
+                "critical_level_percent"
+            );
+
+        if (!cJSON_IsObject(battery) ||
+            !cJSON_IsNumber(low_level) ||
+            !cJSON_IsNumber(critical_level) ||
+            (low_level->valuedouble != (double)low_level->valueint) ||
+            (critical_level->valuedouble !=
+             (double)critical_level->valueint) ||
+            (low_level->valueint < 1) ||
+            (low_level->valueint > 100) ||
+            (critical_level->valueint < 0) ||
+            (critical_level->valueint >= low_level->valueint)) {
+
+            result = ESP_ERR_INVALID_ARG;
+            goto cleanup;
+        }
+
+        parsed_settings->battery.low_level_percent =
+            (uint8_t)low_level->valueint;
+        parsed_settings->battery.critical_level_percent =
+            (uint8_t)critical_level->valueint;
+    }
+
+    /*
+     * Time configuration is optional for compatibility with older
+     * schema-version 1 files.
+     */
+    const cJSON *time =
+        cJSON_GetObjectItemCaseSensitive(root, "time");
+
+    if (time != NULL) {
+        const cJSON *synchronization_enabled =
+            cJSON_GetObjectItemCaseSensitive(
+                time,
+                "synchronization_enabled"
+            );
+        const cJSON *timezone =
+            cJSON_GetObjectItemCaseSensitive(time, "timezone");
+        const cJSON *primary_server =
+            cJSON_GetObjectItemCaseSensitive(
+                time,
+                "primary_server"
+            );
+        const cJSON *secondary_server =
+            cJSON_GetObjectItemCaseSensitive(
+                time,
+                "secondary_server"
+            );
+
+        if (!cJSON_IsObject(time) ||
+            !cJSON_IsBool(synchronization_enabled) ||
+            !cJSON_IsString(timezone) ||
+            !cJSON_IsString(primary_server) ||
+            !cJSON_IsString(secondary_server) ||
+            (timezone->valuestring == NULL) ||
+            (primary_server->valuestring == NULL) ||
+            (secondary_server->valuestring == NULL) ||
+            (timezone->valuestring[0] == '\0') ||
+            (primary_server->valuestring[0] == '\0') ||
+            (strlen(timezone->valuestring) >=
+             sizeof(parsed_settings->time.timezone)) ||
+            (strlen(primary_server->valuestring) >=
+             sizeof(parsed_settings->time.primary_server)) ||
+            (strlen(secondary_server->valuestring) >=
+             sizeof(parsed_settings->time.secondary_server))) {
+
+            result = ESP_ERR_INVALID_ARG;
+            goto cleanup;
+        }
+
+        parsed_settings->time.synchronization_enabled =
+            cJSON_IsTrue(synchronization_enabled);
+
+        (void)strlcpy(
+            parsed_settings->time.timezone,
+            timezone->valuestring,
+            sizeof(parsed_settings->time.timezone)
+        );
+        (void)strlcpy(
+            parsed_settings->time.primary_server,
+            primary_server->valuestring,
+            sizeof(parsed_settings->time.primary_server)
+        );
+        (void)strlcpy(
+            parsed_settings->time.secondary_server,
+            secondary_server->valuestring,
+            sizeof(parsed_settings->time.secondary_server)
+        );
+    }
+
     /*
      * Sound configuration is optional for compatibility with files
      * created before audible-feedback settings were introduced.
@@ -1459,7 +1626,68 @@ static cJSON *settings_service_create_json(
             display,
             "brightness",
             settings->display.brightness
+        ) == NULL ||
+        cJSON_AddNumberToObject(
+            display,
+            "dim_brightness",
+            settings->display.dim_brightness
+        ) == NULL ||
+        cJSON_AddNumberToObject(
+            display,
+            "dim_timeout_s",
+            settings->display.dim_timeout_s
+        ) == NULL ||
+        cJSON_AddNumberToObject(
+            display,
+            "off_timeout_s",
+            settings->display.off_timeout_s
         ) == NULL) {
+
+        goto error;
+    }
+
+    cJSON *battery =
+        cJSON_AddObjectToObject(root, "battery");
+
+    if ((battery == NULL) ||
+        (cJSON_AddNumberToObject(
+            battery,
+            "low_level_percent",
+            settings->battery.low_level_percent
+        ) == NULL) ||
+        (cJSON_AddNumberToObject(
+            battery,
+            "critical_level_percent",
+            settings->battery.critical_level_percent
+        ) == NULL)) {
+
+        goto error;
+    }
+
+    cJSON *time =
+        cJSON_AddObjectToObject(root, "time");
+
+    if ((time == NULL) ||
+        (cJSON_AddBoolToObject(
+            time,
+            "synchronization_enabled",
+            settings->time.synchronization_enabled
+        ) == NULL) ||
+        (cJSON_AddStringToObject(
+            time,
+            "timezone",
+            settings->time.timezone
+        ) == NULL) ||
+        (cJSON_AddStringToObject(
+            time,
+            "primary_server",
+            settings->time.primary_server
+        ) == NULL) ||
+        (cJSON_AddStringToObject(
+            time,
+            "secondary_server",
+            settings->time.secondary_server
+        ) == NULL)) {
 
         goto error;
     }
@@ -2169,6 +2397,18 @@ static esp_err_t settings_service_set_brightness_internal(
         return result;
     }
 
+    result = gui_service_set_display_idle_policy(
+        updated.display.brightness,
+        updated.display.dim_brightness,
+        updated.display.dim_timeout_s,
+        updated.display.off_timeout_s
+    );
+
+    if (result != ESP_OK) {
+        (void)settings_model_set(&previous);
+        return result;
+    }
+
     return ESP_OK;
 }
 
@@ -2744,6 +2984,38 @@ static esp_err_t settings_service_apply_internal(void)
         goto cleanup;
     }
 
+    const time_service_config_t time_config = {
+        .synchronization_enabled =
+            settings->time.synchronization_enabled,
+    };
+    time_service_config_t configured_time = time_config;
+    (void)strlcpy(
+        configured_time.timezone,
+        settings->time.timezone,
+        sizeof(configured_time.timezone)
+    );
+    (void)strlcpy(
+        configured_time.primary_server,
+        settings->time.primary_server,
+        sizeof(configured_time.primary_server)
+    );
+    (void)strlcpy(
+        configured_time.secondary_server,
+        settings->time.secondary_server,
+        sizeof(configured_time.secondary_server)
+    );
+
+    result = time_service_configure(&configured_time);
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to apply time settings: %s",
+            esp_err_to_name(result)
+        );
+        goto cleanup;
+    }
+
     result =
         logging_service_set_tag_levels(
             settings->logging.warning_tags,
@@ -2885,6 +3157,28 @@ static esp_err_t settings_service_apply_internal(void)
         );
 
         goto cleanup;
+    }
+
+    result = gui_service_set_display_idle_policy(
+        settings->display.brightness,
+        settings->display.dim_brightness,
+        settings->display.dim_timeout_s,
+        settings->display.off_timeout_s
+    );
+
+    if (result != ESP_OK) {
+        goto cleanup;
+    }
+
+    if (battery_service_is_running()) {
+        result = battery_service_set_thresholds(
+            settings->battery.low_level_percent,
+            settings->battery.critical_level_percent
+        );
+
+        if (result != ESP_OK) {
+            goto cleanup;
+        }
     }
 
     if (buzzer_service_is_running()) {
@@ -3136,6 +3430,163 @@ esp_err_t settings_service_set_brightness(
 
     settings_service_unlock();
 
+    return result;
+}
+
+esp_err_t settings_service_set_time(
+    const time_settings_t *time
+)
+{
+    if (time == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t lock_result = settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    app_settings_t settings;
+    esp_err_t result = settings_model_get(&settings);
+
+    if (!s_initialized) {
+        result = ESP_ERR_INVALID_STATE;
+    } else if (result == ESP_OK) {
+        const time_settings_t previous = settings.time;
+        settings.time = *time;
+        result = settings_model_set(&settings);
+
+        if (result == ESP_OK) {
+            time_service_config_t config = {
+                .synchronization_enabled =
+                    time->synchronization_enabled,
+            };
+            (void)strlcpy(
+                config.timezone,
+                time->timezone,
+                sizeof(config.timezone)
+            );
+            (void)strlcpy(
+                config.primary_server,
+                time->primary_server,
+                sizeof(config.primary_server)
+            );
+            (void)strlcpy(
+                config.secondary_server,
+                time->secondary_server,
+                sizeof(config.secondary_server)
+            );
+            result = time_service_configure(&config);
+
+            if (result != ESP_OK) {
+                settings.time = previous;
+                (void)settings_model_set(&settings);
+
+                time_service_config_t previous_config = {
+                    .synchronization_enabled =
+                        previous.synchronization_enabled,
+                };
+                (void)strlcpy(
+                    previous_config.timezone,
+                    previous.timezone,
+                    sizeof(previous_config.timezone)
+                );
+                (void)strlcpy(
+                    previous_config.primary_server,
+                    previous.primary_server,
+                    sizeof(previous_config.primary_server)
+                );
+                (void)strlcpy(
+                    previous_config.secondary_server,
+                    previous.secondary_server,
+                    sizeof(previous_config.secondary_server)
+                );
+                (void)time_service_configure(&previous_config);
+            }
+        }
+    }
+
+    settings_service_unlock();
+    return result;
+}
+
+esp_err_t settings_service_set_power_preferences(
+    const display_settings_t *display,
+    const battery_settings_t *battery
+)
+{
+    if ((display == NULL) || (battery == NULL)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t lock_result = settings_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    app_settings_t settings;
+    esp_err_t result = settings_model_get(&settings);
+
+    if (!s_initialized) {
+        result = ESP_ERR_INVALID_STATE;
+    } else if (result == ESP_OK) {
+        const display_settings_t previous_display =
+            settings.display;
+        const battery_settings_t previous_battery =
+            settings.battery;
+        settings.display = *display;
+        settings.battery = *battery;
+        result = settings_model_set(&settings);
+
+        if (result == ESP_OK) {
+            result = display_backlight_set_brightness(
+                settings.display.brightness
+            );
+        }
+
+        if (result == ESP_OK) {
+            result = gui_service_set_display_idle_policy(
+                settings.display.brightness,
+                settings.display.dim_brightness,
+                settings.display.dim_timeout_s,
+                settings.display.off_timeout_s
+            );
+        }
+
+        if ((result == ESP_OK) &&
+            battery_service_is_running()) {
+
+            result = battery_service_set_thresholds(
+                settings.battery.low_level_percent,
+                settings.battery.critical_level_percent
+            );
+        }
+
+        if (result != ESP_OK) {
+            settings.display = previous_display;
+            settings.battery = previous_battery;
+            (void)settings_model_set(&settings);
+            (void)display_backlight_set_brightness(
+                previous_display.brightness
+            );
+            (void)gui_service_set_display_idle_policy(
+                previous_display.brightness,
+                previous_display.dim_brightness,
+                previous_display.dim_timeout_s,
+                previous_display.off_timeout_s
+            );
+            if (battery_service_is_running()) {
+                (void)battery_service_set_thresholds(
+                    previous_battery.low_level_percent,
+                    previous_battery.critical_level_percent
+                );
+            }
+        }
+    }
+
+    settings_service_unlock();
     return result;
 }
 

@@ -325,9 +325,9 @@ endpoint returns `503 Service Unavailable`.
 
 ### `GET /api/settings`
 
-Returns the active configuration. Wi-Fi Station passwords are never returned.
-Only a non-secret credential identifier and whether credentials are configured
-are exposed.
+Returns the active configuration. Wi-Fi SoftAP and Station passwords are never
+returned. The response exposes only whether credentials are configured and,
+for Station mode, its non-secret credential identifier.
 
 ```bash
 curl http://spectra.device/api/settings
@@ -343,7 +343,25 @@ Representative response:
     "name": "Modern Automotive CAN Analyzer"
   },
   "display": {
-    "brightness": 80
+    "brightness": 80,
+    "dim_brightness": 20,
+    "dim_timeout_s": 30,
+    "off_timeout_s": 120
+  },
+  "battery": {
+    "low_level_percent": 15,
+    "critical_level_percent": 5
+  },
+  "time": {
+    "synchronization_enabled": true,
+    "timezone": "CET-1CEST,M3.5.0,M10.5.0/3",
+    "primary_server": "pool.ntp.org",
+    "secondary_server": "time.cloudflare.com",
+    "time_valid": true,
+    "synchronized": true,
+    "synchronization_count": 1,
+    "local_time": "2026-09-15T18:30:00+0200",
+    "utc_time": "2026-09-15T16:30:00Z"
   },
   "logging": {
     "sd_enabled": true,
@@ -362,7 +380,7 @@ Representative response:
     "wifi_ap": {
       "enabled": true,
       "ssid": "Spectra",
-      "password": ""
+      "password_configured": true
     },
     "wifi_sta": {
       "enabled": true,
@@ -392,8 +410,9 @@ Representative response:
 }
 ```
 
-The exact returned Wi-Fi password representation is intentionally not a way to
-retrieve stored credentials.
+Omitting `wifi_ap.password` preserves the stored SoftAP password when its SSID
+is unchanged. Send both `ssid` and `password` to replace credentials. An empty
+password explicitly changes the SoftAP to an open network.
 
 ### `PUT /api/settings`
 
@@ -418,8 +437,11 @@ from persistence.
 
 Validation includes, among other constraints:
 
-- display brightness range;
+- display brightness and idle-backlight ranges;
+- display-off timeout greater than the dim timeout when both are enabled;
+- battery Critical threshold lower than the Low threshold;
 - supported UI theme values;
+- POSIX timezone and SNTP server lengths;
 - Wi-Fi SSID/password requirements;
 - supported Primary CAN bitrate;
 - supported Secondary nominal/data bitrates;
@@ -450,6 +472,9 @@ Example changing both CAN channels:
 
 Do not assume a change was persisted merely because it was applied
 successfully.
+
+Sending `{ "synchronize_time": true }` restarts the active SNTP client and
+requests a new synchronization without adding another HTTP endpoint.
 
 ### `POST /api/settings/save`
 

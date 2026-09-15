@@ -22,8 +22,8 @@
 
     <title>Spectra Settings</title>
 
-    <link rel="stylesheet" href="spectra.css?v=27">
-    <script src="spectra.js?v=27" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=29">
+    <script src="spectra.js?v=29" defer></script>
 </head>
 
 <body class="page-settings">
@@ -85,6 +85,8 @@
                     <a href="#settings-section-5">USB network</a>
                     <a href="#settings-section-6">Primary CAN</a>
                     <a href="#settings-section-7">Secondary CAN</a>
+                    <a href="#settings-section-time">Date and time</a>
+                    <a href="#settings-section-battery">Battery</a>
                 </nav>
             </aside>
             <div class="settings-content">
@@ -177,6 +179,53 @@
                                         80%
                                     </span>
                                 </div>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Idle brightness</div>
+                                <div class="setting-description">
+                                    Backlight level after the dim timeout;
+                                    zero turns it off
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <input id="display-dim-brightness"
+                                    class="text-input" type="number"
+                                    min="0" max="100" step="1" value="20">
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Dim timeout</div>
+                                <div class="setting-description">
+                                    Seconds without input before dimming;
+                                    zero disables dimming
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <input id="display-dim-timeout"
+                                    class="text-input" type="number"
+                                    min="0" max="3600" step="1" value="30">
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Backlight off timeout
+                                </div>
+                                <div class="setting-description">
+                                    Seconds without input before switching the
+                                    backlight off; zero disables it
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <input id="display-off-timeout"
+                                    class="text-input" type="number"
+                                    min="0" max="3600" step="1" value="120">
                             </div>
                         </div>
 
@@ -922,6 +971,120 @@
                                     >
                                     <span class="switch-slider"></span>
                                 </label>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                <section class="card" id="settings-section-time">
+                    <header class="card-header">
+                        <h2>Date and time</h2>
+                        <p>Local time and Internet synchronization</p>
+                    </header>
+
+                    <div class="card-content">
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Current time</div>
+                                <div class="setting-description">
+                                    Device local and UTC clocks
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <strong id="time-local">Unavailable</strong>
+                                <small id="time-utc">—</small>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">SNTP synchronization</div>
+                                <div class="setting-description" id="time-sync-status">
+                                    Synchronization state unavailable
+                                </div>
+                            </div>
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input id="time-sync-enabled" type="checkbox">
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">POSIX timezone</div>
+                                <div class="setting-description">
+                                    For example CET-1CEST,M3.5.0,M10.5.0/3
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <input id="time-timezone" class="text-input"
+                                    type="text" maxlength="63">
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Primary NTP server</div>
+                                <div class="setting-description">
+                                    Required when synchronization is enabled
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <input id="time-primary-server" class="text-input"
+                                    type="text" maxlength="63">
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Secondary NTP server</div>
+                                <div class="setting-description">
+                                    Optional fallback server
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <input id="time-secondary-server" class="text-input"
+                                    type="text" maxlength="63">
+                                <button id="time-sync-now" class="secondary-button"
+                                    type="button">Synchronize now</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card" id="settings-section-battery">
+                    <header class="card-header">
+                        <h2>Battery</h2>
+                        <p>Charge-level warning thresholds</p>
+                    </header>
+
+                    <div class="card-content">
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Low level</div>
+                                <div class="setting-description">
+                                    Show a battery warning at this percentage
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <input id="battery-low-level"
+                                    class="text-input" type="number"
+                                    min="1" max="100" step="1" value="15">
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Critical level</div>
+                                <div class="setting-description">
+                                    Must be lower than the Low level threshold
+                                </div>
+                            </div>
+                            <div class="setting-control">
+                                <input id="battery-critical-level"
+                                    class="text-input" type="number"
+                                    min="0" max="99" step="1" value="5">
                             </div>
                         </div>
                     </div>

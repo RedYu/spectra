@@ -60,6 +60,18 @@ esp_err_t gui_service_set_boot_progress(
     const char *status
 );
 
+/**
+ * @brief Configure display dimming based on LVGL input inactivity.
+ *
+ * A timeout of zero disables the corresponding stage.
+ */
+esp_err_t gui_service_set_display_idle_policy(
+    uint8_t normal_brightness,
+    uint8_t dim_brightness,
+    uint32_t dim_timeout_s,
+    uint32_t off_timeout_s
+);
+
 #ifdef __cplusplus
 }
 #endif
