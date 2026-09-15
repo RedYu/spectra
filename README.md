@@ -115,6 +115,8 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
   long-running routine polling, reset, and session restoration
 - ECU programming from BIN, Intel HEX, Motorola S-record, and BHX images stored
   under `/sdcard/firmwares`
+- Streaming multi-section BHX parsing with big-endian `GHDR`/`SHDR` headers,
+  embedded load addresses, and strict size and marker validation
 - Persistent ECU profiles and DID catalogs stored as separate JSON files
 - Typed DID decoding with byte order, scale, offset, units, ASCII, UTF-8,
   floating-point, signed, unsigned, and raw-byte values
@@ -324,6 +326,29 @@ The device CAN Monitor screen is intended as a lightweight check that an automot
 
 The screen intentionally uses a limited PSRAM-backed snapshot. This limits how many identifier rows are rendered by LVGL at once; it does not limit how many frames the drivers or router can process.
 
+## Firmware image formats
+
+The UDS programming workflow reads firmware images incrementally instead of
+loading complete files into RAM. Supported formats are:
+
+| Format | Extensions | Address source | Segments |
+| --- | --- | --- | --- |
+| Raw binary | `.bin` | Address entered by the user | One contiguous segment |
+| Intel HEX | `.hex`, `.ihex` | Extended address records | Multiple segments |
+| Motorola S-record | `.srec`, `.s19`, `.s28`, `.s37`, `.mot` | S-record addresses | Multiple segments |
+| BHX | `.bhx` | Big-endian `SHDR` headers | Multiple sections |
+
+BHX files begin with a 12-byte `GHDR` containing the format version and total
+firmware-data size. Each following `SHDR` contains its own load address and
+data size. The parser accepts version `1`, validates the `0xC0DECAFE` marker,
+checks the sum of all section sizes, rejects truncated or trailing data, and
+prevents address overflow and overlapping sections.
+
+Every decoded segment is programmed independently with `RequestDownload`,
+`TransferData`, and `RequestTransferExit`. Programming-session setup,
+SecurityAccess, erase and verification routines, ECU reset, cancellation, and
+journal creation remain coordinated for the complete image.
+
 ## Network and Web Interface
 
 Spectra exposes USB RNDIS and Wi-Fi interfaces. Through USB RNDIS or the device SoftAP, the local DNS server resolves:
@@ -520,7 +545,6 @@ To exit the serial monitor, press `Ctrl+]`.
 - [ ] Additional UDS services, functional addressing, and OBD-II workflows
 - [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
 - [ ] Persistent resume after interrupted ECU programming
-- [ ] Add BHEX parsing after selecting and documenting the required variant
 - [ ] XCP multi-packet block transfer, DAQ/STIM, calibration-page control,
   seed/key access, and programming
 - [ ] CAN traffic replay
