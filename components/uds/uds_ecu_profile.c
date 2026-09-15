@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include "isotp_protocol.h"
-#include "uds_protocol.h"
+#include "uds_requests.h"
 
 static bool uds_ecu_profile_text_valid(
     const char *text,
