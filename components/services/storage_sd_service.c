@@ -1906,6 +1906,7 @@ esp_err_t storage_sd_service_format(void)
         "/config",
         "/config/uds",
         "/config/uds/profiles",
+        "/config/uds/dids",
         "/dbc",
         "/firmwares",
         "/logs",

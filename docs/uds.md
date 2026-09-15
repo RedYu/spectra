@@ -157,6 +157,28 @@ file name and restores that selection when the page is opened again. A one-time
 SecurityAccess key is never loaded from or written to a profile or browser
 storage.
 
+`uds_did_catalog` provides a separate, caller-owned catalog of DID
+definitions. Each entry contains the 16-bit DID, display metadata, fixed data
+length, unsigned, signed, IEEE floating-point, ASCII, UTF-8, or raw-byte type,
+byte order, scale, offset, and unit. Catalog validation rejects malformed
+definitions and duplicate identifiers. Lookup and decoding do not allocate
+memory: numeric decoding preserves the raw integer and calculates the physical
+value, text is copied into a caller-provided buffer, and raw-byte values refer
+to the received response buffer. Invalid text encodings, non-finite floating
+point values, and responses whose length differs from the definition are
+reported explicitly.
+
+`uds_did_catalog_service` stores each DID catalog as a separate versioned
+JSON file in `/config/uds/dids`. A catalog contains a display name, an
+optional description, and up to 128 validated DID definitions. File names are
+restricted to safe local characters and the `.json` extension. Loading and
+JSON decoding write definitions into storage supplied by the caller, so a
+catalog that must remain active can be placed in PSRAM. Temporary file-read
+and listing buffers are also allocated in PSRAM. Files larger than 64 KiB,
+unsupported schema versions, malformed definitions, and duplicate DIDs are
+rejected. Catalog listing is paginated and omits invalid files. Formatting an
+SD card recreates the catalog directory.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
@@ -172,6 +194,6 @@ while the client has an outstanding request.
 - one outstanding request per client;
 - physical addressing only through the selected ISO-TP channel;
 - no built-in OEM security-access algorithms;
-- no typed DID value or routine-result decoders yet;
+- no Web API or browser editor for persistent DID catalogs yet;
 - no persistent resume after reset or interrupted ECU programming;
 - no authentication or role-based protection for destructive UDS requests.

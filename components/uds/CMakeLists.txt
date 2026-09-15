@@ -7,6 +7,7 @@ idf_component_register(
         "uds_security_provider.c"
         "uds_download.c"
         "uds_ecu_profile.c"
+        "uds_did_catalog.c"
 
     INCLUDE_DIRS
         "include"
