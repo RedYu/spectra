@@ -177,6 +177,58 @@
                             </select>
                         </label>
                     </div>
+
+                    <h3>Programming sequence</h3>
+
+                    <div class="program-form-grid">
+                        <label>
+                            Diagnostic session
+                            <input id="program-session" value="02" spellcheck="false">
+                        </label>
+
+                        <label>
+                            Security level
+                            <input id="program-security-level" value="01" spellcheck="false">
+                        </label>
+
+                        <label>
+                            One-time security key
+                            <input id="program-security-key" type="password" autocomplete="off" placeholder="12 34 56 78" spellcheck="false">
+                        </label>
+
+                        <label>
+                            Erase routine ID
+                            <input id="program-erase-routine" value="FF00" spellcheck="false">
+                        </label>
+
+                        <label>
+                            Erase option record
+                            <input id="program-erase-record" placeholder="Optional hex bytes" spellcheck="false">
+                        </label>
+
+                        <label>
+                            Verify routine ID
+                            <input id="program-verify-routine" value="FF01" spellcheck="false">
+                        </label>
+
+                        <label>
+                            Verify option record
+                            <input id="program-verify-record" placeholder="Optional hex bytes" spellcheck="false">
+                        </label>
+
+                        <label>
+                            ECU reset type
+                            <input id="program-reset-type" value="01" spellcheck="false">
+                        </label>
+                    </div>
+
+                    <div class="program-options">
+                        <label><input id="program-security-enabled" type="checkbox">Unlock automatically after NRC 0x33</label>
+                        <label><input id="program-erase-enabled" type="checkbox">Erase memory before download</label>
+                        <label><input id="program-verify-enabled" type="checkbox">Verify memory after download</label>
+                        <label><input id="program-reset-enabled" type="checkbox">Reset ECU after verification</label>
+                        <label><input id="program-restore-session" type="checkbox" checked>Restore default session on completion or failure</label>
+                    </div>
                 </fieldset>
 
                 <div class="program-warning">
@@ -209,6 +261,8 @@
                     <div><dt>Acknowledged blocks</dt><dd id="program-blocks">0</dd></div>
                     <div><dt>Retries</dt><dd id="program-retries">0</dd></div>
                     <div><dt>Last NRC</dt><dd id="program-nrc">None</dd></div>
+                    <div><dt>Security</dt><dd id="program-security-state">Not requested</dd></div>
+                    <div><dt>Default session</dt><dd id="program-session-state">Pending</dd></div>
                     <div><dt>Journal</dt><dd id="program-journal">—</dd></div>
                 </dl>
 

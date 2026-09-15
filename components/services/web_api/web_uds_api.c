@@ -88,6 +88,20 @@ static char s_download_journal_path[
     WEB_UDS_JOURNAL_PATH_MAX_SIZE
 ] = {0};
 static uint8_t *s_download_transfer_buffer = NULL;
+static uint8_t s_download_security_seed[
+    UDS_SECURITY_PROVIDER_MANUAL_KEY_SIZE
+];
+static uint8_t s_download_security_key[
+    UDS_SECURITY_PROVIDER_MANUAL_KEY_SIZE
+];
+static uint8_t s_download_erase_record[
+    UDS_DOWNLOAD_ROUTINE_RECORD_MAX_LENGTH
+];
+static size_t s_download_erase_record_length = 0U;
+static uint8_t s_download_verify_record[
+    UDS_DOWNLOAD_ROUTINE_RECORD_MAX_LENGTH
+];
+static size_t s_download_verify_record_length = 0U;
 static TaskHandle_t s_worker_task = NULL;
 static bool s_tester_present_enabled = true;
 static bool s_tester_present_session_active = false;
@@ -1849,6 +1863,17 @@ static void web_uds_worker_task(
                     outcome
                 );
                 web_uds_download_close_file();
+                uds_security_provider_clear_manual_key(
+                    &s_security_provider
+                );
+                web_uds_erase(
+                    s_download_security_key,
+                    sizeof(s_download_security_key)
+                );
+                web_uds_erase(
+                    s_download_security_seed,
+                    sizeof(s_download_security_seed)
+                );
             }
         } else if (s_client.state != UDS_CLIENT_CLOSED) {
             const uint64_t now_us = esp_timer_get_time();
@@ -1878,7 +1903,24 @@ static esp_err_t web_uds_download_start(
     uint32_t data_format = 0U;
     uint32_t address_length = 0U;
     uint32_t size_length = 0U;
+    uint32_t programming_session =
+        UDS_DIAGNOSTIC_SESSION_PROGRAMMING;
+    uint32_t security_level = 0U;
+    uint32_t erase_routine_identifier = 0U;
+    uint32_t verify_routine_identifier = 0U;
+    uint32_t reset_type = 0U;
     uint64_t address = 0U;
+    bool security_enabled = false;
+    bool erase_enabled = false;
+    bool verify_enabled = false;
+    bool reset_enabled = false;
+    bool restore_default_session = true;
+    const cJSON *security_key =
+        cJSON_GetObjectItemCaseSensitive(root, "security_key");
+    const cJSON *erase_record =
+        cJSON_GetObjectItemCaseSensitive(root, "erase_record");
+    const cJSON *verify_record =
+        cJSON_GetObjectItemCaseSensitive(root, "verify_record");
 
     if (!s_client_config_valid ||
         s_download_active ||
@@ -1887,9 +1929,161 @@ static esp_err_t web_uds_download_start(
         !web_uds_number(root, "data_format", UINT8_MAX, &data_format) ||
         !web_uds_number(root, "address_length", 8U, &address_length) ||
         !web_uds_number(root, "size_length", 8U, &size_length) ||
+        !web_uds_number(
+            root,
+            "programming_session",
+            0x7FU,
+            &programming_session
+        ) ||
+        !web_uds_boolean(
+            root,
+            "security_enabled",
+            false,
+            &security_enabled
+        ) ||
+        !web_uds_boolean(
+            root,
+            "erase_enabled",
+            false,
+            &erase_enabled
+        ) ||
+        !web_uds_boolean(
+            root,
+            "verify_enabled",
+            false,
+            &verify_enabled
+        ) ||
+        !web_uds_boolean(
+            root,
+            "reset_enabled",
+            false,
+            &reset_enabled
+        ) ||
+        !web_uds_boolean(
+            root,
+            "restore_default_session",
+            true,
+            &restore_default_session
+        ) ||
         !web_uds_hex_uint64(root, "address", &address)) {
 
         return ESP_ERR_INVALID_ARG;
+    }
+
+    if (security_enabled &&
+        (!web_uds_number(
+            root,
+            "security_level",
+            UDS_SECURITY_ACCESS_LEVEL_MAX,
+            &security_level
+        ) ||
+         ((security_level & 1U) == 0U) ||
+         !cJSON_IsString(security_key))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (erase_enabled &&
+        (!web_uds_number(
+            root,
+            "erase_routine_id",
+            UINT16_MAX,
+            &erase_routine_identifier
+        ) ||
+         (erase_routine_identifier == 0U) ||
+         !cJSON_IsString(erase_record))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (verify_enabled &&
+        (!web_uds_number(
+            root,
+            "verify_routine_id",
+            UINT16_MAX,
+            &verify_routine_identifier
+        ) ||
+         (verify_routine_identifier == 0U) ||
+         !cJSON_IsString(verify_record))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (reset_enabled &&
+        (!web_uds_number(
+            root,
+            "reset_type",
+            0x7FU,
+            &reset_type
+        ) ||
+         (reset_type == 0U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_download_erase_record_length = 0U;
+    s_download_verify_record_length = 0U;
+
+    esp_err_t parse_result = ESP_OK;
+
+    if (erase_enabled) {
+        parse_result =
+            web_uds_parse_hex(
+                erase_record->valuestring,
+                s_download_erase_record,
+                sizeof(s_download_erase_record),
+                &s_download_erase_record_length
+            );
+    }
+
+    if ((parse_result == ESP_OK) && verify_enabled) {
+        parse_result =
+            web_uds_parse_hex(
+                verify_record->valuestring,
+                s_download_verify_record,
+                sizeof(s_download_verify_record),
+                &s_download_verify_record_length
+            );
+    }
+
+    if (parse_result != ESP_OK) {
+        return parse_result;
+    }
+
+    if (security_enabled) {
+        uint8_t manual_key[
+            UDS_SECURITY_PROVIDER_MANUAL_KEY_SIZE
+        ];
+        size_t manual_key_length = 0U;
+
+        parse_result =
+            web_uds_parse_hex(
+                security_key->valuestring,
+                manual_key,
+                sizeof(manual_key),
+                &manual_key_length
+            );
+
+        if ((parse_result == ESP_OK) &&
+            (manual_key_length == 0U)) {
+
+            parse_result = ESP_ERR_INVALID_ARG;
+        }
+
+        if (parse_result == ESP_OK) {
+            parse_result =
+                uds_security_provider_set_manual_key(
+                    &s_security_provider,
+                    manual_key,
+                    manual_key_length
+                );
+        }
+
+        web_uds_erase(manual_key, sizeof(manual_key));
+
+        if (parse_result != ESP_OK) {
+            return parse_result;
+        }
     }
 
     struct stat information = {0};
@@ -1905,6 +2099,10 @@ static esp_err_t web_uds_download_start(
         ((uint64_t)information.st_size >
          WEB_UDS_FIRMWARE_MAX_SIZE)) {
 
+        uds_security_provider_clear_manual_key(
+            &s_security_provider
+        );
+
         return (result != ESP_OK)
             ? result
             : ESP_ERR_INVALID_ARG;
@@ -1919,6 +2117,9 @@ static esp_err_t web_uds_download_start(
         );
 
     if (result != ESP_OK) {
+        uds_security_provider_clear_manual_key(
+            &s_security_provider
+        );
         return result;
     }
 
@@ -1940,6 +2141,9 @@ static esp_err_t web_uds_download_start(
             &progress,
             "failed"
         );
+        uds_security_provider_clear_manual_key(
+            &s_security_provider
+        );
         return result;
     }
 
@@ -1960,6 +2164,46 @@ static esp_err_t web_uds_download_start(
             .memory_size_length = (uint8_t)size_length,
             .maximum_block_retries = 3U,
             .operation_timeout_us = 600000000ULL,
+            .programming_session_type =
+                (uint8_t)programming_session,
+            .security_level =
+                security_enabled
+                    ? (uint8_t)security_level
+                    : 0U,
+            .security_algorithm =
+                security_enabled
+                    ? uds_security_provider_calculate
+                    : NULL,
+            .security_algorithm_context =
+                security_enabled
+                    ? &s_security_provider
+                    : NULL,
+            .security_seed_buffer = s_download_security_seed,
+            .security_seed_capacity =
+                sizeof(s_download_security_seed),
+            .security_key_buffer = s_download_security_key,
+            .security_key_capacity =
+                sizeof(s_download_security_key),
+            .erase_routine_identifier =
+                erase_enabled
+                    ? (uint16_t)erase_routine_identifier
+                    : 0U,
+            .erase_option_record = s_download_erase_record,
+            .erase_option_record_length =
+                s_download_erase_record_length,
+            .verify_routine_identifier =
+                verify_enabled
+                    ? (uint16_t)verify_routine_identifier
+                    : 0U,
+            .verify_option_record = s_download_verify_record,
+            .verify_option_record_length =
+                s_download_verify_record_length,
+            .reset_type =
+                reset_enabled
+                    ? (uint8_t)reset_type
+                    : 0U,
+            .restore_default_session =
+                restore_default_session,
         };
 
         result = uds_download_open(&s_download, &config);
@@ -1988,6 +2232,17 @@ static esp_err_t web_uds_download_start(
             "failed"
         );
         web_uds_download_close_file();
+        uds_security_provider_clear_manual_key(
+            &s_security_provider
+        );
+        web_uds_erase(
+            s_download_security_key,
+            sizeof(s_download_security_key)
+        );
+        web_uds_erase(
+            s_download_security_seed,
+            sizeof(s_download_security_seed)
+        );
         (void)uds_client_open(&s_client, &s_client_config);
     }
 
@@ -2268,6 +2523,16 @@ static esp_err_t web_uds_get_handler(
             response,
             "download_result",
             download_progress.last_result
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "download_security_unlocked",
+            download_progress.security_unlocked
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "download_default_session_restored",
+            download_progress.default_session_restored
         ) != NULL) &&
         (cJSON_AddNumberToObject(
             response,

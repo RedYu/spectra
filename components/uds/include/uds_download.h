@@ -19,14 +19,23 @@ extern "C" {
 
 #define UDS_DOWNLOAD_DEFAULT_MAXIMUM_BLOCK_RETRIES (3U)
 #define UDS_DOWNLOAD_DEFAULT_OPERATION_TIMEOUT_US  (600000000ULL)
+#define UDS_DOWNLOAD_ROUTINE_RECORD_MAX_LENGTH      (256U)
 
 typedef enum
 {
     UDS_DOWNLOAD_CLOSED = 0,
     UDS_DOWNLOAD_IDLE,
+    UDS_DOWNLOAD_ENTERING_SESSION,
+    UDS_DOWNLOAD_REQUESTING_SECURITY_SEED,
+    UDS_DOWNLOAD_CALCULATING_SECURITY_KEY,
+    UDS_DOWNLOAD_SENDING_SECURITY_KEY,
+    UDS_DOWNLOAD_ERASING_MEMORY,
     UDS_DOWNLOAD_REQUESTING_DOWNLOAD,
     UDS_DOWNLOAD_TRANSFERRING,
     UDS_DOWNLOAD_REQUESTING_TRANSFER_EXIT,
+    UDS_DOWNLOAD_VERIFYING_MEMORY,
+    UDS_DOWNLOAD_RESETTING_ECU,
+    UDS_DOWNLOAD_RESTORING_DEFAULT_SESSION,
     UDS_DOWNLOAD_COMPLETE,
     UDS_DOWNLOAD_CANCELLED,
     UDS_DOWNLOAD_ERROR,
@@ -38,6 +47,16 @@ typedef esp_err_t (*uds_download_read_cb_t)(
     uint8_t *buffer,
     size_t capacity,
     size_t *read_size,
+    void *context
+);
+
+typedef esp_err_t (*uds_download_security_algorithm_cb_t)(
+    uint8_t security_level,
+    const uint8_t *seed,
+    size_t seed_length,
+    uint8_t *key,
+    size_t key_capacity,
+    size_t *key_length,
     void *context
 );
 
@@ -57,6 +76,22 @@ typedef struct
     size_t exit_parameter_record_length;
     uint8_t maximum_block_retries;
     uint64_t operation_timeout_us;
+    uint8_t programming_session_type;
+    uint8_t security_level;
+    uds_download_security_algorithm_cb_t security_algorithm;
+    void *security_algorithm_context;
+    uint8_t *security_seed_buffer;
+    size_t security_seed_capacity;
+    uint8_t *security_key_buffer;
+    size_t security_key_capacity;
+    uint16_t erase_routine_identifier;
+    const uint8_t *erase_option_record;
+    size_t erase_option_record_length;
+    uint16_t verify_routine_identifier;
+    const uint8_t *verify_option_record;
+    size_t verify_option_record_length;
+    uint8_t reset_type;
+    bool restore_default_session;
 
 } uds_download_config_t;
 
@@ -73,6 +108,8 @@ typedef struct
     uint8_t current_block_retry;
     uint8_t last_negative_response_code;
     esp_err_t last_result;
+    bool security_unlocked;
+    bool default_session_restored;
 
 } uds_download_progress_t;
 
@@ -97,6 +134,13 @@ typedef struct
     uint64_t operation_timeout_us;
     bool action_pending;
     bool retry_pending;
+    bool security_unlocked;
+    bool default_session_restored;
+    bool restoring_after_error;
+    size_t security_seed_length;
+    uds_download_state_t security_resume_state;
+    esp_err_t operation_result;
+    uint8_t operation_negative_response_code;
     esp_err_t last_result;
 
 } uds_download_t;

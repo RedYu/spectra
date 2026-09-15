@@ -12,15 +12,132 @@ static void uds_download_client_callback(
     void *context
 );
 
+static void uds_download_schedule_after_session(
+    uds_download_t *download
+);
+
+static void uds_download_schedule_after_security(
+    uds_download_t *download
+);
+
+static void uds_download_schedule_after_transfer(
+    uds_download_t *download
+);
+
+static void uds_download_schedule_completion(
+    uds_download_t *download
+);
+
+static esp_err_t uds_download_submit_action(
+    uds_download_t *download,
+    uint64_t now_us
+);
+
+static bool uds_download_routine_response_valid(
+    const uds_client_event_t *event,
+    uint16_t routine_identifier
+)
+{
+    return (event->response.payload_length >= 3U) &&
+           ((event->response.payload[0] & 0x7FU) ==
+            UDS_ROUTINE_CONTROL_START) &&
+           (event->response.payload[1] ==
+            (uint8_t)(routine_identifier >> 8U)) &&
+           (event->response.payload[2] ==
+            (uint8_t)routine_identifier);
+}
+
 static void uds_download_fail(
     uds_download_t *download,
     esp_err_t result
 )
 {
-    download->state = UDS_DOWNLOAD_ERROR;
+    if ((download->state ==
+         UDS_DOWNLOAD_RESTORING_DEFAULT_SESSION) &&
+        download->restoring_after_error) {
+
+        download->state = UDS_DOWNLOAD_ERROR;
+        download->action_pending = false;
+        download->retry_pending = false;
+        download->last_result = download->operation_result;
+        download->last_negative_response_code =
+            download->operation_negative_response_code;
+        return;
+    }
+
+    download->operation_result = result;
+    download->operation_negative_response_code =
+        download->last_negative_response_code;
     download->action_pending = false;
     download->retry_pending = false;
     download->last_result = result;
+
+    if (download->config.restore_default_session &&
+        !download->default_session_restored &&
+        (download->state !=
+         UDS_DOWNLOAD_RESTORING_DEFAULT_SESSION) &&
+        (download->client.state != UDS_CLIENT_CLOSED)) {
+
+        download->state =
+            UDS_DOWNLOAD_RESTORING_DEFAULT_SESSION;
+        download->restoring_after_error = true;
+        download->action_pending = true;
+    } else {
+        download->state = UDS_DOWNLOAD_ERROR;
+    }
+}
+
+static void uds_download_schedule_after_session(
+    uds_download_t *download
+)
+{
+    uds_download_schedule_after_security(download);
+}
+
+static void uds_download_schedule_after_security(
+    uds_download_t *download
+)
+{
+    if (download->security_resume_state != UDS_DOWNLOAD_CLOSED) {
+        download->state = download->security_resume_state;
+        download->security_resume_state = UDS_DOWNLOAD_CLOSED;
+    } else {
+        download->state =
+            (download->config.erase_routine_identifier != 0U)
+                ? UDS_DOWNLOAD_ERASING_MEMORY
+                : UDS_DOWNLOAD_REQUESTING_DOWNLOAD;
+    }
+    download->action_pending = true;
+}
+
+static void uds_download_schedule_after_transfer(
+    uds_download_t *download
+)
+{
+    if (download->config.verify_routine_identifier != 0U) {
+        download->state = UDS_DOWNLOAD_VERIFYING_MEMORY;
+        download->action_pending = true;
+    } else {
+        uds_download_schedule_completion(download);
+    }
+}
+
+static void uds_download_schedule_completion(
+    uds_download_t *download
+)
+{
+    if (download->config.reset_type != 0U) {
+        download->state = UDS_DOWNLOAD_RESETTING_ECU;
+        download->action_pending = true;
+    } else if (download->config.restore_default_session) {
+        download->state =
+            UDS_DOWNLOAD_RESTORING_DEFAULT_SESSION;
+        download->action_pending = true;
+    } else {
+        download->state = UDS_DOWNLOAD_COMPLETE;
+        download->action_pending = false;
+        download->last_result = ESP_OK;
+    }
 }
 
 static bool uds_download_retry_block(
@@ -61,7 +178,23 @@ esp_err_t uds_download_open(
         ((config->exit_parameter_record == NULL) &&
          (config->exit_parameter_record_length != 0U)) ||
         (config->exit_parameter_record_length >
-         UDS_CLIENT_TRANSFER_EXIT_MAX_LENGTH)) {
+         UDS_CLIENT_TRANSFER_EXIT_MAX_LENGTH) ||
+        ((config->security_level != 0U) &&
+         ((config->security_level & 1U) == 0U)) ||
+        ((config->security_level != 0U) &&
+         ((config->security_algorithm == NULL) ||
+          (config->security_seed_buffer == NULL) ||
+          (config->security_seed_capacity == 0U) ||
+          (config->security_key_buffer == NULL) ||
+          (config->security_key_capacity == 0U))) ||
+        ((config->erase_option_record == NULL) &&
+         (config->erase_option_record_length != 0U)) ||
+        (config->erase_option_record_length >
+         UDS_DOWNLOAD_ROUTINE_RECORD_MAX_LENGTH) ||
+        ((config->verify_option_record == NULL) &&
+         (config->verify_option_record_length != 0U)) ||
+        (config->verify_option_record_length >
+         UDS_DOWNLOAD_ROUTINE_RECORD_MAX_LENGTH)) {
 
         return ESP_ERR_INVALID_ARG;
     }
@@ -144,19 +277,25 @@ esp_err_t uds_download_start(
         return ESP_ERR_INVALID_STATE;
     }
 
+    download->state =
+        (download->config.programming_session_type != 0U)
+            ? UDS_DOWNLOAD_ENTERING_SESSION
+            : (download->config.erase_routine_identifier != 0U)
+                ? UDS_DOWNLOAD_ERASING_MEMORY
+                : UDS_DOWNLOAD_REQUESTING_DOWNLOAD;
+    download->action_pending = true;
+    download->security_unlocked = false;
+    download->default_session_restored = false;
+    download->restoring_after_error = false;
+    download->security_seed_length = 0U;
+    download->security_resume_state = UDS_DOWNLOAD_CLOSED;
+    download->operation_result = ESP_OK;
+    download->operation_negative_response_code = 0U;
+
     const esp_err_t result =
-        uds_client_request_download(
-            &download->client,
-            download->config.data_format_identifier,
-            download->config.memory_address,
-            download->config.memory_address_length,
-            download->config.memory_size,
-            download->config.memory_size_length,
-            now_us
-        );
+        uds_download_submit_action(download, now_us);
 
     if (result == ESP_OK) {
-        download->state = UDS_DOWNLOAD_REQUESTING_DOWNLOAD;
         download->transferred_size = 0U;
         download->maximum_block_length = 0U;
         download->block_data_capacity = 0U;
@@ -167,7 +306,6 @@ esp_err_t uds_download_start(
         download->acknowledged_blocks = 0U;
         download->retry_count = 0U;
         download->started_at_us = now_us;
-        download->action_pending = false;
         download->retry_pending = false;
     } else {
         uds_download_fail(download, result);
@@ -218,6 +356,50 @@ esp_err_t uds_download_poll(
 
     if (download->retry_pending) {
         result = ESP_OK;
+    }
+
+    if (download->state ==
+        UDS_DOWNLOAD_CALCULATING_SECURITY_KEY) {
+
+        size_t key_length = 0U;
+        result =
+            download->config.security_algorithm(
+                download->config.security_level,
+                download->config.security_seed_buffer,
+                download->security_seed_length,
+                download->config.security_key_buffer,
+                download->config.security_key_capacity,
+                &key_length,
+                download->config.security_algorithm_context
+            );
+
+        if ((result == ESP_OK) &&
+            ((key_length == 0U) ||
+             (key_length > download->config.security_key_capacity) ||
+             (key_length > UDS_CLIENT_SECURITY_DATA_MAX_LENGTH))) {
+
+            result = ESP_ERR_INVALID_SIZE;
+        }
+
+        if (result == ESP_OK) {
+            result =
+                uds_client_security_access_send_key(
+                    &download->client,
+                    download->config.security_level,
+                    download->config.security_key_buffer,
+                    key_length,
+                    now_us
+                );
+        }
+
+        if (result == ESP_OK) {
+            download->state = UDS_DOWNLOAD_SENDING_SECURITY_KEY;
+        } else {
+            uds_download_fail(download, result);
+        }
+
+        download->last_result = result;
+        return result;
     }
 
     if (!download->action_pending) {
@@ -299,8 +481,108 @@ esp_err_t uds_download_poll(
         return result;
     }
 
-    uds_download_fail(download, ESP_ERR_INVALID_STATE);
-    return ESP_ERR_INVALID_STATE;
+    return uds_download_submit_action(download, now_us);
+}
+
+static esp_err_t uds_download_submit_action(
+    uds_download_t *download,
+    uint64_t now_us
+)
+{
+    download->action_pending = false;
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+
+    switch (download->state) {
+        case UDS_DOWNLOAD_ENTERING_SESSION:
+            result =
+                uds_client_diagnostic_session_control(
+                    &download->client,
+                    download->config.programming_session_type,
+                    false,
+                    now_us
+                );
+            break;
+
+        case UDS_DOWNLOAD_REQUESTING_SECURITY_SEED:
+            result =
+                uds_client_security_access_request_seed(
+                    &download->client,
+                    download->config.security_level,
+                    NULL,
+                    0U,
+                    now_us
+                );
+            break;
+
+        case UDS_DOWNLOAD_ERASING_MEMORY:
+            result =
+                uds_client_routine_control(
+                    &download->client,
+                    UDS_ROUTINE_CONTROL_START,
+                    download->config.erase_routine_identifier,
+                    download->config.erase_option_record,
+                    download->config.erase_option_record_length,
+                    false,
+                    now_us
+                );
+            break;
+
+        case UDS_DOWNLOAD_REQUESTING_DOWNLOAD:
+            result =
+                uds_client_request_download(
+                    &download->client,
+                    download->config.data_format_identifier,
+                    download->config.memory_address,
+                    download->config.memory_address_length,
+                    download->config.memory_size,
+                    download->config.memory_size_length,
+                    now_us
+                );
+            break;
+
+        case UDS_DOWNLOAD_VERIFYING_MEMORY:
+            result =
+                uds_client_routine_control(
+                    &download->client,
+                    UDS_ROUTINE_CONTROL_START,
+                    download->config.verify_routine_identifier,
+                    download->config.verify_option_record,
+                    download->config.verify_option_record_length,
+                    false,
+                    now_us
+                );
+            break;
+
+        case UDS_DOWNLOAD_RESETTING_ECU:
+            result =
+                uds_client_ecu_reset(
+                    &download->client,
+                    download->config.reset_type,
+                    false,
+                    now_us
+                );
+            break;
+
+        case UDS_DOWNLOAD_RESTORING_DEFAULT_SESSION:
+            result =
+                uds_client_diagnostic_session_control(
+                    &download->client,
+                    UDS_DIAGNOSTIC_SESSION_DEFAULT,
+                    false,
+                    now_us
+                );
+            break;
+
+        default:
+            break;
+    }
+
+    if (result != ESP_OK) {
+        uds_download_fail(download, result);
+    }
+
+    download->last_result = result;
+    return result;
 }
 
 esp_err_t uds_download_cancel(
@@ -311,11 +593,11 @@ esp_err_t uds_download_cancel(
         return ESP_ERR_INVALID_ARG;
     }
 
-    if ((download->state !=
-         UDS_DOWNLOAD_REQUESTING_DOWNLOAD) &&
-        (download->state != UDS_DOWNLOAD_TRANSFERRING) &&
-        (download->state !=
-         UDS_DOWNLOAD_REQUESTING_TRANSFER_EXIT)) {
+    if ((download->state == UDS_DOWNLOAD_CLOSED) ||
+        (download->state == UDS_DOWNLOAD_IDLE) ||
+        (download->state == UDS_DOWNLOAD_COMPLETE) ||
+        (download->state == UDS_DOWNLOAD_CANCELLED) ||
+        (download->state == UDS_DOWNLOAD_ERROR)) {
 
         return ESP_ERR_INVALID_STATE;
     }
@@ -351,6 +633,9 @@ esp_err_t uds_download_get_progress(
         .last_negative_response_code =
             download->last_negative_response_code,
         .last_result = download->last_result,
+        .security_unlocked = download->security_unlocked,
+        .default_session_restored =
+            download->default_session_restored,
     };
 
     return ESP_OK;
@@ -413,7 +698,108 @@ static void uds_download_client_callback(
         return;
     }
 
+    if (event->type == UDS_CLIENT_EVENT_RESPONSE) {
+        download->last_negative_response_code = 0U;
+    }
+
     if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
+        (download->state == UDS_DOWNLOAD_ENTERING_SESSION)) {
+
+        if ((event->response.service_id ==
+             (UDS_SERVICE_DIAGNOSTIC_SESSION_CONTROL +
+              UDS_POSITIVE_RESPONSE_OFFSET)) &&
+            (event->response.payload_length >= 1U) &&
+            ((event->response.payload[0] & 0x7FU) ==
+             download->config.programming_session_type)) {
+
+            uds_download_schedule_after_session(download);
+        } else {
+            uds_download_fail(
+                download,
+                ESP_ERR_INVALID_RESPONSE
+            );
+        }
+    } else if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
+               (download->state ==
+                UDS_DOWNLOAD_REQUESTING_SECURITY_SEED)) {
+
+        const bool valid =
+            (event->response.service_id ==
+             (UDS_SERVICE_SECURITY_ACCESS +
+              UDS_POSITIVE_RESPONSE_OFFSET)) &&
+            (event->response.payload_length >= 1U) &&
+            (event->response.payload[0] ==
+             download->config.security_level);
+
+        if (!valid) {
+            uds_download_fail(
+                download,
+                ESP_ERR_INVALID_RESPONSE
+            );
+        } else {
+            const size_t seed_length =
+                event->response.payload_length - 1U;
+
+            if (seed_length == 0U) {
+                download->security_unlocked = true;
+                uds_download_schedule_after_security(download);
+            } else if (seed_length >
+                       download->config.security_seed_capacity) {
+
+                uds_download_fail(
+                    download,
+                    ESP_ERR_INVALID_SIZE
+                );
+            } else {
+                memcpy(
+                    download->config.security_seed_buffer,
+                    &event->response.payload[1],
+                    seed_length
+                );
+                download->security_seed_length = seed_length;
+                download->state =
+                    UDS_DOWNLOAD_CALCULATING_SECURITY_KEY;
+            }
+        }
+    } else if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
+               (download->state ==
+                UDS_DOWNLOAD_SENDING_SECURITY_KEY)) {
+
+        const bool valid =
+            (event->response.service_id ==
+             (UDS_SERVICE_SECURITY_ACCESS +
+              UDS_POSITIVE_RESPONSE_OFFSET)) &&
+            (event->response.payload_length >= 1U) &&
+            (event->response.payload[0] ==
+             (uint8_t)(download->config.security_level + 1U));
+
+        if (valid) {
+            download->security_unlocked = true;
+            uds_download_schedule_after_security(download);
+        } else {
+            uds_download_fail(
+                download,
+                ESP_ERR_INVALID_RESPONSE
+            );
+        }
+    } else if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
+               (download->state ==
+                UDS_DOWNLOAD_ERASING_MEMORY)) {
+
+        if (uds_download_routine_response_valid(
+                event,
+                download->config.erase_routine_identifier
+            )) {
+
+            download->state = UDS_DOWNLOAD_REQUESTING_DOWNLOAD;
+            download->action_pending = true;
+        } else {
+            uds_download_fail(
+                download,
+                ESP_ERR_INVALID_RESPONSE
+            );
+        }
+    } else if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
         (download->state ==
          UDS_DOWNLOAD_REQUESTING_DOWNLOAD)) {
 
@@ -511,11 +897,71 @@ static void uds_download_client_callback(
             );
 
         if (result == ESP_OK) {
+            uds_download_schedule_after_transfer(download);
+        } else {
+            uds_download_fail(download, result);
+        }
+    } else if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
+               (download->state ==
+                UDS_DOWNLOAD_VERIFYING_MEMORY)) {
+
+        if (uds_download_routine_response_valid(
+                event,
+                download->config.verify_routine_identifier
+            )) {
+
+            uds_download_schedule_completion(download);
+        } else {
+            uds_download_fail(
+                download,
+                ESP_ERR_INVALID_RESPONSE
+            );
+        }
+    } else if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
+               (download->state ==
+                UDS_DOWNLOAD_RESETTING_ECU)) {
+
+        if ((event->response.payload_length >= 1U) &&
+            ((event->response.payload[0] & 0x7FU) ==
+             download->config.reset_type)) {
+
+            download->default_session_restored = true;
             download->state = UDS_DOWNLOAD_COMPLETE;
             download->action_pending = false;
             download->last_result = ESP_OK;
         } else {
-            uds_download_fail(download, result);
+            uds_download_fail(
+                download,
+                ESP_ERR_INVALID_RESPONSE
+            );
+        }
+    } else if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
+               (download->state ==
+                UDS_DOWNLOAD_RESTORING_DEFAULT_SESSION)) {
+
+        const bool valid =
+            (event->response.payload_length >= 1U) &&
+            ((event->response.payload[0] & 0x7FU) ==
+             UDS_DIAGNOSTIC_SESSION_DEFAULT);
+
+        if (!valid) {
+            uds_download_fail(
+                download,
+                ESP_ERR_INVALID_RESPONSE
+            );
+        } else {
+            download->default_session_restored = true;
+            download->action_pending = false;
+
+            if (download->restoring_after_error) {
+                download->state = UDS_DOWNLOAD_ERROR;
+                download->last_result = download->operation_result;
+                download->last_negative_response_code =
+                    download->operation_negative_response_code;
+            } else {
+                download->state = UDS_DOWNLOAD_COMPLETE;
+                download->last_result = ESP_OK;
+            }
         }
     } else if ((event->type == UDS_CLIENT_EVENT_TIMEOUT) &&
                uds_download_retry_block(download, 0U)) {
@@ -532,6 +978,23 @@ static void uds_download_client_callback(
                )) {
 
         /* Retry only explicitly recoverable TransferData failures. */
+    } else if ((event->type == UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) &&
+               (event->response.negative_response_code ==
+                UDS_NRC_SECURITY_ACCESS_DENIED) &&
+               (download->config.security_level != 0U) &&
+               !download->security_unlocked &&
+               ((download->state == UDS_DOWNLOAD_ERASING_MEMORY) ||
+                (download->state ==
+                 UDS_DOWNLOAD_REQUESTING_DOWNLOAD) ||
+                (download->state ==
+                 UDS_DOWNLOAD_VERIFYING_MEMORY))) {
+
+        download->security_resume_state = download->state;
+        download->state =
+            UDS_DOWNLOAD_REQUESTING_SECURITY_SEED;
+        download->action_pending = true;
+        download->last_negative_response_code =
+            event->response.negative_response_code;
     } else if ((download->state != UDS_DOWNLOAD_CANCELLED) &&
                ((event->type ==
                  UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) ||
@@ -540,6 +1003,9 @@ static void uds_download_client_callback(
                  UDS_CLIENT_EVENT_TRANSPORT_ERROR) ||
                 (event->type ==
                  UDS_CLIENT_EVENT_PROTOCOL_ERROR))) {
+
+        download->last_negative_response_code =
+            event->response.negative_response_code;
 
         uds_download_fail(
             download,

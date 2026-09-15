@@ -79,6 +79,14 @@ code execute only from `uds_download_poll()`, not from the ISO-TP callback. The
 adapter allocates neither heap memory nor a task and provides progress and
 cancellation APIs.
 
+The programming pipeline can enter a configured diagnostic session, perform
+SecurityAccess with the selected provider, run OEM erase and verification
+routines, transfer the image, reset the ECU, and restore the default session.
+Protected erase, download, and verify operations can trigger SecurityAccess
+after NRC `0x33` when credentials are configured. On a terminal failure the
+pipeline preserves the original result while making a best-effort transition
+back to the default session.
+
 The UDS Web API connects this state machine to an SD-card file. Starting an
 automatic download reuses the configured diagnostic transport, closes the
 manual client to prevent duplicate ISO-TP channels, and creates a temporary

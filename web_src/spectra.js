@@ -7680,9 +7680,17 @@
         const downloadStateNames = [
             'Closed',
             'Ready',
+            'Entering programming session',
+            'Requesting security seed',
+            'Calculating security key',
+            'Sending security key',
+            'Erasing memory',
             'Requesting download',
             'Transferring firmware',
             'Finalizing transfer',
+            'Verifying memory',
+            'Resetting ECU',
+            'Restoring default session',
             'Programming completed',
             'Programming cancelled',
             'Programming failed'
@@ -7761,6 +7769,29 @@
             }
 
             return text.toUpperCase();
+        }
+
+        function parseHexBytes(input, required, name) {
+            const text = input.value.trim();
+
+            if (!text) {
+                if (required)
+                    throw new Error(`${name} cannot be empty.`);
+
+                return '';
+            }
+
+            const compact = text.replace(/\s+/g, '');
+
+            if (!/^[0-9a-f]+$/i.test(compact) ||
+                (compact.length & 1) !== 0) {
+
+                throw new Error(
+                    `${name} must contain complete hexadecimal bytes.`
+                );
+            }
+
+            return compact.match(/.{2}/g).join(' ').toUpperCase();
         }
 
         async function command(body) {
@@ -7931,6 +7962,14 @@
                 : 'None';
             element('program-journal').textContent =
                 data.download_journal || '—';
+            element('program-security-state').textContent =
+                data.download_security_unlocked
+                    ? 'Unlocked'
+                    : 'Not unlocked';
+            element('program-session-state').textContent =
+                data.download_default_session_restored
+                    ? 'Restored'
+                    : 'Not restored';
         }
 
         async function refresh() {
@@ -7943,9 +7982,9 @@
 
                 const active = data.download_active &&
                     data.download_state >= 2 &&
-                    data.download_state <= 4;
+                    data.download_state <= 12;
                 const terminal = data.download_active &&
-                    data.download_state >= 5;
+                    data.download_state >= 13;
                 channelOpen = data.open;
                 downloadReserved = data.download_active;
 
@@ -7957,7 +7996,7 @@
                 status.classList.toggle('active', active);
                 status.classList.toggle(
                     'error',
-                    data.download_state === 7 || data.state === 7
+                    data.download_state === 15 || data.state === 7
                 );
                 element('program-channel-state').textContent = data.open
                     ? clientStateNames[data.state] || 'Channel open'
@@ -7973,11 +8012,11 @@
                 element('program-refresh-files').disabled = data.download_active;
                 updateProgress(data);
 
-                if (data.download_state === 5)
+                if (data.download_state === 13)
                     message.textContent = 'Programming completed successfully.';
-                else if (data.download_state === 6)
+                else if (data.download_state === 14)
                     message.textContent = 'Programming was cancelled.';
-                else if (data.download_state === 7)
+                else if (data.download_state === 15)
                     message.textContent =
                         `Programming failed with result ${data.download_result}.`;
             } catch (error) {
@@ -8066,7 +8105,57 @@
                         addressLength
                     ),
                     address_length : addressLength,
-                    size_length : sizeLength
+                    size_length : sizeLength,
+                    programming_session : parseHex(
+                        element('program-session'),
+                        0x7f,
+                        'Diagnostic session'
+                    ),
+                    security_enabled :
+                        element('program-security-enabled').checked,
+                    security_level : parseHex(
+                        element('program-security-level'),
+                        0x7d,
+                        'Security level'
+                    ),
+                    security_key : parseHexBytes(
+                        element('program-security-key'),
+                        element('program-security-enabled').checked,
+                        'Security key'
+                    ),
+                    erase_enabled :
+                        element('program-erase-enabled').checked,
+                    erase_routine_id : parseHex(
+                        element('program-erase-routine'),
+                        0xffff,
+                        'Erase routine ID'
+                    ),
+                    erase_record : parseHexBytes(
+                        element('program-erase-record'),
+                        false,
+                        'Erase option record'
+                    ),
+                    verify_enabled :
+                        element('program-verify-enabled').checked,
+                    verify_routine_id : parseHex(
+                        element('program-verify-routine'),
+                        0xffff,
+                        'Verify routine ID'
+                    ),
+                    verify_record : parseHexBytes(
+                        element('program-verify-record'),
+                        false,
+                        'Verify option record'
+                    ),
+                    reset_enabled :
+                        element('program-reset-enabled').checked,
+                    reset_type : parseHex(
+                        element('program-reset-type'),
+                        0x7f,
+                        'ECU reset type'
+                    ),
+                    restore_default_session :
+                        element('program-restore-session').checked
                 });
                 message.textContent = 'Programming started.';
                 await refresh();
