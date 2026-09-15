@@ -1,7 +1,7 @@
 # Firmware image readers
 
 Spectra provides allocation-free streaming readers in the `uds` component for
-raw binary, Intel HEX, and Motorola S-record firmware images. The parser is
+raw binary, Intel HEX, Motorola S-record, and BHX firmware images. The parser is
 independent of the SD-card and Web layers: the caller supplies a random-access
 read callback and the parser returns normalized address/data blocks.
 
@@ -39,14 +39,26 @@ checksum, consistent data-address width, optional declared record count,
 ordered non-overlapping data, the matching termination type, and trailing
 content.
 
+## BHX
+
+BHX is parsed as a big-endian multi-section container. A 12-byte `GHDR`
+contains version `1` and the total number of firmware data bytes. It is
+followed by one or more `SHDR` records. Each section header contains version
+`1`, a 32-bit load address, a 32-bit data size, and the marker `0xC0DECAFE`.
+
+The reader emits every section at its embedded load address. It validates all
+signatures, versions, section and total sizes, address overflow, ordered
+non-overlapping sections, truncation, and unexpected trailing data. Section
+headers are not included in the reported firmware data size.
+
 Recognized extensions are `.bin`, `.hex`, `.ihex`, `.srec`, `.s19`, `.s28`,
-`.s37`, and `.mot`, case-insensitively.
+`.s37`, `.mot`, and `.bhx`, case-insensitively.
 
 ## UDS programming integration
 
 The Web UDS programming path validates the complete image before changing the
-ECU session. BIN uses the address entered by the user. Intel HEX and S-record
-use their embedded addresses. Adjacent records are combined into segments;
+ECU session. BIN uses the address entered by the user. Intel HEX, S-record,
+and BHX use their embedded addresses. Adjacent blocks are combined into segments;
 each discontinuous segment receives its own RequestDownload, TransferData
 sequence, and RequestTransferExit. Programming session entry, SecurityAccess,
 erase, verification, reset, and default-session restoration still run once for
@@ -54,5 +66,4 @@ the complete image.
 
 The progress API reports both total image progress and the current segment.
 Parser state and the segment index are allocated in PSRAM and released when the
-programming file is closed. BHEX is not implemented because it requires the
-specification of the particular BHEX variant.
+programming file is closed.

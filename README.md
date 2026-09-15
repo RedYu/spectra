@@ -113,7 +113,7 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - RequestDownload, TransferData, and RequestTransferExit primitives
 - Non-blocking ECU programming pipeline with retry, cancellation, progress,
   long-running routine polling, reset, and session restoration
-- ECU programming from BIN, Intel HEX, and Motorola S-record images stored
+- ECU programming from BIN, Intel HEX, Motorola S-record, and BHX images stored
   under `/sdcard/firmwares`
 - Persistent ECU profiles and DID catalogs stored as separate JSON files
 - Typed DID decoding with byte order, scale, offset, units, ASCII, UTF-8,
@@ -504,7 +504,7 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] ISO-TP transport over Classical CAN and CAN FD
 - [x] UDS client, browser diagnostics, DID catalogs, and ECU profiles
 - [x] Automatic UDS ECU programming with routine polling and journals
-- [x] Streaming BIN, Intel HEX, and Motorola S-record readers and validators
+- [x] Streaming BIN, Intel HEX, Motorola S-record, and BHX readers and validators
 - [x] Stateful XCP master, browser console, discovery, upload, and bounded writes
 - [x] Embedded Web UI and REST API
 - [x] Device diagnostics with health analysis, task/queue telemetry, reports,

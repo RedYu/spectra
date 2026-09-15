@@ -105,7 +105,7 @@ HTTP requests only read progress or request cancellation. The 512-byte transfer
 buffer is allocated in PSRAM and the SD file is closed on completion,
 cancellation, or error.
 
-Automatic Web downloads accept BIN, Intel HEX, and Motorola S-record images
+Automatic Web downloads accept BIN, Intel HEX, Motorola S-record, and BHX images
 directly inside `/firmwares`. BIN uses the configured base address. Text-image
 formats are completely validated before the diagnostic session changes and use
 their embedded addresses. Adjacent data records are combined; every address

@@ -160,6 +160,39 @@ static esp_err_t firmware_image_validate_trailing_data(
     return ESP_OK;
 }
 
+static uint32_t firmware_image_read_be32(
+    const uint8_t *data
+)
+{
+    return
+        ((uint32_t)data[0] << 24U) |
+        ((uint32_t)data[1] << 16U) |
+        ((uint32_t)data[2] << 8U) |
+        data[3];
+}
+
+static esp_err_t firmware_image_read_bytes(
+    firmware_image_reader_t *reader,
+    uint8_t *data,
+    size_t size
+)
+{
+    for (size_t index = 0U; index < size; ++index) {
+        const esp_err_t result = firmware_image_read_byte(
+            reader,
+            &data[index]
+        );
+
+        if (result != ESP_OK) {
+            return (result == ESP_ERR_NOT_FOUND)
+                ? ESP_ERR_INVALID_SIZE
+                : result;
+        }
+    }
+
+    return ESP_OK;
+}
+
 static esp_err_t firmware_image_publish_block(
     firmware_image_reader_t *reader,
     uint64_t address,
@@ -222,6 +255,121 @@ static esp_err_t firmware_image_next_bin(
         reader,
         reader->config.binary_address + offset,
         read_size,
+        block
+    );
+}
+
+static esp_err_t firmware_image_next_bhx(
+    firmware_image_reader_t *reader,
+    firmware_image_block_t *block
+)
+{
+    if (reader->terminated) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    if (!reader->bhx_global_header_read) {
+        uint8_t header[12];
+        const esp_err_t result = firmware_image_read_bytes(
+            reader,
+            header,
+            sizeof(header)
+        );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        if ((memcmp(header, "GHDR", 4U) != 0) ||
+            (firmware_image_read_be32(&header[4]) != 1U)) {
+
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+
+        reader->bhx_total_data_size =
+            firmware_image_read_be32(&header[8]);
+
+        if (reader->bhx_total_data_size == 0U) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        reader->bhx_global_header_read = true;
+    }
+
+    if (reader->bhx_section_remaining == 0U) {
+        if (reader->bhx_consumed_data_size ==
+            reader->bhx_total_data_size) {
+
+            if (reader->file_offset != reader->config.file_size) {
+                return ESP_ERR_INVALID_SIZE;
+            }
+
+            reader->terminated = true;
+            return ESP_ERR_NOT_FOUND;
+        }
+
+        uint8_t header[20];
+        const esp_err_t result = firmware_image_read_bytes(
+            reader,
+            header,
+            sizeof(header)
+        );
+
+        if (result != ESP_OK) {
+            return result;
+        }
+
+        const uint32_t address =
+            firmware_image_read_be32(&header[8]);
+        const uint32_t size =
+            firmware_image_read_be32(&header[12]);
+        const uint32_t remaining =
+            reader->bhx_total_data_size -
+            reader->bhx_consumed_data_size;
+
+        if ((memcmp(header, "SHDR", 4U) != 0) ||
+            (firmware_image_read_be32(&header[4]) != 1U) ||
+            (firmware_image_read_be32(&header[16]) !=
+             0xC0DECAFEUL)) {
+
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+
+        if ((size == 0U) ||
+            (size > remaining) ||
+            ((uint64_t)address + size >
+             ((uint64_t)UINT32_MAX + 1U))) {
+
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        reader->bhx_section_address = address;
+        reader->bhx_section_remaining = size;
+    }
+
+    const size_t size =
+        (reader->bhx_section_remaining < sizeof(reader->data))
+            ? reader->bhx_section_remaining
+            : sizeof(reader->data);
+    const esp_err_t result = firmware_image_read_bytes(
+        reader,
+        reader->data,
+        size
+    );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    const uint64_t address = reader->bhx_section_address;
+    reader->bhx_section_address += size;
+    reader->bhx_section_remaining -= (uint32_t)size;
+    reader->bhx_consumed_data_size += (uint32_t)size;
+
+    return firmware_image_publish_block(
+        reader,
+        address,
+        size,
         block
     );
 }
@@ -615,7 +763,7 @@ esp_err_t firmware_image_open(
         (config == NULL) ||
         (config->read == NULL) ||
         (config->file_size == 0U) ||
-        (config->format > FIRMWARE_IMAGE_FORMAT_S_RECORD) ||
+        (config->format > FIRMWARE_IMAGE_FORMAT_BHX) ||
         ((config->format == FIRMWARE_IMAGE_FORMAT_BIN) &&
          (config->binary_address >
           (UINT64_MAX - config->file_size)))) {
@@ -648,6 +796,9 @@ esp_err_t firmware_image_next(
 
         case FIRMWARE_IMAGE_FORMAT_S_RECORD:
             return firmware_image_next_s_record(reader, block);
+
+        case FIRMWARE_IMAGE_FORMAT_BHX:
+            return firmware_image_next_bhx(reader, block);
 
         default:
             return ESP_ERR_INVALID_STATE;
@@ -749,6 +900,11 @@ esp_err_t firmware_image_format_from_name(
         (strcmp(normalized, ".mot") == 0)) {
 
         *format = FIRMWARE_IMAGE_FORMAT_S_RECORD;
+        return ESP_OK;
+    }
+
+    if (strcmp(normalized, ".bhx") == 0) {
+        *format = FIRMWARE_IMAGE_FORMAT_BHX;
         return ESP_OK;
     }
 

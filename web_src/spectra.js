@@ -9032,7 +9032,7 @@
 
                     files.push(...result.entries.filter(entry =>
                         entry.type !== 'directory' &&
-                        /\.(bin|hex|ihex|srec|s19|s28|s37|mot)$/i.test(
+                        /\.(bin|hex|ihex|srec|s19|s28|s37|mot|bhx)$/i.test(
                             entry.name
                         )
                     ));

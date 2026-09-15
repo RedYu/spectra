@@ -217,6 +217,100 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "Firmware image decodes multiple BHX sections",
+    "[firmware_image]"
+)
+{
+    static const uint8_t image[] = {
+        'G', 'H', 'D', 'R',
+        0x00U, 0x00U, 0x00U, 0x01U,
+        0x00U, 0x00U, 0x00U, 0x07U,
+        'S', 'H', 'D', 'R',
+        0x00U, 0x00U, 0x00U, 0x01U,
+        0x00U, 0x01U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x04U,
+        0xC0U, 0xDEU, 0xCAU, 0xFEU,
+        0x11U, 0x22U, 0x33U, 0x44U,
+        'S', 'H', 'D', 'R',
+        0x00U, 0x00U, 0x00U, 0x01U,
+        0x00U, 0x2FU, 0xFFU, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x03U,
+        0xC0U, 0xDEU, 0xCAU, 0xFEU,
+        0xAAU, 0xBBU, 0xCCU,
+    };
+    firmware_image_test_source_t source;
+    const firmware_image_config_t config =
+        firmware_image_test_config(
+            FIRMWARE_IMAGE_FORMAT_BHX,
+            image,
+            sizeof(image),
+            &source
+        );
+    firmware_image_reader_t reader;
+    firmware_image_block_t block;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        firmware_image_open(&reader, &config)
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        firmware_image_next(&reader, &block)
+    );
+    TEST_ASSERT_EQUAL_HEX64(0x00010000U, block.address);
+    TEST_ASSERT_EQUAL_UINT32(4U, block.size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(&image[32], block.data, 4U);
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        firmware_image_next(&reader, &block)
+    );
+    TEST_ASSERT_EQUAL_HEX64(0x002FFF00U, block.address);
+    TEST_ASSERT_EQUAL_UINT32(3U, block.size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(&image[56], block.data, 3U);
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_NOT_FOUND,
+        firmware_image_next(&reader, &block)
+    );
+}
+
+TEST_CASE(
+    "Firmware image rejects an inconsistent BHX total size",
+    "[firmware_image]"
+)
+{
+    static const uint8_t image[] = {
+        'G', 'H', 'D', 'R',
+        0x00U, 0x00U, 0x00U, 0x01U,
+        0x00U, 0x00U, 0x00U, 0x02U,
+        'S', 'H', 'D', 'R',
+        0x00U, 0x00U, 0x00U, 0x01U,
+        0x00U, 0x00U, 0x10U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x01U,
+        0xC0U, 0xDEU, 0xCAU, 0xFEU,
+        0xAAU,
+    };
+    firmware_image_test_source_t source;
+    const firmware_image_config_t config =
+        firmware_image_test_config(
+            FIRMWARE_IMAGE_FORMAT_BHX,
+            image,
+            sizeof(image),
+            &source
+        );
+    firmware_image_reader_t reader;
+    firmware_image_info_t info;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        firmware_image_open(&reader, &config)
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_SIZE,
+        firmware_image_inspect(&reader, &info)
+    );
+}
+
+TEST_CASE(
     "Firmware image recognizes supported extensions",
     "[firmware_image]"
 )
@@ -242,4 +336,9 @@ TEST_CASE(
         ESP_ERR_NOT_SUPPORTED,
         firmware_image_format_from_name("image.bhex", &format)
     );
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        firmware_image_format_from_name("image.BHX", &format)
+    );
+    TEST_ASSERT_EQUAL(FIRMWARE_IMAGE_FORMAT_BHX, format);
 }

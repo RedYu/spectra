@@ -24,6 +24,7 @@ typedef enum
     FIRMWARE_IMAGE_FORMAT_BIN = 0,
     FIRMWARE_IMAGE_FORMAT_INTEL_HEX,
     FIRMWARE_IMAGE_FORMAT_S_RECORD,
+    FIRMWARE_IMAGE_FORMAT_BHX,
 
 } firmware_image_format_t;
 
@@ -74,11 +75,16 @@ typedef struct
     uint64_t entry_address;
     uint32_t data_record_count;
     uint32_t declared_record_count;
+    uint32_t bhx_total_data_size;
+    uint32_t bhx_consumed_data_size;
+    uint32_t bhx_section_remaining;
+    uint64_t bhx_section_address;
     uint8_t s_record_data_type;
     bool previous_block_valid;
     bool entry_address_valid;
     bool terminated;
     bool count_record_seen;
+    bool bhx_global_header_read;
     size_t read_buffer_offset;
     size_t read_buffer_size;
     uint8_t read_buffer[FIRMWARE_IMAGE_READ_BUFFER_SIZE];
