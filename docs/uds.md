@@ -179,6 +179,22 @@ unsupported schema versions, malformed definitions, and duplicate DIDs are
 rejected. Catalog listing is paginated and omits invalid files. Formatting an
 SD card recreates the catalog directory.
 
+The existing `/api/uds` GET handler also exposes DID catalogs without using an
+additional HTTP URI slot. `did_catalogs=1` returns a paginated summary list and
+`did_catalog=<file>` returns one validated catalog. POST actions
+`did_catalog_save` and `did_catalog_remove` validate all input before changing
+the SD card. Catalog request bodies are bounded to the catalog file limit plus
+the small API envelope, and their HTTP receive buffer is allocated in PSRAM.
+The ISO-TP diagnostics page provides a catalog editor for adding, changing,
+loading, saving, and removing up to 128 DID definitions. Its Use action copies
+the selected DID directly into the ReadDataByIdentifier request form. Positive
+`0x62` responses are decoded locally in the browser using the catalog currently
+shown in the editor. The decoder checks the returned DID and exact data length,
+supports signed and unsigned integers, IEEE 32-bit and 64-bit floating point,
+ASCII, UTF-8, and raw bytes, applies byte order, scale, offset, and unit, and
+keeps the original bytes visible. Unknown DIDs and length mismatches remain
+visible without being interpreted.
+
 Complete-message buffers are still configured through `isotp_service`, so an
 application can place them in PSRAM. The UDS client itself does not allocate
 payload memory.
@@ -194,6 +210,6 @@ while the client has an outstanding request.
 - one outstanding request per client;
 - physical addressing only through the selected ISO-TP channel;
 - no built-in OEM security-access algorithms;
-- no Web API or browser editor for persistent DID catalogs yet;
+- one ReadDataByIdentifier response is decoded at a time;
 - no persistent resume after reset or interrupted ECU programming;
 - no authentication or role-based protection for destructive UDS requests.

@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=35">
-    <script src="spectra.js?v=35" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=36">
+    <script src="spectra.js?v=36" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -438,6 +438,100 @@
                     </button>
                 </div>
 
+            </section>
+
+            <section class="card uds-did-catalog isotp-card">
+                <div class="panel-title">
+                    <div>
+                        <h2>DID catalog</h2>
+                        <p class="note">
+                            Describe ECU data identifiers and store the
+                            catalog on the SD card.
+                        </p>
+                    </div>
+
+                    <span id="uds-did-catalog-count">0 / 128 DIDs</span>
+                </div>
+
+                <div class="uds-did-catalog-source">
+                    <label>
+                        Stored catalog
+                        <select id="uds-did-catalog-select">
+                            <option value="">Loading catalogs…</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        File name
+                        <input
+                            id="uds-did-catalog-file"
+                            maxlength="95"
+                            placeholder="example-ecu.json"
+                            spellcheck="false"
+                        >
+                    </label>
+
+                    <label>
+                        Catalog name
+                        <input
+                            id="uds-did-catalog-name"
+                            maxlength="63"
+                            placeholder="Example ECU"
+                        >
+                    </label>
+
+                    <label class="uds-did-catalog-description">
+                        Description
+                        <input
+                            id="uds-did-catalog-description"
+                            maxlength="127"
+                            placeholder="Model and diagnostic data notes"
+                        >
+                    </label>
+                </div>
+
+                <div class="isotp-actions">
+                    <button id="uds-did-catalog-refresh">Refresh</button>
+                    <button id="uds-did-catalog-load" disabled>
+                        Load catalog
+                    </button>
+                    <button id="uds-did-catalog-new">New catalog</button>
+                    <button id="uds-did-catalog-save" class="primary">
+                        Save catalog
+                    </button>
+                    <button id="uds-did-catalog-remove" class="danger" disabled>
+                        Delete catalog
+                    </button>
+                </div>
+
+                <div class="uds-did-table-wrapper">
+                    <table class="uds-did-table">
+                        <thead>
+                            <tr>
+                                <th>DID</th>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Length</th>
+                                <th>Order</th>
+                                <th>Scale</th>
+                                <th>Offset</th>
+                                <th>Unit</th>
+                                <th>Description</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+
+                        <tbody id="uds-did-catalog-rows"></tbody>
+                    </table>
+                </div>
+
+                <div class="isotp-actions">
+                    <button id="uds-did-catalog-add">Add DID</button>
+                </div>
+
+                <div id="uds-did-catalog-message" role="status">
+                    Select a stored catalog or create a new one.
+                </div>
             </section>
 
             <section class="card uds-response isotp-card">

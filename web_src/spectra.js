@@ -6858,6 +6858,25 @@
         const response = element('uds-response-data');
         const summary = element('uds-response-summary');
         const brs = element('uds-brs');
+        const didCatalogSelect =
+            element('uds-did-catalog-select');
+        const didCatalogFile =
+            element('uds-did-catalog-file');
+        const didCatalogName =
+            element('uds-did-catalog-name');
+        const didCatalogDescription =
+            element('uds-did-catalog-description');
+        const didCatalogRows =
+            element('uds-did-catalog-rows');
+        const didCatalogCount =
+            element('uds-did-catalog-count');
+        const didCatalogMessage =
+            element('uds-did-catalog-message');
+        const didCatalogLoad =
+            element('uds-did-catalog-load');
+        const didCatalogRemove =
+            element('uds-did-catalog-remove');
+        let didCatalogs = [];
         let lastSequence = -1;
 
         const stateNames = [
@@ -6938,6 +6957,287 @@
             return result;
         }
 
+        function setDidCatalogMessage(text, error = false) {
+            didCatalogMessage.textContent = text;
+            didCatalogMessage.classList.toggle('error', error);
+        }
+
+        function updateDidCatalogCount() {
+            didCatalogCount.textContent =
+                `${didCatalogRows.children.length} / 128 DIDs`;
+            element('uds-did-catalog-add').disabled =
+                didCatalogRows.children.length >= 128;
+        }
+
+        function createDidCatalogRow(definition = {}) {
+            if (didCatalogRows.children.length >= 128)
+                throw new Error('A catalog can contain at most 128 DIDs.');
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><input class="did-identifier" maxlength="4" spellcheck="false"></td>
+                <td><input class="did-name" maxlength="63"></td>
+                <td><select class="did-type">
+                    <option value="unsigned">Unsigned</option>
+                    <option value="signed">Signed</option>
+                    <option value="float">Float</option>
+                    <option value="ascii">ASCII</option>
+                    <option value="utf8">UTF-8</option>
+                    <option value="bytes">Raw bytes</option>
+                </select></td>
+                <td><input class="did-length" type="number" min="1" max="256"></td>
+                <td><select class="did-order">
+                    <option value="big_endian">Big endian</option>
+                    <option value="little_endian">Little endian</option>
+                </select></td>
+                <td><input class="did-scale" type="number" step="any"></td>
+                <td><input class="did-offset" type="number" step="any"></td>
+                <td><input class="did-unit" maxlength="23"></td>
+                <td><input class="did-description" maxlength="127"></td>
+                <td><div class="uds-did-row-actions">
+                    <button type="button" data-did-use>Use</button>
+                    <button type="button" data-did-remove class="danger">Remove</button>
+                </div></td>`;
+
+            const set = (selector, value) => {
+                row.querySelector(selector).value = value;
+            };
+            const identifier = Number.isInteger(definition.identifier)
+                ? definition.identifier
+                : 0xf190;
+
+            set(
+                '.did-identifier',
+                identifier.toString(16).padStart(4, '0').toUpperCase()
+            );
+            set('.did-name', definition.name || 'Vehicle identification');
+            set('.did-type', definition.data_type || 'ascii');
+            set('.did-length', definition.data_length || 17);
+            set('.did-order', definition.byte_order || 'big_endian');
+            set(
+                '.did-scale',
+                Number.isFinite(definition.scale) ? definition.scale : 1
+            );
+            set(
+                '.did-offset',
+                Number.isFinite(definition.offset) ? definition.offset : 0
+            );
+            set('.did-unit', definition.unit || '');
+            set('.did-description', definition.description || '');
+
+            row.querySelector('[data-did-use]').addEventListener(
+                'click',
+                () => {
+                    service.value = 'read_did';
+                    element('uds-did').value =
+                        row.querySelector('.did-identifier').value
+                            .trim()
+                            .toUpperCase();
+                    updateService();
+                    setDidCatalogMessage(
+                        'DID copied to the UDS request form.'
+                    );
+                }
+            );
+            row.querySelector('[data-did-remove]').addEventListener(
+                'click',
+                () => {
+                    row.remove();
+                    updateDidCatalogCount();
+                }
+            );
+
+            didCatalogRows.appendChild(row);
+            updateDidCatalogCount();
+        }
+
+        function clearDidCatalog() {
+            didCatalogSelect.value = '';
+            didCatalogFile.value = '';
+            didCatalogName.value = '';
+            didCatalogDescription.value = '';
+            didCatalogRows.replaceChildren();
+            createDidCatalogRow();
+            didCatalogLoad.disabled = true;
+            didCatalogRemove.disabled = true;
+            setDidCatalogMessage('New DID catalog ready.');
+        }
+
+        function collectDidCatalog() {
+            const name = didCatalogName.value.trim();
+
+            if (!name)
+                throw new Error('Catalog name is required.');
+
+            const definitions = [];
+            const identifiers = new Set();
+
+            for (const row of didCatalogRows.children) {
+                const identifierText =
+                    row.querySelector('.did-identifier').value.trim();
+
+                if (!/^[0-9a-f]{1,4}$/i.test(identifierText))
+                    throw new Error(
+                        'Every DID must contain one to four hexadecimal digits.'
+                    );
+
+                const identifier = parseInt(identifierText, 16);
+
+                if (identifiers.has(identifier))
+                    throw new Error(
+                        `DID 0x${identifierText.toUpperCase()} is duplicated.`
+                    );
+
+                identifiers.add(identifier);
+
+                const dataLength =
+                    Number(row.querySelector('.did-length').value);
+                const scale =
+                    Number(row.querySelector('.did-scale').value);
+                const offset =
+                    Number(row.querySelector('.did-offset').value);
+                const definitionName =
+                    row.querySelector('.did-name').value.trim();
+
+                if (!definitionName)
+                    throw new Error(
+                        `DID 0x${identifierText.toUpperCase()} requires a name.`
+                    );
+
+                if (!Number.isInteger(dataLength) ||
+                    dataLength < 1 || dataLength > 256) {
+
+                    throw new Error(
+                        `DID 0x${identifierText.toUpperCase()} has an invalid length.`
+                    );
+                }
+
+                if (!Number.isFinite(scale) || !Number.isFinite(offset))
+                    throw new Error('Scale and offset must be finite numbers.');
+
+                definitions.push({
+                    identifier,
+                    name : definitionName,
+                    unit : row.querySelector('.did-unit').value.trim(),
+                    description :
+                        row.querySelector('.did-description').value.trim(),
+                    data_type : row.querySelector('.did-type').value,
+                    byte_order : row.querySelector('.did-order').value,
+                    data_length : dataLength,
+                    scale,
+                    offset
+                });
+            }
+
+            return {
+                version : 1,
+                name,
+                description : didCatalogDescription.value.trim(),
+                definitions
+            };
+        }
+
+        function displayDidCatalog(catalog) {
+            didCatalogName.value = catalog.name || '';
+            didCatalogDescription.value = catalog.description || '';
+            didCatalogRows.replaceChildren();
+
+            for (const definition of catalog.definitions || [])
+                createDidCatalogRow(definition);
+
+            updateDidCatalogCount();
+        }
+
+        async function refreshDidCatalogs(selectedFile = '') {
+            const previous = selectedFile || didCatalogSelect.value;
+            didCatalogSelect.disabled = true;
+            didCatalogLoad.disabled = true;
+            didCatalogRemove.disabled = true;
+            didCatalogs = [];
+
+            try {
+                let offset = 0;
+                let hasMore = true;
+
+                while (hasMore) {
+                    const query = new URLSearchParams({
+                        did_catalogs : '1',
+                        offset : String(offset)
+                    });
+                    const reply = await fetch(
+                        `/api/uds?${query.toString()}`,
+                        {cache : 'no-store'}
+                    );
+                    const result = await reply.json();
+
+                    if (!reply.ok || !result.success)
+                        throw new Error(
+                            result.message || `HTTP ${reply.status}`
+                        );
+
+                    didCatalogs.push(...result.did_catalogs);
+                    offset += result.did_catalogs.length;
+                    hasMore = result.has_more;
+                }
+
+                didCatalogSelect.replaceChildren(
+                    new Option('Select DID catalog…', '')
+                );
+
+                for (const catalog of didCatalogs) {
+                    didCatalogSelect.add(
+                        new Option(
+                            `${catalog.name} · ${catalog.definition_count} DIDs`,
+                            catalog.file_name
+                        )
+                    );
+                }
+
+                if (didCatalogs.some(
+                        catalog => catalog.file_name === previous
+                    )) {
+
+                    didCatalogSelect.value = previous;
+                }
+
+                setDidCatalogMessage(
+                    `${didCatalogs.length} stored DID catalogs available.`
+                );
+            } catch (error) {
+                didCatalogSelect.replaceChildren(
+                    new Option('Catalogs unavailable', '')
+                );
+                setDidCatalogMessage(error.message, true);
+            } finally {
+                didCatalogSelect.disabled = false;
+                didCatalogLoad.disabled = !didCatalogSelect.value;
+                didCatalogRemove.disabled = !didCatalogSelect.value;
+            }
+        }
+
+        async function loadDidCatalog() {
+            const fileName = didCatalogSelect.value;
+
+            if (!fileName)
+                throw new Error('Select a DID catalog first.');
+
+            const query = new URLSearchParams({did_catalog : fileName});
+            const reply = await fetch(
+                `/api/uds?${query.toString()}`,
+                {cache : 'no-store'}
+            );
+            const result = await reply.json();
+
+            if (!reply.ok || !result.success)
+                throw new Error(result.message || `HTTP ${reply.status}`);
+
+            didCatalogFile.value = result.file_name;
+            displayDidCatalog(result.did_catalog);
+            setDidCatalogMessage(
+                `Loaded DID catalog ${result.did_catalog.name}.`
+            );
+        }
+
         function updateFormat() {
             const fd = format.value === 'fd';
             brs.disabled = !fd;
@@ -7013,6 +7313,148 @@
                         : selected === 'security_unlock'
                             ? 'Request seed and unlock'
                             : 'Send UDS request';
+        }
+
+        function decodeDidResponse(payloadText) {
+            const bytes = payloadText
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .map(value => parseInt(value, 16));
+
+            if (bytes.length < 2 ||
+                bytes.some(value => !Number.isInteger(value) ||
+                    value < 0 || value > 0xff)) {
+
+                return null;
+            }
+
+            const identifier = (bytes[0] << 8) | bytes[1];
+            let catalog = null;
+
+            try {
+                catalog = collectDidCatalog();
+            } catch (_) {
+                return null;
+            }
+
+            const definition = catalog.definitions.find(
+                item => item.identifier === identifier
+            );
+            const identifierText =
+                identifier.toString(16).padStart(4, '0').toUpperCase();
+            const data = bytes.slice(2);
+            const rawText = data
+                .map(value => value.toString(16).padStart(2, '0').toUpperCase())
+                .join(' ');
+
+            if (!definition) {
+                return `DID 0x${identifierText}\n` +
+                    `No definition in ${catalog.name}.\n\n` +
+                    `Raw: ${rawText || 'empty'}`;
+            }
+
+            const lines = [
+                `${definition.name} · DID 0x${identifierText}`
+            ];
+
+            if (data.length !== definition.data_length) {
+                lines.push(
+                    `Length mismatch: received ${data.length} bytes, ` +
+                    `catalog expects ${definition.data_length}.`,
+                    '',
+                    `Raw: ${rawText || 'empty'}`
+                );
+
+                return lines.join('\n');
+            }
+
+            try {
+                if (definition.data_type === 'ascii') {
+                    if (data.some(value => value < 0x20 || value > 0x7e))
+                        throw new Error('Data contains non-printable ASCII bytes.');
+
+                    lines.push(
+                        `Value: ${String.fromCharCode(...data)}`
+                    );
+                } else if (definition.data_type === 'utf8') {
+                    const text = new TextDecoder(
+                        'utf-8',
+                        {fatal : true}
+                    ).decode(Uint8Array.from(data));
+
+                    lines.push(`Value: ${text}`);
+                } else if (definition.data_type === 'bytes') {
+                    lines.push(`Value: ${rawText || 'empty'}`);
+                } else if (definition.data_type === 'float') {
+                    if (data.length !== 4 && data.length !== 8)
+                        throw new Error('Float values require 4 or 8 bytes.');
+
+                    const ordered = definition.byte_order === 'little_endian';
+                    const view = new DataView(Uint8Array.from(data).buffer);
+                    const rawValue = data.length === 4
+                        ? view.getFloat32(0, ordered)
+                        : view.getFloat64(0, ordered);
+                    const physical =
+                        rawValue * definition.scale + definition.offset;
+
+                    if (!Number.isFinite(rawValue) ||
+                        !Number.isFinite(physical)) {
+
+                        throw new Error('Decoded floating-point value is not finite.');
+                    }
+
+                    lines.push(
+                        `Raw value: ${rawValue}`,
+                        `Value: ${physical}${definition.unit
+                            ? ` ${definition.unit}`
+                            : ''}`
+                    );
+                } else {
+                    if (data.length > 8)
+                        throw new Error('Integer values cannot exceed 8 bytes.');
+
+                    const ordered = definition.byte_order === 'little_endian'
+                        ? [...data].reverse()
+                        : data;
+                    let rawValue = 0n;
+
+                    for (const byte of ordered)
+                        rawValue = (rawValue << 8n) | BigInt(byte);
+
+                    let numericValue = rawValue;
+
+                    if (definition.data_type === 'signed') {
+                        const bitCount = BigInt(data.length * 8);
+                        const signBit = 1n << (bitCount - 1n);
+
+                        if ((rawValue & signBit) !== 0n)
+                            numericValue = rawValue - (1n << bitCount);
+                    }
+
+                    const physical =
+                        Number(numericValue) * definition.scale +
+                        definition.offset;
+
+                    if (!Number.isFinite(physical))
+                        throw new Error('Decoded numeric value is not finite.');
+
+                    lines.push(
+                        `Raw value: ${numericValue.toString()}`,
+                        `Value: ${physical}${definition.unit
+                            ? ` ${definition.unit}`
+                            : ''}`
+                    );
+                }
+            } catch (error) {
+                lines.push(`Decode error: ${error.message}`);
+            }
+
+            if (definition.description)
+                lines.push(`Description: ${definition.description}`);
+
+            lines.push('', `Raw: ${rawText || 'empty'}`);
+            return lines.join('\n');
         }
 
         function decodeDtcResponse(payloadText) {
@@ -7256,8 +7698,10 @@
                         `Positive · SID 0x${data.response_sid
                             .toString(16).padStart(2, '0').toUpperCase()}`;
                     const decoded =
-                        data.response_sid === 0x59
-                            ? decodeDtcResponse(data.payload || '')
+                        data.response_sid === 0x62
+                            ? decodeDidResponse(data.payload || '')
+                            : data.response_sid === 0x59
+                                ? decodeDtcResponse(data.payload || '')
                             : data.response_sid === 0x71
                                 ? decodeRoutineResponse(data.payload || '')
                                 : data.response_sid === 0x67
@@ -7630,6 +8074,117 @@
             }
         });
 
+        didCatalogSelect.addEventListener('change', () => {
+            const fileName = didCatalogSelect.value;
+
+            didCatalogLoad.disabled = !fileName;
+            didCatalogRemove.disabled = !fileName;
+
+            if (fileName)
+                didCatalogFile.value = fileName;
+        });
+
+        element('uds-did-catalog-refresh').addEventListener(
+            'click',
+            () => refreshDidCatalogs()
+        );
+
+        didCatalogLoad.addEventListener('click', async () => {
+            try {
+                await loadDidCatalog();
+            } catch (error) {
+                setDidCatalogMessage(error.message, true);
+            }
+        });
+
+        element('uds-did-catalog-new').addEventListener(
+            'click',
+            clearDidCatalog
+        );
+
+        element('uds-did-catalog-add').addEventListener('click', () => {
+            try {
+                createDidCatalogRow({
+                    identifier : 0,
+                    name : '',
+                    data_type : 'unsigned',
+                    data_length : 1,
+                    byte_order : 'big_endian',
+                    scale : 1,
+                    offset : 0
+                });
+            } catch (error) {
+                setDidCatalogMessage(error.message, true);
+            }
+        });
+
+        element('uds-did-catalog-save').addEventListener(
+            'click',
+            async () => {
+                try {
+                    let fileName = didCatalogFile.value.trim();
+
+                    if (!fileName)
+                        throw new Error('Catalog file name is required.');
+
+                    if (!fileName.toLowerCase().endsWith('.json'))
+                        fileName += '.json';
+
+                    if (!/^[a-z0-9_.-]+\.json$/i.test(fileName) ||
+                        fileName.startsWith('.') ||
+                        fileName.includes('..')) {
+
+                        throw new Error(
+                            'Use a safe local file name ending in .json.'
+                        );
+                    }
+
+                    const catalog = collectDidCatalog();
+
+                    await command({
+                        action : 'did_catalog_save',
+                        file_name : fileName,
+                        did_catalog : catalog
+                    });
+
+                    didCatalogFile.value = fileName;
+                    await refreshDidCatalogs(fileName);
+                    didCatalogSelect.value = fileName;
+                    didCatalogLoad.disabled = false;
+                    didCatalogRemove.disabled = false;
+                    setDidCatalogMessage(
+                        `Saved DID catalog ${fileName}.`
+                    );
+                } catch (error) {
+                    setDidCatalogMessage(error.message, true);
+                }
+            }
+        );
+
+        didCatalogRemove.addEventListener('click', async () => {
+            const fileName = didCatalogSelect.value;
+
+            if (!fileName ||
+                !window.confirm(`Delete DID catalog ${fileName}?`)) {
+
+                return;
+            }
+
+            try {
+                await command({
+                    action : 'did_catalog_remove',
+                    file_name : fileName
+                });
+                clearDidCatalog();
+                await refreshDidCatalogs();
+                setDidCatalogMessage(
+                    `Deleted DID catalog ${fileName}.`
+                );
+            } catch (error) {
+                setDidCatalogMessage(error.message, true);
+            }
+        });
+
         format.addEventListener('change', updateFormat);
         service.addEventListener('change', updateService);
         element('uds-dtc-subfunction').addEventListener(
@@ -7638,6 +8193,8 @@
         );
         updateFormat();
         updateService();
+        createDidCatalogRow();
+        refreshDidCatalogs();
         refresh();
         setInterval(refresh, 300);
     }

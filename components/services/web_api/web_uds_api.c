@@ -22,6 +22,7 @@
 
 #include "app_task_priorities.h"
 #include "uds_client.h"
+#include "uds_did_catalog_service.h"
 #include "uds_download.h"
 #include "uds_profile_service.h"
 #include "uds_security_provider.h"
@@ -30,7 +31,8 @@
 #include "web_api_common.h"
 
 #define WEB_UDS_BUFFER_SIZE       (1024U)
-#define WEB_UDS_BODY_MAX_SIZE     (4096U)
+#define WEB_UDS_BODY_MAX_SIZE \
+    (UDS_DID_CATALOG_FILE_MAX_SIZE + 1024U)
 #define WEB_UDS_LOCK_TIMEOUT_MS   (100U)
 #define WEB_UDS_WORKER_TASK_STACK_SIZE    (4096U)
 #define WEB_UDS_WORKER_PERIOD_MS          (10U)
@@ -43,6 +45,7 @@
 #define WEB_UDS_JOURNAL_PATH_MAX_SIZE    (128U)
 #define WEB_UDS_JOURNAL_LINE_MAX_SIZE    (384U)
 #define WEB_UDS_PROFILE_LIST_CAPACITY     (16U)
+#define WEB_UDS_DID_CATALOG_LIST_CAPACITY (16U)
 #define WEB_UDS_QUERY_MAX_SIZE            (192U)
 
 typedef enum
@@ -293,6 +296,18 @@ static esp_err_t web_uds_profile_remove(
     const cJSON *root
 );
 
+static esp_err_t web_uds_did_catalog_get_handler(
+    httpd_req_t *request
+);
+
+static esp_err_t web_uds_did_catalog_save(
+    const cJSON *root
+);
+
+static esp_err_t web_uds_did_catalog_remove(
+    const cJSON *root
+);
+
 static esp_err_t web_uds_post_handler(
     httpd_req_t *request
 );
@@ -400,7 +415,11 @@ static esp_err_t web_uds_receive_json(
         return ESP_ERR_INVALID_SIZE;
     }
 
-    char *body = malloc(request->content_len + 1U);
+    char *body = heap_caps_malloc(
+        request->content_len + 1U,
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
 
     if (body == NULL) {
         return ESP_ERR_NO_MEM;
@@ -417,7 +436,7 @@ static esp_err_t web_uds_receive_json(
             );
 
         if (count <= 0) {
-            free(body);
+            heap_caps_free(body);
             return ESP_FAIL;
         }
 
@@ -433,7 +452,7 @@ static esp_err_t web_uds_receive_json(
             true
         );
 
-    free(body);
+    heap_caps_free(body);
 
     return (*root != NULL)
         ? ESP_OK
@@ -2803,10 +2822,388 @@ static esp_err_t web_uds_profile_remove(
         : ESP_ERR_INVALID_ARG;
 }
 
+static esp_err_t web_uds_did_catalog_send_list(
+    httpd_req_t *request,
+    size_t offset
+)
+{
+    uds_did_catalog_summary_t *catalogs = heap_caps_calloc(
+        WEB_UDS_DID_CATALOG_LIST_CAPACITY,
+        sizeof(*catalogs),
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+
+    if (catalogs == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t count = 0U;
+    bool has_more = false;
+    esp_err_t result = uds_did_catalog_service_list(
+        offset,
+        catalogs,
+        WEB_UDS_DID_CATALOG_LIST_CAPACITY,
+        &count,
+        &has_more
+    );
+    cJSON *response = NULL;
+    cJSON *items = NULL;
+
+    if (result == ESP_OK) {
+        response = cJSON_CreateObject();
+        items = cJSON_CreateArray();
+
+        if ((response == NULL) ||
+            (items == NULL) ||
+            !cJSON_AddItemToObject(
+                response,
+                "did_catalogs",
+                items
+            )) {
+
+            cJSON_Delete(response);
+            cJSON_Delete(items);
+            response = NULL;
+            items = NULL;
+            result = ESP_ERR_NO_MEM;
+        }
+    }
+
+    for (size_t index = 0U;
+         (result == ESP_OK) && (index < count);
+         ++index) {
+
+        cJSON *item = cJSON_CreateObject();
+
+        if ((item == NULL) ||
+            (cJSON_AddStringToObject(
+                item,
+                "file_name",
+                catalogs[index].file_name
+            ) == NULL) ||
+            (cJSON_AddStringToObject(
+                item,
+                "name",
+                catalogs[index].name
+            ) == NULL) ||
+            (cJSON_AddStringToObject(
+                item,
+                "description",
+                catalogs[index].description
+            ) == NULL) ||
+            (cJSON_AddNumberToObject(
+                item,
+                "definition_count",
+                catalogs[index].definition_count
+            ) == NULL) ||
+            !cJSON_AddItemToArray(items, item)) {
+
+            cJSON_Delete(item);
+            result = ESP_ERR_NO_MEM;
+        }
+    }
+
+    if ((result == ESP_OK) &&
+        ((cJSON_AddBoolToObject(
+            response,
+            "success",
+            true
+        ) == NULL) ||
+         (cJSON_AddNumberToObject(
+            response,
+            "offset",
+            offset
+        ) == NULL) ||
+         (cJSON_AddBoolToObject(
+            response,
+            "has_more",
+            has_more
+        ) == NULL))) {
+
+        result = ESP_ERR_NO_MEM;
+    }
+
+    heap_caps_free(catalogs);
+
+    if (result != ESP_OK) {
+        cJSON_Delete(response);
+        return web_api_send_message(
+            request,
+            (result == ESP_ERR_INVALID_STATE)
+                ? "409 Conflict"
+                : "500 Internal Server Error",
+            false,
+            esp_err_to_name(result)
+        );
+    }
+
+    result = web_api_send_json(request, response);
+    cJSON_Delete(response);
+    return result;
+}
+
+static esp_err_t web_uds_did_catalog_send_one(
+    httpd_req_t *request,
+    const char *file_name
+)
+{
+    uds_did_definition_t *definitions = heap_caps_calloc(
+        UDS_DID_CATALOG_DEFINITION_MAX_COUNT,
+        sizeof(*definitions),
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+
+    if (definitions == NULL) {
+        return web_api_send_message(
+            request,
+            "500 Internal Server Error",
+            false,
+            "Unable to allocate DID catalog storage"
+        );
+    }
+
+    uds_did_catalog_document_t document = {
+        .definitions = definitions,
+        .capacity = UDS_DID_CATALOG_DEFINITION_MAX_COUNT,
+    };
+    esp_err_t result = uds_did_catalog_service_load(
+        file_name,
+        &document
+    );
+    char *json = NULL;
+
+    if (result == ESP_OK) {
+        result = uds_did_catalog_service_encode_json(
+            &document,
+            &json
+        );
+    }
+
+    heap_caps_free(definitions);
+
+    cJSON *catalog_json = (json != NULL)
+        ? cJSON_Parse(json)
+        : NULL;
+    free(json);
+
+    if ((result == ESP_OK) &&
+        (catalog_json == NULL)) {
+
+        result = ESP_ERR_NO_MEM;
+    }
+
+    cJSON *response = NULL;
+
+    if (result == ESP_OK) {
+        response = cJSON_CreateObject();
+
+        if ((response == NULL) ||
+            (cJSON_AddBoolToObject(
+                response,
+                "success",
+                true
+            ) == NULL) ||
+            (cJSON_AddStringToObject(
+                response,
+                "file_name",
+                file_name
+            ) == NULL) ||
+            !cJSON_AddItemToObject(
+                response,
+                "did_catalog",
+                catalog_json
+            )) {
+
+            cJSON_Delete(response);
+            cJSON_Delete(catalog_json);
+            response = NULL;
+            result = ESP_ERR_NO_MEM;
+        }
+    }
+
+    if (result != ESP_OK) {
+        cJSON_Delete(catalog_json);
+        return web_api_send_message(
+            request,
+            (result == ESP_ERR_NOT_FOUND)
+                ? "404 Not Found"
+                : "400 Bad Request",
+            false,
+            esp_err_to_name(result)
+        );
+    }
+
+    result = web_api_send_json(request, response);
+    cJSON_Delete(response);
+    return result;
+}
+
+static esp_err_t web_uds_did_catalog_get_handler(
+    httpd_req_t *request
+)
+{
+    const size_t query_length =
+        httpd_req_get_url_query_len(request);
+
+    if ((query_length == 0U) ||
+        (query_length >= WEB_UDS_QUERY_MAX_SIZE)) {
+
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    char query[WEB_UDS_QUERY_MAX_SIZE];
+
+    if (httpd_req_get_url_query_str(
+            request,
+            query,
+            sizeof(query)
+        ) != ESP_OK) {
+
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    char file_name[UDS_DID_CATALOG_FILE_NAME_MAX_LENGTH];
+
+    if (httpd_query_key_value(
+            query,
+            "did_catalog",
+            file_name,
+            sizeof(file_name)
+        ) == ESP_OK) {
+
+        return web_uds_did_catalog_send_one(
+            request,
+            file_name
+        );
+    }
+
+    char catalogs[4];
+
+    if (httpd_query_key_value(
+            query,
+            "did_catalogs",
+            catalogs,
+            sizeof(catalogs)
+        ) != ESP_OK) {
+
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    size_t offset = 0U;
+    char offset_text[16];
+
+    if (httpd_query_key_value(
+            query,
+            "offset",
+            offset_text,
+            sizeof(offset_text)
+        ) == ESP_OK) {
+
+        char *end = NULL;
+        const unsigned long parsed =
+            strtoul(offset_text, &end, 10);
+
+        if ((end == offset_text) ||
+            (*end != '\0') ||
+            (parsed > SIZE_MAX)) {
+
+            return web_api_send_message(
+                request,
+                "400 Bad Request",
+                false,
+                "Invalid DID catalog-list offset"
+            );
+        }
+
+        offset = (size_t)parsed;
+    }
+
+    return web_uds_did_catalog_send_list(
+        request,
+        offset
+    );
+}
+
+static esp_err_t web_uds_did_catalog_save(
+    const cJSON *root
+)
+{
+    const cJSON *file_name =
+        cJSON_GetObjectItemCaseSensitive(root, "file_name");
+    const cJSON *catalog_json =
+        cJSON_GetObjectItemCaseSensitive(root, "did_catalog");
+
+    if (!cJSON_IsString(file_name) ||
+        !cJSON_IsObject(catalog_json)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char *json = cJSON_PrintUnformatted(catalog_json);
+
+    if (json == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    uds_did_definition_t *definitions = heap_caps_calloc(
+        UDS_DID_CATALOG_DEFINITION_MAX_COUNT,
+        sizeof(*definitions),
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+
+    if (definitions == NULL) {
+        free(json);
+        return ESP_ERR_NO_MEM;
+    }
+
+    uds_did_catalog_document_t document = {
+        .definitions = definitions,
+        .capacity = UDS_DID_CATALOG_DEFINITION_MAX_COUNT,
+    };
+    esp_err_t result = uds_did_catalog_service_decode_json(
+        json,
+        &document
+    );
+
+    free(json);
+
+    if (result == ESP_OK) {
+        result = uds_did_catalog_service_save(
+            file_name->valuestring,
+            &document
+        );
+    }
+
+    heap_caps_free(definitions);
+    return result;
+}
+
+static esp_err_t web_uds_did_catalog_remove(
+    const cJSON *root
+)
+{
+    const cJSON *file_name =
+        cJSON_GetObjectItemCaseSensitive(root, "file_name");
+
+    return cJSON_IsString(file_name)
+        ? uds_did_catalog_service_remove(file_name->valuestring)
+        : ESP_ERR_INVALID_ARG;
+}
+
 static esp_err_t web_uds_get_handler(
     httpd_req_t *request
 )
 {
+    const esp_err_t did_catalog_result =
+        web_uds_did_catalog_get_handler(request);
+
+    if (did_catalog_result != ESP_ERR_NOT_FOUND) {
+        return did_catalog_result;
+    }
+
     const esp_err_t profile_result =
         web_uds_profile_get_handler(request);
 
@@ -3153,14 +3550,31 @@ static esp_err_t web_uds_post_handler(
 
     if (cJSON_IsString(action) &&
         ((strcmp(action->valuestring, "profile_save") == 0) ||
-         (strcmp(action->valuestring, "profile_remove") == 0))) {
+         (strcmp(action->valuestring, "profile_remove") == 0) ||
+         (strcmp(action->valuestring, "did_catalog_save") == 0) ||
+         (strcmp(action->valuestring, "did_catalog_remove") == 0))) {
 
-        result = (strcmp(
-            action->valuestring,
-            "profile_save"
-        ) == 0)
-            ? web_uds_profile_save(root)
-            : web_uds_profile_remove(root);
+        if (strcmp(
+                action->valuestring,
+                "profile_save"
+            ) == 0) {
+
+            result = web_uds_profile_save(root);
+        } else if (strcmp(
+                       action->valuestring,
+                       "profile_remove"
+                   ) == 0) {
+
+            result = web_uds_profile_remove(root);
+        } else if (strcmp(
+                       action->valuestring,
+                       "did_catalog_save"
+                   ) == 0) {
+
+            result = web_uds_did_catalog_save(root);
+        } else {
+            result = web_uds_did_catalog_remove(root);
+        }
 
         cJSON_Delete(root);
 
@@ -3174,7 +3588,7 @@ static esp_err_t web_uds_post_handler(
                     : "409 Conflict",
             result == ESP_OK,
             (result == ESP_OK)
-                ? "UDS profile updated"
+                ? "UDS persistent data updated"
                 : esp_err_to_name(result)
         );
     }
