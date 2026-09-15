@@ -7955,6 +7955,8 @@
                 data.download_block_retry
                     ? `${data.download_retries || 0} · current ${data.download_block_retry}`
                     : data.download_retries || 0;
+            element('program-routine-polls').textContent =
+                data.download_routine_polls || 0;
             element('program-nrc').textContent = data.download_nrc
                 ? `0x${Number(data.download_nrc)
                     .toString(16).padStart(2, '0').toUpperCase()} · ` +
@@ -8135,6 +8137,20 @@
                         false,
                         'Erase option record'
                     ),
+                    erase_status_enabled :
+                        element('program-erase-status-enabled').checked,
+                    erase_status_offset :
+                        Number(element('program-erase-status-offset').value),
+                    erase_status_pending : parseHex(
+                        element('program-erase-status-pending'),
+                        0xff,
+                        'Erase pending status'
+                    ),
+                    erase_status_success : parseHex(
+                        element('program-erase-status-success'),
+                        0xff,
+                        'Erase success status'
+                    ),
                     verify_enabled :
                         element('program-verify-enabled').checked,
                     verify_routine_id : parseHex(
@@ -8146,6 +8162,26 @@
                         element('program-verify-record'),
                         false,
                         'Verify option record'
+                    ),
+                    verify_status_enabled :
+                        element('program-verify-status-enabled').checked,
+                    verify_status_offset :
+                        Number(element('program-verify-status-offset').value),
+                    verify_status_pending : parseHex(
+                        element('program-verify-status-pending'),
+                        0xff,
+                        'Verify pending status'
+                    ),
+                    verify_status_success : parseHex(
+                        element('program-verify-status-success'),
+                        0xff,
+                        'Verify success status'
+                    ),
+                    routine_poll_interval_ms : Number(
+                        element('program-routine-poll-interval').value
+                    ),
+                    routine_poll_maximum : Number(
+                        element('program-routine-poll-maximum').value
                     ),
                     reset_enabled :
                         element('program-reset-enabled').checked,

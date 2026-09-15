@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.ico">
     <title>UDS Programming · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=34">
-    <script src="spectra.js?v=34" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=35">
+    <script src="spectra.js?v=35" defer></script>
 </head>
 
 <body class="page-uds-programming">
@@ -220,12 +220,50 @@
                             ECU reset type
                             <input id="program-reset-type" value="01" spellcheck="false">
                         </label>
+
+                        <label>
+                            Routine poll interval (ms)
+                            <input id="program-routine-poll-interval" type="number" min="1" max="60000" value="250">
+                        </label>
+
+                        <label>
+                            Maximum routine polls
+                            <input id="program-routine-poll-maximum" type="number" min="1" max="100000" value="240">
+                        </label>
+
+                        <label>
+                            Erase status offset
+                            <input id="program-erase-status-offset" type="number" min="0" max="255" value="0">
+                        </label>
+
+                        <label>
+                            Erase pending / success
+                            <span class="program-inline-fields">
+                                <input id="program-erase-status-pending" value="00" maxlength="2" spellcheck="false" aria-label="Erase pending status">
+                                <input id="program-erase-status-success" value="01" maxlength="2" spellcheck="false" aria-label="Erase success status">
+                            </span>
+                        </label>
+
+                        <label>
+                            Verify status offset
+                            <input id="program-verify-status-offset" type="number" min="0" max="255" value="0">
+                        </label>
+
+                        <label>
+                            Verify pending / success
+                            <span class="program-inline-fields">
+                                <input id="program-verify-status-pending" value="00" maxlength="2" spellcheck="false" aria-label="Verify pending status">
+                                <input id="program-verify-status-success" value="01" maxlength="2" spellcheck="false" aria-label="Verify success status">
+                            </span>
+                        </label>
                     </div>
 
                     <div class="program-options">
                         <label><input id="program-security-enabled" type="checkbox">Unlock automatically after NRC 0x33</label>
                         <label><input id="program-erase-enabled" type="checkbox">Erase memory before download</label>
+                        <label><input id="program-erase-status-enabled" type="checkbox">Interpret erase routine status byte</label>
                         <label><input id="program-verify-enabled" type="checkbox">Verify memory after download</label>
+                        <label><input id="program-verify-status-enabled" type="checkbox">Interpret verify routine status byte</label>
                         <label><input id="program-reset-enabled" type="checkbox">Reset ECU after verification</label>
                         <label><input id="program-restore-session" type="checkbox" checked>Restore default session on completion or failure</label>
                     </div>
@@ -260,6 +298,7 @@
                     <div><dt>Sequence counter</dt><dd id="program-sequence">—</dd></div>
                     <div><dt>Acknowledged blocks</dt><dd id="program-blocks">0</dd></div>
                     <div><dt>Retries</dt><dd id="program-retries">0</dd></div>
+                    <div><dt>Routine polls</dt><dd id="program-routine-polls">0</dd></div>
                     <div><dt>Last NRC</dt><dd id="program-nrc">None</dd></div>
                     <div><dt>Security</dt><dd id="program-security-state">Not requested</dd></div>
                     <div><dt>Default session</dt><dd id="program-session-state">Pending</dd></div>

@@ -20,6 +20,8 @@ extern "C" {
 #define UDS_DOWNLOAD_DEFAULT_MAXIMUM_BLOCK_RETRIES (3U)
 #define UDS_DOWNLOAD_DEFAULT_OPERATION_TIMEOUT_US  (600000000ULL)
 #define UDS_DOWNLOAD_ROUTINE_RECORD_MAX_LENGTH      (256U)
+#define UDS_DOWNLOAD_DEFAULT_ROUTINE_POLL_INTERVAL_US (250000ULL)
+#define UDS_DOWNLOAD_DEFAULT_MAXIMUM_ROUTINE_POLLS    (240U)
 
 typedef enum
 {
@@ -60,6 +62,22 @@ typedef esp_err_t (*uds_download_security_algorithm_cb_t)(
     void *context
 );
 
+typedef enum
+{
+    UDS_DOWNLOAD_ROUTINE_RESULT_COMPLETE = 0,
+    UDS_DOWNLOAD_ROUTINE_RESULT_PENDING,
+    UDS_DOWNLOAD_ROUTINE_RESULT_ERROR,
+
+} uds_download_routine_result_t;
+
+typedef uds_download_routine_result_t
+(*uds_download_routine_result_cb_t)(
+    uint16_t routine_identifier,
+    const uint8_t *status_record,
+    size_t status_record_length,
+    void *context
+);
+
 typedef struct
 {
     uds_client_config_t client;
@@ -87,9 +105,15 @@ typedef struct
     uint16_t erase_routine_identifier;
     const uint8_t *erase_option_record;
     size_t erase_option_record_length;
+    uds_download_routine_result_cb_t erase_result;
+    void *erase_result_context;
     uint16_t verify_routine_identifier;
     const uint8_t *verify_option_record;
     size_t verify_option_record_length;
+    uds_download_routine_result_cb_t verify_result;
+    void *verify_result_context;
+    uint64_t routine_poll_interval_us;
+    uint32_t maximum_routine_polls;
     uint8_t reset_type;
     bool restore_default_session;
 
@@ -110,6 +134,7 @@ typedef struct
     esp_err_t last_result;
     bool security_unlocked;
     bool default_session_restored;
+    uint32_t routine_poll_count;
 
 } uds_download_progress_t;
 
@@ -130,6 +155,7 @@ typedef struct
     uint8_t last_negative_response_code;
     uint32_t acknowledged_blocks;
     uint32_t retry_count;
+    uint32_t routine_poll_count;
     uint64_t started_at_us;
     uint64_t operation_timeout_us;
     bool action_pending;
@@ -137,7 +163,11 @@ typedef struct
     bool security_unlocked;
     bool default_session_restored;
     bool restoring_after_error;
+    bool routine_result_polling;
     size_t security_seed_length;
+    uint64_t action_due_us;
+    uint64_t routine_poll_interval_us;
+    uint32_t maximum_routine_polls;
     uds_download_state_t security_resume_state;
     esp_err_t operation_result;
     uint8_t operation_negative_response_code;

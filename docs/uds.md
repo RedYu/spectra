@@ -87,6 +87,16 @@ after NRC `0x33` when credentials are configured. On a terminal failure the
 pipeline preserves the original result while making a best-effort transition
 back to the default session.
 
+Erase and verification routines support long-running ECU operations. A
+positive StartRoutine response starts delayed RequestRoutineResults (`0x31
+0x03`) polling instead of being treated as final completion. The polling
+interval and maximum number of result requests are configurable. NRC `0x78`
+uses the UDS client P2* timeout, while NRC `0x21` delays and repeats the result
+request without restarting the routine. An optional application callback can
+interpret the OEM routine status record as pending, complete, or failed. The
+programming web page provides a simple status-byte policy with configurable
+offset, pending value, and success value for erase and verification routines.
+
 The UDS Web API connects this state machine to an SD-card file. Starting an
 automatic download reuses the configured diagnostic transport, closes the
 manual client to prevent duplicate ISO-TP channels, and creates a temporary

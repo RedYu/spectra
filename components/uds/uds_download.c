@@ -7,6 +7,8 @@
 
 #include <string.h>
 
+#include "esp_timer.h"
+
 static void uds_download_client_callback(
     const uds_client_event_t *event,
     void *context
@@ -35,12 +37,13 @@ static esp_err_t uds_download_submit_action(
 
 static bool uds_download_routine_response_valid(
     const uds_client_event_t *event,
+    uint8_t control_type,
     uint16_t routine_identifier
 )
 {
     return (event->response.payload_length >= 3U) &&
            ((event->response.payload[0] & 0x7FU) ==
-            UDS_ROUTINE_CONTROL_START) &&
+            control_type) &&
            (event->response.payload[1] ==
             (uint8_t)(routine_identifier >> 8U)) &&
            (event->response.payload[2] ==
@@ -220,6 +223,14 @@ esp_err_t uds_download_open(
         (config->operation_timeout_us != 0U)
             ? config->operation_timeout_us
             : UDS_DOWNLOAD_DEFAULT_OPERATION_TIMEOUT_US;
+    download->routine_poll_interval_us =
+        (config->routine_poll_interval_us != 0U)
+            ? config->routine_poll_interval_us
+            : UDS_DOWNLOAD_DEFAULT_ROUTINE_POLL_INTERVAL_US;
+    download->maximum_routine_polls =
+        (config->maximum_routine_polls != 0U)
+            ? config->maximum_routine_polls
+            : UDS_DOWNLOAD_DEFAULT_MAXIMUM_ROUTINE_POLLS;
 
     const esp_err_t result =
         uds_client_open(
@@ -289,6 +300,9 @@ esp_err_t uds_download_start(
     download->restoring_after_error = false;
     download->security_seed_length = 0U;
     download->security_resume_state = UDS_DOWNLOAD_CLOSED;
+    download->routine_result_polling = false;
+    download->routine_poll_count = 0U;
+    download->action_due_us = 0U;
     download->operation_result = ESP_OK;
     download->operation_negative_response_code = 0U;
 
@@ -406,6 +420,10 @@ esp_err_t uds_download_poll(
         return ESP_OK;
     }
 
+    if (now_us < download->action_due_us) {
+        return ESP_OK;
+    }
+
     if (download->state == UDS_DOWNLOAD_TRANSFERRING) {
         if (!download->retry_pending) {
             const uint64_t remaining =
@@ -518,10 +536,16 @@ static esp_err_t uds_download_submit_action(
             result =
                 uds_client_routine_control(
                     &download->client,
-                    UDS_ROUTINE_CONTROL_START,
+                    download->routine_result_polling
+                        ? UDS_ROUTINE_CONTROL_REQUEST_RESULTS
+                        : UDS_ROUTINE_CONTROL_START,
                     download->config.erase_routine_identifier,
-                    download->config.erase_option_record,
-                    download->config.erase_option_record_length,
+                    download->routine_result_polling
+                        ? NULL
+                        : download->config.erase_option_record,
+                    download->routine_result_polling
+                        ? 0U
+                        : download->config.erase_option_record_length,
                     false,
                     now_us
                 );
@@ -544,10 +568,16 @@ static esp_err_t uds_download_submit_action(
             result =
                 uds_client_routine_control(
                     &download->client,
-                    UDS_ROUTINE_CONTROL_START,
+                    download->routine_result_polling
+                        ? UDS_ROUTINE_CONTROL_REQUEST_RESULTS
+                        : UDS_ROUTINE_CONTROL_START,
                     download->config.verify_routine_identifier,
-                    download->config.verify_option_record,
-                    download->config.verify_option_record_length,
+                    download->routine_result_polling
+                        ? NULL
+                        : download->config.verify_option_record,
+                    download->routine_result_polling
+                        ? 0U
+                        : download->config.verify_option_record_length,
                     false,
                     now_us
                 );
@@ -636,6 +666,7 @@ esp_err_t uds_download_get_progress(
         .security_unlocked = download->security_unlocked,
         .default_session_restored =
             download->default_session_restored,
+        .routine_poll_count = download->routine_poll_count,
     };
 
     return ESP_OK;
@@ -786,18 +817,63 @@ static void uds_download_client_callback(
                (download->state ==
                 UDS_DOWNLOAD_ERASING_MEMORY)) {
 
-        if (uds_download_routine_response_valid(
+        const uint8_t control_type =
+            download->routine_result_polling
+                ? UDS_ROUTINE_CONTROL_REQUEST_RESULTS
+                : UDS_ROUTINE_CONTROL_START;
+
+        if (!uds_download_routine_response_valid(
                 event,
+                control_type,
                 download->config.erase_routine_identifier
             )) {
 
-            download->state = UDS_DOWNLOAD_REQUESTING_DOWNLOAD;
-            download->action_pending = true;
-        } else {
             uds_download_fail(
                 download,
                 ESP_ERR_INVALID_RESPONSE
             );
+        } else if (!download->routine_result_polling) {
+            download->routine_result_polling = true;
+            download->routine_poll_count = 0U;
+            download->action_due_us =
+                (uint64_t)esp_timer_get_time() +
+                download->routine_poll_interval_us;
+            download->action_pending = true;
+        } else {
+            download->routine_poll_count++;
+            const uds_download_routine_result_t result =
+                (download->config.erase_result != NULL)
+                    ? download->config.erase_result(
+                        download->config.erase_routine_identifier,
+                        &event->response.payload[3],
+                        event->response.payload_length - 3U,
+                        download->config.erase_result_context
+                    )
+                    : UDS_DOWNLOAD_ROUTINE_RESULT_COMPLETE;
+
+            if (result == UDS_DOWNLOAD_ROUTINE_RESULT_COMPLETE) {
+                download->routine_result_polling = false;
+                download->action_due_us = 0U;
+                download->state =
+                    UDS_DOWNLOAD_REQUESTING_DOWNLOAD;
+                download->action_pending = true;
+            } else if ((result ==
+                        UDS_DOWNLOAD_ROUTINE_RESULT_PENDING) &&
+                       (download->routine_poll_count <
+                        download->maximum_routine_polls)) {
+
+                download->action_due_us =
+                    (uint64_t)esp_timer_get_time() +
+                    download->routine_poll_interval_us;
+                download->action_pending = true;
+            } else {
+                uds_download_fail(
+                    download,
+                    (result == UDS_DOWNLOAD_ROUTINE_RESULT_PENDING)
+                        ? ESP_ERR_TIMEOUT
+                        : ESP_FAIL
+                );
+            }
         }
     } else if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
         (download->state ==
@@ -905,17 +981,61 @@ static void uds_download_client_callback(
                (download->state ==
                 UDS_DOWNLOAD_VERIFYING_MEMORY)) {
 
-        if (uds_download_routine_response_valid(
+        const uint8_t control_type =
+            download->routine_result_polling
+                ? UDS_ROUTINE_CONTROL_REQUEST_RESULTS
+                : UDS_ROUTINE_CONTROL_START;
+
+        if (!uds_download_routine_response_valid(
                 event,
+                control_type,
                 download->config.verify_routine_identifier
             )) {
 
-            uds_download_schedule_completion(download);
-        } else {
             uds_download_fail(
                 download,
                 ESP_ERR_INVALID_RESPONSE
             );
+        } else if (!download->routine_result_polling) {
+            download->routine_result_polling = true;
+            download->routine_poll_count = 0U;
+            download->action_due_us =
+                (uint64_t)esp_timer_get_time() +
+                download->routine_poll_interval_us;
+            download->action_pending = true;
+        } else {
+            download->routine_poll_count++;
+            const uds_download_routine_result_t result =
+                (download->config.verify_result != NULL)
+                    ? download->config.verify_result(
+                        download->config.verify_routine_identifier,
+                        &event->response.payload[3],
+                        event->response.payload_length - 3U,
+                        download->config.verify_result_context
+                    )
+                    : UDS_DOWNLOAD_ROUTINE_RESULT_COMPLETE;
+
+            if (result == UDS_DOWNLOAD_ROUTINE_RESULT_COMPLETE) {
+                download->routine_result_polling = false;
+                download->action_due_us = 0U;
+                uds_download_schedule_completion(download);
+            } else if ((result ==
+                        UDS_DOWNLOAD_ROUTINE_RESULT_PENDING) &&
+                       (download->routine_poll_count <
+                        download->maximum_routine_polls)) {
+
+                download->action_due_us =
+                    (uint64_t)esp_timer_get_time() +
+                    download->routine_poll_interval_us;
+                download->action_pending = true;
+            } else {
+                uds_download_fail(
+                    download,
+                    (result == UDS_DOWNLOAD_ROUTINE_RESULT_PENDING)
+                        ? ESP_ERR_TIMEOUT
+                        : ESP_FAIL
+                );
+            }
         }
     } else if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
                (download->state ==
@@ -978,6 +1098,31 @@ static void uds_download_client_callback(
                )) {
 
         /* Retry only explicitly recoverable TransferData failures. */
+    } else if ((event->type == UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) &&
+               (event->response.negative_response_code ==
+                UDS_NRC_BUSY_REPEAT_REQUEST) &&
+               download->routine_result_polling &&
+               ((download->state == UDS_DOWNLOAD_ERASING_MEMORY) ||
+                (download->state ==
+                 UDS_DOWNLOAD_VERIFYING_MEMORY))) {
+
+        download->routine_poll_count++;
+        download->last_negative_response_code =
+            event->response.negative_response_code;
+
+        if (download->routine_poll_count <
+            download->maximum_routine_polls) {
+
+            download->action_due_us =
+                (uint64_t)esp_timer_get_time() +
+                download->routine_poll_interval_us;
+            download->action_pending = true;
+        } else {
+            uds_download_fail(
+                download,
+                ESP_ERR_TIMEOUT
+            );
+        }
     } else if ((event->type == UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) &&
                (event->response.negative_response_code ==
                 UDS_NRC_SECURITY_ACCESS_DENIED) &&

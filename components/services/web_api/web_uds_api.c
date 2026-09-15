@@ -53,6 +53,15 @@ typedef enum
 
 } web_uds_security_state_t;
 
+typedef struct
+{
+    bool enabled;
+    size_t offset;
+    uint8_t pending_value;
+    uint8_t success_value;
+
+} web_uds_routine_status_policy_t;
+
 static SemaphoreHandle_t s_lock = NULL;
 static uint8_t *s_receive_buffer = NULL;
 static uint8_t *s_transmit_buffer = NULL;
@@ -102,6 +111,10 @@ static uint8_t s_download_verify_record[
     UDS_DOWNLOAD_ROUTINE_RECORD_MAX_LENGTH
 ];
 static size_t s_download_verify_record_length = 0U;
+static web_uds_routine_status_policy_t
+    s_download_erase_status_policy;
+static web_uds_routine_status_policy_t
+    s_download_verify_status_policy;
 static TaskHandle_t s_worker_task = NULL;
 static bool s_tester_present_enabled = true;
 static bool s_tester_present_session_active = false;
@@ -205,6 +218,14 @@ static esp_err_t web_uds_download_read(
     uint8_t *buffer,
     size_t capacity,
     size_t *read_size,
+    void *context
+);
+
+static uds_download_routine_result_t
+web_uds_download_evaluate_routine_result(
+    uint16_t routine_identifier,
+    const uint8_t *status_record,
+    size_t status_record_length,
     void *context
 );
 
@@ -1580,6 +1601,39 @@ static esp_err_t web_uds_download_read(
     return result;
 }
 
+static uds_download_routine_result_t
+web_uds_download_evaluate_routine_result(
+    uint16_t routine_identifier,
+    const uint8_t *status_record,
+    size_t status_record_length,
+    void *context
+)
+{
+    (void)routine_identifier;
+
+    const web_uds_routine_status_policy_t *policy = context;
+
+    if ((policy == NULL) || !policy->enabled) {
+        return UDS_DOWNLOAD_ROUTINE_RESULT_COMPLETE;
+    }
+
+    if ((status_record == NULL) ||
+        (policy->offset >= status_record_length)) {
+
+        return UDS_DOWNLOAD_ROUTINE_RESULT_ERROR;
+    }
+
+    const uint8_t status = status_record[policy->offset];
+
+    if (status == policy->success_value) {
+        return UDS_DOWNLOAD_ROUTINE_RESULT_COMPLETE;
+    }
+
+    return (status == policy->pending_value)
+        ? UDS_DOWNLOAD_ROUTINE_RESULT_PENDING
+        : UDS_DOWNLOAD_ROUTINE_RESULT_ERROR;
+}
+
 static void web_uds_download_close_file(void)
 {
     if (s_download_file != NULL) {
@@ -1799,6 +1853,7 @@ static void web_uds_download_finalize_journal(
         " outcome=%s duration_us=%" PRIu64
         " transferred=%" PRIu64 " total=%" PRIu64
         " blocks=%" PRIu32 " retries=%" PRIu32
+        " routine_polls=%" PRIu32
         " nrc=0x%02X result=%d\n",
         now_us,
         outcome,
@@ -1807,6 +1862,7 @@ static void web_uds_download_finalize_journal(
         progress->total_size,
         progress->acknowledged_blocks,
         progress->retry_count,
+        progress->routine_poll_count,
         (unsigned int)progress->last_negative_response_code,
         (int)progress->last_result
     );
@@ -1909,12 +1965,22 @@ static esp_err_t web_uds_download_start(
     uint32_t erase_routine_identifier = 0U;
     uint32_t verify_routine_identifier = 0U;
     uint32_t reset_type = 0U;
+    uint32_t routine_poll_interval_ms = 250U;
+    uint32_t routine_poll_maximum = 240U;
+    uint32_t erase_status_offset = 0U;
+    uint32_t erase_pending_value = 0U;
+    uint32_t erase_success_value = 1U;
+    uint32_t verify_status_offset = 0U;
+    uint32_t verify_pending_value = 0U;
+    uint32_t verify_success_value = 1U;
     uint64_t address = 0U;
     bool security_enabled = false;
     bool erase_enabled = false;
     bool verify_enabled = false;
     bool reset_enabled = false;
     bool restore_default_session = true;
+    bool erase_status_enabled = false;
+    bool verify_status_enabled = false;
     const cJSON *security_key =
         cJSON_GetObjectItemCaseSensitive(root, "security_key");
     const cJSON *erase_record =
@@ -1965,6 +2031,20 @@ static esp_err_t web_uds_download_start(
             true,
             &restore_default_session
         ) ||
+        !web_uds_number(
+            root,
+            "routine_poll_interval_ms",
+            60000U,
+            &routine_poll_interval_ms
+        ) ||
+        (routine_poll_interval_ms == 0U) ||
+        !web_uds_number(
+            root,
+            "routine_poll_maximum",
+            100000U,
+            &routine_poll_maximum
+        ) ||
+        (routine_poll_maximum == 0U) ||
         !web_uds_hex_uint64(root, "address", &address)) {
 
         return ESP_ERR_INVALID_ARG;
@@ -1996,6 +2076,35 @@ static esp_err_t web_uds_download_start(
         return ESP_ERR_INVALID_ARG;
     }
 
+    if (erase_enabled &&
+        (!web_uds_boolean(
+            root,
+            "erase_status_enabled",
+            false,
+            &erase_status_enabled
+        ) ||
+         !web_uds_number(
+            root,
+            "erase_status_offset",
+            UINT8_MAX,
+            &erase_status_offset
+        ) ||
+         !web_uds_number(
+            root,
+            "erase_status_pending",
+            UINT8_MAX,
+            &erase_pending_value
+        ) ||
+         !web_uds_number(
+            root,
+            "erase_status_success",
+            UINT8_MAX,
+            &erase_success_value
+        ))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
     if (verify_enabled &&
         (!web_uds_number(
             root,
@@ -2009,6 +2118,35 @@ static esp_err_t web_uds_download_start(
         return ESP_ERR_INVALID_ARG;
     }
 
+    if (verify_enabled &&
+        (!web_uds_boolean(
+            root,
+            "verify_status_enabled",
+            false,
+            &verify_status_enabled
+        ) ||
+         !web_uds_number(
+            root,
+            "verify_status_offset",
+            UINT8_MAX,
+            &verify_status_offset
+        ) ||
+         !web_uds_number(
+            root,
+            "verify_status_pending",
+            UINT8_MAX,
+            &verify_pending_value
+        ) ||
+         !web_uds_number(
+            root,
+            "verify_status_success",
+            UINT8_MAX,
+            &verify_success_value
+        ))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
     if (reset_enabled &&
         (!web_uds_number(
             root,
@@ -2017,6 +2155,14 @@ static esp_err_t web_uds_download_start(
             &reset_type
         ) ||
          (reset_type == 0U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((erase_status_enabled &&
+         (erase_pending_value == erase_success_value)) ||
+        (verify_status_enabled &&
+         (verify_pending_value == verify_success_value))) {
 
         return ESP_ERR_INVALID_ARG;
     }
@@ -2049,6 +2195,21 @@ static esp_err_t web_uds_download_start(
     if (parse_result != ESP_OK) {
         return parse_result;
     }
+
+    s_download_erase_status_policy =
+        (web_uds_routine_status_policy_t) {
+            .enabled = erase_status_enabled,
+            .offset = erase_status_offset,
+            .pending_value = (uint8_t)erase_pending_value,
+            .success_value = (uint8_t)erase_success_value,
+        };
+    s_download_verify_status_policy =
+        (web_uds_routine_status_policy_t) {
+            .enabled = verify_status_enabled,
+            .offset = verify_status_offset,
+            .pending_value = (uint8_t)verify_pending_value,
+            .success_value = (uint8_t)verify_success_value,
+        };
 
     if (security_enabled) {
         uint8_t manual_key[
@@ -2191,6 +2352,10 @@ static esp_err_t web_uds_download_start(
             .erase_option_record = s_download_erase_record,
             .erase_option_record_length =
                 s_download_erase_record_length,
+            .erase_result =
+                web_uds_download_evaluate_routine_result,
+            .erase_result_context =
+                &s_download_erase_status_policy,
             .verify_routine_identifier =
                 verify_enabled
                     ? (uint16_t)verify_routine_identifier
@@ -2198,6 +2363,13 @@ static esp_err_t web_uds_download_start(
             .verify_option_record = s_download_verify_record,
             .verify_option_record_length =
                 s_download_verify_record_length,
+            .verify_result =
+                web_uds_download_evaluate_routine_result,
+            .verify_result_context =
+                &s_download_verify_status_policy,
+            .routine_poll_interval_us =
+                (uint64_t)routine_poll_interval_ms * 1000ULL,
+            .maximum_routine_polls = routine_poll_maximum,
             .reset_type =
                 reset_enabled
                     ? (uint8_t)reset_type
@@ -2543,6 +2715,11 @@ static esp_err_t web_uds_get_handler(
             response,
             "download_retries",
             download_progress.retry_count
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_routine_polls",
+            download_progress.routine_poll_count
         ) != NULL) &&
         (cJSON_AddNumberToObject(
             response,

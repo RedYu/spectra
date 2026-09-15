@@ -2556,6 +2556,12 @@ body:where(.page-uds-programming) {
     gap: 8px;
 }
 
+:where(body.page-uds-programming) .program-inline-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
 :where(body.page-uds-programming) input[type="checkbox"] {
     width: auto;
     accent-color: var(--accent);
