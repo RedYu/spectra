@@ -29,6 +29,7 @@ idf_component_register(
         "can_transmit_service.c"
         "can_logger_binary_format.c"
         "time_service.c"
+        "ota_service.c"
         "uds_profile_service.c"
         "uds_did_catalog_service.c"
 
@@ -71,6 +72,7 @@ idf_component_register(
         esp_driver_tsens
 
         esp_app_format
+        app_update
         esp_system
         esp_hw_support
         spi_flash

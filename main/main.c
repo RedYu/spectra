@@ -43,6 +43,7 @@
 #include "can_transmit_service.h"
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
+#include "ota_service.h"
 #include "isotp_service.h"
 #include "xcp_service.h"
 #include "time_service.h"
@@ -1012,6 +1013,22 @@ static void startup_task(
         (void)gui_service_set_boot_progress(
             48U,
             "CAN logger ready"
+        );
+    }
+
+    result = start_service(
+        "OTA",
+        ota_service_init,
+        SERVICE_OPTIONAL
+    );
+
+    if (result != ESP_OK) {
+        startup_warning = true;
+
+        ESP_LOGW(
+            TAG,
+            "OTA service is unavailable: %s",
+            esp_err_to_name(result)
         );
     }
 
