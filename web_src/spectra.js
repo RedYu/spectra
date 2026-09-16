@@ -1005,50 +1005,6 @@
             );
 
             setText(
-                "summary-cpu",
-                `${system.cpu_usage ?? 0}%`
-            );
-
-            setText(
-                "summary-frequency",
-                `${system.cpu_frequency_mhz ?? 0} MHz`
-            );
-
-            setText(
-                "summary-heap",
-                formatBytes(system.free_heap)
-            );
-
-            setText(
-                "summary-minimum-heap",
-                `Minimum ${formatBytes(
-                    system.minimum_free_heap
-                )}`
-            );
-
-            setText(
-                "summary-temperature",
-                system.chip_temperature_valid
-                    ? `${Number(
-                        system.chip_temperature_celsius
-                    ).toFixed(1)} °C`
-                    : "Unavailable"
-            );
-
-            setText(
-                "summary-uptime",
-                formatUptime(system.uptime_sec)
-            );
-
-            setText(
-                "summary-reset",
-                `Reset: ${
-                    system.reset_reason_name ||
-                    "unknown"
-                }`
-            );
-
-            setText(
                 "system-device-id",
                 system.device_id
             );

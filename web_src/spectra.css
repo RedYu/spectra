@@ -305,42 +305,6 @@ body:where(.page-overview) {
 :where(body.page-overview) .connection-status.offline {
     color: var(--danger);
 }
-:where(body.page-overview) .summary-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 14px;
-    margin-bottom: 20px;
-}
-:where(body.page-overview) .summary-card {
-    min-width: 0;
-    padding: 18px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--surface);
-}
-:where(body.page-overview) .summary-label {
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-}
-:where(body.page-overview) .summary-value {
-    overflow: hidden;
-    margin-top: 10px;
-    font-size: 23px;
-    font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-:where(body.page-overview) .summary-details {
-    overflow: hidden;
-    margin-top: 5px;
-    color: var(--muted);
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
 :where(body.page-overview) .content-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -442,9 +406,6 @@ body:where(.page-overview) {
     }
 }
 @media (max-width: 960px) {
-    :where(body.page-overview) .summary-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
     :where(body.page-overview) .content-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -474,7 +435,6 @@ body:where(.page-overview) {
         align-items: flex-start;
         flex-direction: column;
     }
-    :where(body.page-overview) .summary-grid,
     :where(body.page-overview) .content-grid {
         grid-template-columns: 1fr;
     }
