@@ -501,6 +501,189 @@ body:where(.page-overview) {
 :where(body.page-overview) .time-sync-dot.synchronized {
     background: var(--success);
 }
+:where(body.page-overview) .live-dashboard {
+    margin-bottom: 20px;
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+}
+:where(body.page-overview) .live-dashboard-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+}
+:where(body.page-overview) .live-dashboard-header h2 {
+    margin: 0;
+    font-size: 18px;
+}
+:where(body.page-overview) .live-dashboard-header p {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+:where(body.page-overview) .live-dashboard-actions,
+:where(body.page-overview) .live-dashboard-editor,
+:where(body.page-overview) .live-widget-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+:where(body.page-overview) .live-dashboard-editor {
+    margin-top: 16px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--background);
+}
+:where(body.page-overview) .live-dashboard-editor[hidden] {
+    display: none;
+}
+:where(body.page-overview) .live-dashboard-editor label {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+:where(body.page-overview) .live-dashboard-editor select {
+    min-width: 210px;
+}
+:where(body.page-overview) .live-dashboard-editor-note {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 12px;
+}
+:where(body.page-overview) .live-dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+:where(body.page-overview) .live-widget {
+    position: relative;
+    min-width: 0;
+    min-height: 132px;
+    overflow: hidden;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: var(--background);
+}
+:where(body.page-overview) .live-widget[data-size="2"] {
+    grid-column: span 2;
+}
+:where(body.page-overview) .live-widget[data-size="4"] {
+    grid-column: span 4;
+}
+:where(body.page-overview) .live-widget-title {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+:where(body.page-overview) .live-widget-value {
+    overflow: hidden;
+    margin-top: 12px;
+    font-size: 25px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+:where(body.page-overview) .live-widget-detail {
+    min-height: 17px;
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 12px;
+}
+:where(body.page-overview) .live-widget-gauge {
+    height: 6px;
+    overflow: hidden;
+    margin-top: 14px;
+    border-radius: 999px;
+    background: #202a36;
+}
+:where(body.page-overview) .live-widget-gauge-fill {
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 180ms ease;
+}
+:where(body.page-overview) .live-widget-graph {
+    width: 100%;
+    height: 54px;
+    margin-top: 8px;
+    color: var(--accent);
+}
+:where(body.page-overview) .live-widget-graph polyline {
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+}
+:where(body.page-overview) .live-widget.editing {
+    padding-bottom: 53px;
+    outline: 1px dashed rgba(59, 130, 246, 0.55);
+    outline-offset: -5px;
+}
+:where(body.page-overview) .live-widget-controls {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+}
+:where(body.page-overview) .live-widget-controls button,
+:where(body.page-overview) .live-widget-controls select {
+    min-height: 30px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+:where(body.page-overview) .live-widget-controls .remove {
+    margin-left: auto;
+    color: var(--danger);
+}
+@media (max-width: 960px) {
+    :where(body.page-overview) .live-dashboard-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    :where(body.page-overview) .live-widget[data-size="4"] {
+        grid-column: span 2;
+    }
+}
+@media (max-width: 640px) {
+    :where(body.page-overview) .live-dashboard-header,
+    :where(body.page-overview) .live-dashboard-editor {
+        align-items: stretch;
+        flex-direction: column;
+    }
+    :where(body.page-overview) .live-dashboard-actions {
+        align-self: stretch;
+    }
+    :where(body.page-overview) .live-dashboard-actions button {
+        flex: 1;
+    }
+    :where(body.page-overview) .live-dashboard-editor select {
+        width: 100%;
+        min-width: 0;
+    }
+    :where(body.page-overview) .live-dashboard-editor-note {
+        margin-left: 0;
+    }
+    :where(body.page-overview) .live-dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+    :where(body.page-overview) .live-widget[data-size="2"],
+    :where(body.page-overview) .live-widget[data-size="4"] {
+        grid-column: span 1;
+    }
+}
 /* ===== settings.html ===== */
 :root:where(.page-settings) {
     color-scheme: dark;

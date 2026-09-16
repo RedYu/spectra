@@ -22,8 +22,8 @@
 
     <title>Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=26">
-    <script src="spectra.js?v=26" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=27">
+    <script src="spectra.js?v=27" defer></script>
 </head>
 
 <body class="page-overview">
@@ -158,6 +158,73 @@
                     -
                 </div>
             </article>
+        </section>
+
+        <section
+            class="live-dashboard"
+            aria-labelledby="live-dashboard-title"
+        >
+            <header class="live-dashboard-header">
+                <div>
+                    <h2 id="live-dashboard-title">
+                        Live dashboard
+                    </h2>
+
+                    <p>
+                        Your persistent view of live device signals
+                    </p>
+                </div>
+
+                <div class="live-dashboard-actions">
+                    <button
+                        id="live-dashboard-edit"
+                        class="button button-secondary"
+                        type="button"
+                        aria-pressed="false"
+                    >
+                        Customize
+                    </button>
+
+                    <button
+                        id="live-dashboard-reset"
+                        class="button button-secondary"
+                        type="button"
+                        hidden
+                    >
+                        Reset
+                    </button>
+                </div>
+            </header>
+
+            <div
+                id="live-dashboard-editor"
+                class="live-dashboard-editor"
+                hidden
+            >
+                <label for="live-dashboard-source">
+                    Add signal
+                </label>
+
+                <select id="live-dashboard-source"></select>
+
+                <button
+                    id="live-dashboard-add"
+                    class="button button-primary"
+                    type="button"
+                >
+                    Add widget
+                </button>
+
+                <span class="live-dashboard-editor-note">
+                    Layout is stored in this browser
+                </span>
+            </div>
+
+            <div
+                id="live-dashboard-grid"
+                class="live-dashboard-grid"
+                aria-live="polite"
+            ></div>
         </section>
 
         <section class="content-grid">

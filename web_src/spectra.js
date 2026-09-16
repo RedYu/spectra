@@ -8,6 +8,179 @@
     function init_overview() {
 
         const REFRESH_INTERVAL_MS = 2000;
+        const LIVE_DASHBOARD_STORAGE_KEY =
+            "spectra.liveDashboard.v1";
+        const LIVE_DASHBOARD_HISTORY_LENGTH = 60;
+
+        const liveDashboardSources = {
+            cpu: {
+                title: "CPU load",
+                unit: "%",
+                maximum: 100,
+                value: data =>
+                    Number(data.system?.cpu_usage),
+                detail: data =>
+                    `${data.system?.cpu_frequency_mhz ?? 0} MHz`,
+                format: value =>
+                    `${value.toFixed(1)}%`
+            },
+            heap: {
+                title: "Internal heap",
+                unit: "bytes",
+                value: data =>
+                    Number(data.system?.free_heap),
+                detail: data =>
+                    `Minimum ${formatBytes(
+                        data.system?.minimum_free_heap
+                    )}`,
+                format: value =>
+                    formatBytes(value)
+            },
+            temperature: {
+                title: "Chip temperature",
+                unit: "°C",
+                maximum: 100,
+                value: data =>
+                    data.system?.chip_temperature_valid === true
+                        ? Number(
+                            data.system
+                                .chip_temperature_celsius
+                        )
+                        : Number.NaN,
+                detail: () =>
+                    "ESP32-S3 internal sensor",
+                format: value =>
+                    `${value.toFixed(1)} °C`
+            },
+            uptime: {
+                title: "Uptime",
+                unit: "seconds",
+                value: data =>
+                    Number(data.system?.uptime_sec),
+                detail: data =>
+                    `Reset: ${
+                        data.system?.reset_reason_name ||
+                        "unknown"
+                    }`,
+                format: value =>
+                    formatUptime(value)
+            },
+            battery_level: {
+                title: "Battery level",
+                unit: "%",
+                maximum: 100,
+                value: data => {
+                    const battery =
+                        data.power?.battery || {};
+
+                    return battery.measurement_valid === true &&
+                        battery.present === true
+                        ? Number(battery.level_percent)
+                        : Number.NaN;
+                },
+                detail: data => {
+                    const voltage =
+                        Number(
+                            data.power?.battery?.voltage_mv
+                        );
+
+                    return Number.isFinite(voltage)
+                        ? `${(voltage / 1000).toFixed(2)} V`
+                        : "Battery unavailable";
+                },
+                format: value =>
+                    `${value.toFixed(0)}%`
+            },
+            battery_voltage: {
+                title: "Battery voltage",
+                unit: "mV",
+                value: data =>
+                    Number(
+                        data.power?.battery?.voltage_mv
+                    ),
+                detail: data =>
+                    `${Number(
+                        data.power?.battery?.level_percent ??
+                        0
+                    ).toFixed(0)}% charge`,
+                format: value =>
+                    `${(value / 1000).toFixed(2)} V`
+            },
+            sd_free: {
+                title: "SD card free",
+                unit: "bytes",
+                value: data =>
+                    Number(
+                        data.system?.sd_card_free_bytes
+                    ),
+                detail: data =>
+                    `${formatBytes(
+                        data.system?.sd_card_total_bytes
+                    )} total`,
+                format: value =>
+                    formatBytes(value)
+            },
+            ap_clients: {
+                title: "Wi-Fi clients",
+                unit: "clients",
+                value: data =>
+                    Number(
+                        data.network?.wifi?.softap
+                            ?.client_count
+                    ),
+                detail: data =>
+                    data.network?.wifi?.softap?.ssid ||
+                    "SoftAP",
+                format: value =>
+                    String(value)
+            }
+        };
+
+        const defaultLiveDashboard = [
+            {
+                id: "cpu",
+                source: "cpu",
+                view: "graph",
+                size: 2
+            },
+            {
+                id: "heap",
+                source: "heap",
+                view: "graph",
+                size: 2
+            },
+            {
+                id: "battery",
+                source: "battery_level",
+                view: "gauge",
+                size: 1
+            },
+            {
+                id: "temperature",
+                source: "temperature",
+                view: "number",
+                size: 1
+            },
+            {
+                id: "sd",
+                source: "sd_free",
+                view: "number",
+                size: 1
+            },
+            {
+                id: "network",
+                source: "ap_clients",
+                view: "number",
+                size: 1
+            }
+        ];
+
+        let liveDashboardEditing = false;
+        let liveDashboardData = null;
+        let liveDashboardWidgets = [];
+
+        const liveDashboardHistory =
+            new Map();
 
         function setText(id, value) {
             const element =
@@ -225,6 +398,536 @@
             }
 
             return result;
+        }
+
+        function normalizeLiveDashboardWidgets(value) {
+            if (!Array.isArray(value)) {
+                return null;
+            }
+
+            const widgets = [];
+
+            value.slice(0, 16).forEach((widget, index) => {
+                if ((typeof widget !== "object") ||
+                    (widget === null) ||
+                    !(widget.source in liveDashboardSources)) {
+
+                    return;
+                }
+
+                const view =
+                    ["number", "gauge", "graph"]
+                        .includes(widget.view)
+                        ? widget.view
+                        : "number";
+
+                const size =
+                    [1, 2, 4].includes(Number(widget.size))
+                        ? Number(widget.size)
+                        : 1;
+
+                widgets.push({
+                    id:
+                        String(
+                            widget.id ||
+                            `widget-${index}`
+                        ),
+                    source: widget.source,
+                    view,
+                    size
+                });
+            });
+
+            return widgets.length > 0
+                ? widgets
+                : null;
+        }
+
+        function loadLiveDashboardWidgets() {
+            try {
+                const stored =
+                    window.localStorage.getItem(
+                        LIVE_DASHBOARD_STORAGE_KEY
+                    );
+
+                if (stored !== null) {
+                    const normalized =
+                        normalizeLiveDashboardWidgets(
+                            JSON.parse(stored)
+                        );
+
+                    if (normalized !== null) {
+                        return normalized;
+                    }
+                }
+            } catch (error) {
+                console.warn(
+                    "Failed to load live dashboard layout:",
+                    error
+                );
+            }
+
+            return defaultLiveDashboard.map(widget => ({
+                ...widget
+            }));
+        }
+
+        function saveLiveDashboardWidgets() {
+            try {
+                window.localStorage.setItem(
+                    LIVE_DASHBOARD_STORAGE_KEY,
+                    JSON.stringify(liveDashboardWidgets)
+                );
+            } catch (error) {
+                console.warn(
+                    "Failed to save live dashboard layout:",
+                    error
+                );
+            }
+        }
+
+        function createLiveDashboardButton(
+            text,
+            title,
+            handler,
+            className = ""
+        ) {
+            const button =
+                document.createElement("button");
+
+            button.type = "button";
+            button.textContent = text;
+            button.title = title;
+            button.className = className;
+            button.addEventListener(
+                "click",
+                handler
+            );
+
+            return button;
+        }
+
+        function moveLiveDashboardWidget(
+            index,
+            offset
+        ) {
+            const destination = index + offset;
+
+            if ((destination < 0) ||
+                (destination >= liveDashboardWidgets.length)) {
+
+                return;
+            }
+
+            [
+                liveDashboardWidgets[index],
+                liveDashboardWidgets[destination]
+            ] = [
+                liveDashboardWidgets[destination],
+                liveDashboardWidgets[index]
+            ];
+
+            saveLiveDashboardWidgets();
+            renderLiveDashboard();
+        }
+
+        function createLiveDashboardControls(
+            widget,
+            index
+        ) {
+            const controls =
+                document.createElement("div");
+
+            controls.className =
+                "live-widget-controls";
+
+            controls.append(
+                createLiveDashboardButton(
+                    "←",
+                    "Move left",
+                    () => moveLiveDashboardWidget(
+                        index,
+                        -1
+                    )
+                ),
+                createLiveDashboardButton(
+                    "→",
+                    "Move right",
+                    () => moveLiveDashboardWidget(
+                        index,
+                        1
+                    )
+                )
+            );
+
+            const view =
+                document.createElement("select");
+
+            [
+                ["number", "Value"],
+                ["gauge", "Gauge"],
+                ["graph", "Graph"]
+            ].forEach(([value, text]) => {
+                const option =
+                    document.createElement("option");
+
+                option.value = value;
+                option.textContent = text;
+                option.selected = widget.view === value;
+                view.append(option);
+            });
+
+            view.title = "Widget presentation";
+            view.addEventListener("change", () => {
+                widget.view = view.value;
+                saveLiveDashboardWidgets();
+                renderLiveDashboard();
+            });
+
+            const size =
+                document.createElement("select");
+
+            [
+                [1, "Small"],
+                [2, "Medium"],
+                [4, "Wide"]
+            ].forEach(([value, text]) => {
+                const option =
+                    document.createElement("option");
+
+                option.value = String(value);
+                option.textContent = text;
+                option.selected = widget.size === value;
+                size.append(option);
+            });
+
+            size.title = "Widget width";
+            size.addEventListener("change", () => {
+                widget.size = Number(size.value);
+                saveLiveDashboardWidgets();
+                renderLiveDashboard();
+            });
+
+            controls.append(
+                view,
+                size,
+                createLiveDashboardButton(
+                    "Remove",
+                    "Remove widget",
+                    () => {
+                        liveDashboardWidgets.splice(
+                            index,
+                            1
+                        );
+
+                        saveLiveDashboardWidgets();
+                        renderLiveDashboard();
+                    },
+                    "remove"
+                )
+            );
+
+            return controls;
+        }
+
+        function createLiveDashboardGraph(values) {
+            const namespace =
+                "http://www.w3.org/2000/svg";
+
+            const graph =
+                document.createElementNS(
+                    namespace,
+                    "svg"
+                );
+
+            graph.classList.add(
+                "live-widget-graph"
+            );
+
+            graph.setAttribute(
+                "viewBox",
+                "0 0 100 40"
+            );
+
+            graph.setAttribute(
+                "preserveAspectRatio",
+                "none"
+            );
+
+            const finite =
+                values.filter(Number.isFinite);
+
+            if (finite.length < 2) {
+                return graph;
+            }
+
+            const minimum = Math.min(...finite);
+            const maximum = Math.max(...finite);
+            const range = Math.max(1, maximum - minimum);
+            const denominator =
+                Math.max(1, values.length - 1);
+
+            const points = values
+                .map((value, index) => {
+                    const x =
+                        index * 100 / denominator;
+
+                    const y = Number.isFinite(value)
+                        ? 38 - ((value - minimum) / range * 36)
+                        : 38;
+
+                    return `${x.toFixed(2)},${y.toFixed(2)}`;
+                })
+                .join(" ");
+
+            const line =
+                document.createElementNS(
+                    namespace,
+                    "polyline"
+                );
+
+            line.setAttribute("points", points);
+            graph.append(line);
+
+            return graph;
+        }
+
+        function renderLiveDashboard() {
+            const grid =
+                document.getElementById(
+                    "live-dashboard-grid"
+                );
+
+            if (grid === null) {
+                return;
+            }
+
+            grid.replaceChildren();
+
+            liveDashboardWidgets.forEach((widget, index) => {
+                const source =
+                    liveDashboardSources[widget.source];
+
+                const value = liveDashboardData === null
+                    ? Number.NaN
+                    : source.value(liveDashboardData);
+
+                const article =
+                    document.createElement("article");
+
+                article.className = "live-widget";
+                article.dataset.size = String(widget.size);
+                article.classList.toggle(
+                    "editing",
+                    liveDashboardEditing
+                );
+
+                const title =
+                    document.createElement("div");
+
+                title.className = "live-widget-title";
+                title.textContent = source.title;
+
+                const valueElement =
+                    document.createElement("div");
+
+                valueElement.className =
+                    "live-widget-value";
+
+                valueElement.textContent =
+                    Number.isFinite(value)
+                        ? source.format(value)
+                        : "Unavailable";
+
+                const detail =
+                    document.createElement("div");
+
+                detail.className =
+                    "live-widget-detail";
+
+                detail.textContent =
+                    liveDashboardData === null
+                        ? "Waiting for data"
+                        : source.detail(liveDashboardData);
+
+                article.append(
+                    title,
+                    valueElement,
+                    detail
+                );
+
+                if (widget.view === "gauge") {
+                    const gauge =
+                        document.createElement("div");
+
+                    gauge.className =
+                        "live-widget-gauge";
+
+                    const fill =
+                        document.createElement("div");
+
+                    fill.className =
+                        "live-widget-gauge-fill";
+
+                    const percentage =
+                        Number.isFinite(value) &&
+                        Number.isFinite(source.maximum)
+                            ? Math.max(
+                                0,
+                                Math.min(
+                                    100,
+                                    value * 100 /
+                                    source.maximum
+                                )
+                            )
+                            : 0;
+
+                    fill.style.width =
+                        `${percentage}%`;
+
+                    gauge.append(fill);
+                    article.append(gauge);
+                } else if (widget.view === "graph") {
+                    article.append(
+                        createLiveDashboardGraph(
+                            liveDashboardHistory.get(
+                                widget.source
+                            ) || []
+                        )
+                    );
+                }
+
+                if (liveDashboardEditing) {
+                    article.append(
+                        createLiveDashboardControls(
+                            widget,
+                            index
+                        )
+                    );
+                }
+
+                grid.append(article);
+            });
+        }
+
+        function updateLiveDashboard(data) {
+            liveDashboardData = data;
+
+            Object.entries(liveDashboardSources)
+                .forEach(([key, source]) => {
+                    const values =
+                        liveDashboardHistory.get(key) || [];
+
+                    values.push(source.value(data));
+
+                    if (values.length >
+                        LIVE_DASHBOARD_HISTORY_LENGTH) {
+
+                        values.shift();
+                    }
+
+                    liveDashboardHistory.set(
+                        key,
+                        values
+                    );
+                });
+
+            renderLiveDashboard();
+        }
+
+        function initializeLiveDashboard() {
+            const editor =
+                document.getElementById(
+                    "live-dashboard-editor"
+                );
+
+            const edit =
+                document.getElementById(
+                    "live-dashboard-edit"
+                );
+
+            const reset =
+                document.getElementById(
+                    "live-dashboard-reset"
+                );
+
+            const sourceSelect =
+                document.getElementById(
+                    "live-dashboard-source"
+                );
+
+            const add =
+                document.getElementById(
+                    "live-dashboard-add"
+                );
+
+            if (!editor || !edit || !reset ||
+                !sourceSelect || !add) {
+
+                return;
+            }
+
+            liveDashboardWidgets =
+                loadLiveDashboardWidgets();
+
+            Object.entries(liveDashboardSources)
+                .forEach(([key, source]) => {
+                    const option =
+                        document.createElement("option");
+
+                    option.value = key;
+                    option.textContent = source.title;
+                    sourceSelect.append(option);
+                });
+
+            edit.addEventListener("click", () => {
+                liveDashboardEditing =
+                    !liveDashboardEditing;
+
+                editor.hidden = !liveDashboardEditing;
+                reset.hidden = !liveDashboardEditing;
+                edit.textContent = liveDashboardEditing
+                    ? "Done"
+                    : "Customize";
+
+                edit.setAttribute(
+                    "aria-pressed",
+                    String(liveDashboardEditing)
+                );
+
+                renderLiveDashboard();
+            });
+
+            add.addEventListener("click", () => {
+                if (liveDashboardWidgets.length >= 16) {
+                    return;
+                }
+
+                liveDashboardWidgets.push({
+                    id:
+                        `widget-${Date.now()}-${
+                            liveDashboardWidgets.length
+                        }`,
+                    source: sourceSelect.value,
+                    view: "number",
+                    size: 1
+                });
+
+                saveLiveDashboardWidgets();
+                renderLiveDashboard();
+            });
+
+            reset.addEventListener("click", () => {
+                liveDashboardWidgets =
+                    defaultLiveDashboard.map(widget => ({
+                        ...widget
+                    }));
+
+                saveLiveDashboardWidgets();
+                renderLiveDashboard();
+            });
+
+            renderLiveDashboard();
         }
 
         function updateDeviceTime(time) {
@@ -844,6 +1547,11 @@
                 updateSystem(system);
                 updateNetwork(network);
                 updatePower(power);
+                updateLiveDashboard({
+                    system,
+                    network,
+                    power
+                });
 
                 status.textContent =
                     `Updated ${new Date()
@@ -860,6 +1568,7 @@
             }
         }
 
+        initializeLiveDashboard();
         refreshDashboard();
 
         window.setInterval(
