@@ -640,6 +640,8 @@ esp_err_t ota_service_finish(void)
     s_info.last_error = ESP_OK;
     ota_service_update_boot_partition();
 
+    (void)system_model_set_ota_available(true);
+
     ESP_LOGI(
         TAG,
         "OTA image ready: project=%s, version=%s, partition=%s",
@@ -966,6 +968,11 @@ esp_err_t ota_service_check_backend(void)
             sizeof(s_info.backend_version)
         );
 
+        (void)system_model_set_ota_available(
+            update_available ||
+            (s_info.state == OTA_SERVICE_STATE_READY)
+        );
+
         if (update_available) {
             ESP_LOGI(
                 TAG,
@@ -981,6 +988,10 @@ esp_err_t ota_service_check_backend(void)
     } else {
         s_info.backend_state =
             OTA_SERVICE_BACKEND_STATE_ERROR;
+
+        (void)system_model_set_ota_available(
+            s_info.state == OTA_SERVICE_STATE_READY
+        );
 
         ESP_LOGW(
             TAG,
@@ -1020,6 +1031,8 @@ esp_err_t ota_service_cancel(void)
         s_info.state = OTA_SERVICE_STATE_IDLE;
         s_info.last_error = ESP_OK;
         ota_service_update_boot_partition();
+
+        (void)system_model_set_ota_available(false);
 
         ESP_LOGI(TAG, "OTA update cancelled");
     } else {

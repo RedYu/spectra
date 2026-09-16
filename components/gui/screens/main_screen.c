@@ -32,7 +32,10 @@
 #include "can_logger_service.h"
 #include "time_service.h"
 #include "battery_service.h"
+#include "internet_service.h"
+#include "ota_service.h"
 #include "storage_sd_service.h"
+#include "system_service.h"
 
 #define MAIN_TOOLBAR_HEIGHT \
     GUI_THEME_TOOLBAR_HEIGHT
@@ -120,6 +123,20 @@ static const char *TAG = "main_screen";
 static main_screen_context_t s_context = {0};
 
 static modal_dialog_t s_update_dialog = {0};
+
+static ota_service_state_t s_update_dialog_ota_state =
+    OTA_SERVICE_STATE_COUNT;
+
+static ota_service_backend_state_t s_update_dialog_backend_state =
+    OTA_SERVICE_BACKEND_STATE_COUNT;
+
+static esp_err_t s_update_dialog_backend_error = ESP_FAIL;
+
+static char s_update_dialog_version[
+    OTA_SERVICE_VERSION_MAX_LENGTH
+] = {0};
+
+static void main_screen_update_ota_dialog(void);
 
 static const char *main_screen_can_fd_state_to_string(
     can_fd_mcp2518fd_state_t state
@@ -1458,6 +1475,7 @@ static void main_screen_update(void)
 
     main_screen_update_recording();
     main_screen_update_battery();
+    main_screen_update_ota_dialog();
 }
 
 static void main_screen_update_timer_cb(
@@ -1488,6 +1506,15 @@ static void main_screen_delete_event_cb(
 
     s_update_dialog =
         (modal_dialog_t){0};
+
+    s_update_dialog_ota_state =
+        OTA_SERVICE_STATE_COUNT;
+
+    s_update_dialog_backend_state =
+        OTA_SERVICE_BACKEND_STATE_COUNT;
+
+    s_update_dialog_backend_error = ESP_FAIL;
+    s_update_dialog_version[0] = '\0';
 }
 
 static void sd_button_action(void)
@@ -1503,11 +1530,390 @@ static void sd_button_action(void)
     }
 }
 
+static void main_screen_update_ota_dialog(void)
+{
+    if (!modal_dialog_is_open(&s_update_dialog)) {
+        return;
+    }
+
+    ota_service_info_t info;
+
+    const esp_err_t result =
+        ota_service_get_info(&info);
+
+    if (result != ESP_OK) {
+        modal_dialog_set_title(
+            &s_update_dialog,
+            "Update Unavailable"
+        );
+
+        modal_dialog_set_message(
+            &s_update_dialog,
+            esp_err_to_name(result)
+        );
+
+        modal_dialog_set_progress_visible(
+            &s_update_dialog,
+            false
+        );
+
+        modal_dialog_set_secondary_enabled(
+            &s_update_dialog,
+            true
+        );
+
+        modal_dialog_set_secondary_text(
+            &s_update_dialog,
+            "Restart"
+        );
+
+        return;
+    }
+
+    modal_dialog_set_secondary_text(
+        &s_update_dialog,
+        "Check Again"
+    );
+
+    const char *version =
+        info.state == OTA_SERVICE_STATE_READY
+            ? info.version
+            : info.backend_version;
+
+    if ((s_update_dialog_ota_state == info.state) &&
+        (s_update_dialog_backend_state ==
+         info.backend_state) &&
+        (s_update_dialog_backend_error ==
+         info.backend_last_error) &&
+        (strcmp(
+            s_update_dialog_version,
+            version
+        ) == 0)) {
+
+        return;
+    }
+
+    s_update_dialog_ota_state = info.state;
+    s_update_dialog_backend_state =
+        info.backend_state;
+
+    s_update_dialog_backend_error =
+        info.backend_last_error;
+
+    (void)strlcpy(
+        s_update_dialog_version,
+        version,
+        sizeof(s_update_dialog_version)
+    );
+
+    if (info.state == OTA_SERVICE_STATE_READY) {
+        char message[128];
+
+        (void)snprintf(
+            message,
+            sizeof(message),
+            "Version %s is installed and ready. Restart from the Web "
+            "interface to activate it.",
+            info.version[0] != '\0'
+                ? info.version
+                : "unknown"
+        );
+
+        modal_dialog_set_title(
+            &s_update_dialog,
+            "Update Ready"
+        );
+
+        modal_dialog_set_message(
+            &s_update_dialog,
+            message
+        );
+
+        modal_dialog_set_progress_visible(
+            &s_update_dialog,
+            true
+        );
+
+        modal_dialog_set_progress_text(
+            &s_update_dialog,
+            "Firmware validated"
+        );
+
+        modal_dialog_set_progress(
+            &s_update_dialog,
+            100U,
+            true
+        );
+
+        modal_dialog_set_secondary_enabled(
+            &s_update_dialog,
+            true
+        );
+
+        return;
+    }
+
+    switch (info.backend_state) {
+        case OTA_SERVICE_BACKEND_STATE_CHECKING:
+            modal_dialog_set_title(
+                &s_update_dialog,
+                "Checking for Updates"
+            );
+
+            modal_dialog_set_message(
+                &s_update_dialog,
+                "Contacting the Spectra backend..."
+            );
+
+            modal_dialog_set_progress_visible(
+                &s_update_dialog,
+                true
+            );
+
+            modal_dialog_set_progress_text(
+                &s_update_dialog,
+                "Waiting for server response"
+            );
+
+            modal_dialog_set_progress(
+                &s_update_dialog,
+                35U,
+                true
+            );
+
+            modal_dialog_set_secondary_enabled(
+                &s_update_dialog,
+                false
+            );
+            break;
+
+        case OTA_SERVICE_BACKEND_STATE_NO_UPDATE:
+            modal_dialog_set_title(
+                &s_update_dialog,
+                "Software Up to Date"
+            );
+
+            modal_dialog_set_message(
+                &s_update_dialog,
+                "No firmware updates are currently available."
+            );
+
+            modal_dialog_set_progress_visible(
+                &s_update_dialog,
+                false
+            );
+
+            modal_dialog_set_secondary_enabled(
+                &s_update_dialog,
+                true
+            );
+            break;
+
+        case OTA_SERVICE_BACKEND_STATE_UPDATE_AVAILABLE: {
+            char message[128];
+
+            (void)snprintf(
+                message,
+                sizeof(message),
+                "Firmware %s is available. Backend installation will "
+                "be enabled in a future update.",
+                info.backend_version[0] != '\0'
+                    ? info.backend_version
+                    : "update"
+            );
+
+            modal_dialog_set_title(
+                &s_update_dialog,
+                "Update Available"
+            );
+
+            modal_dialog_set_message(
+                &s_update_dialog,
+                message
+            );
+
+            modal_dialog_set_progress_visible(
+                &s_update_dialog,
+                false
+            );
+
+            modal_dialog_set_secondary_enabled(
+                &s_update_dialog,
+                true
+            );
+            break;
+        }
+
+        case OTA_SERVICE_BACKEND_STATE_ERROR:
+            modal_dialog_set_title(
+                &s_update_dialog,
+                "Update Check Failed"
+            );
+
+            modal_dialog_set_message(
+                &s_update_dialog,
+                esp_err_to_name(
+                    info.backend_last_error
+                )
+            );
+
+            modal_dialog_set_progress_visible(
+                &s_update_dialog,
+                false
+            );
+
+            modal_dialog_set_secondary_enabled(
+                &s_update_dialog,
+                true
+            );
+            break;
+
+        case OTA_SERVICE_BACKEND_STATE_NOT_CHECKED:
+        default:
+            modal_dialog_set_title(
+                &s_update_dialog,
+                "Software Update"
+            );
+
+            modal_dialog_set_message(
+                &s_update_dialog,
+                "Press Check Again to contact the Spectra backend."
+            );
+
+            modal_dialog_set_progress_visible(
+                &s_update_dialog,
+                false
+            );
+
+            modal_dialog_set_secondary_enabled(
+                &s_update_dialog,
+                true
+            );
+            break;
+    }
+}
+
+static void ota_dialog_secondary_action(
+    modal_dialog_t *dialog
+)
+{
+    ota_service_info_t info;
+
+    if ((ota_service_get_info(&info) == ESP_OK) &&
+        (info.state == OTA_SERVICE_STATE_READY)) {
+
+        const esp_err_t restart_result =
+            system_service_schedule_restart(1500U);
+
+        modal_dialog_set_title(
+            dialog,
+            restart_result == ESP_OK
+                ? "Restarting"
+                : "Restart Failed"
+        );
+
+        modal_dialog_set_message(
+            dialog,
+            restart_result == ESP_OK
+                ? "The device will restart into the updated firmware."
+                : esp_err_to_name(restart_result)
+        );
+
+        modal_dialog_set_primary_enabled(
+            dialog,
+            restart_result != ESP_OK
+        );
+
+        modal_dialog_set_secondary_enabled(
+            dialog,
+            false
+        );
+
+        return;
+    }
+
+    const esp_err_t result =
+        internet_service_request_check();
+
+    if (result != ESP_OK) {
+        modal_dialog_set_title(
+            dialog,
+            "No Internet Connection"
+        );
+
+        modal_dialog_set_message(
+            dialog,
+            "Connect the device to Wi-Fi and try again."
+        );
+
+        modal_dialog_set_progress_visible(
+            dialog,
+            false
+        );
+
+        modal_dialog_set_secondary_enabled(
+            dialog,
+            true
+        );
+
+        return;
+    }
+
+    modal_dialog_set_title(
+        dialog,
+        "Checking for Updates"
+    );
+
+    modal_dialog_set_message(
+        dialog,
+        "Contacting the Spectra backend..."
+    );
+
+    modal_dialog_set_progress_visible(
+        dialog,
+        true
+    );
+
+    modal_dialog_set_progress_text(
+        dialog,
+        "Waiting for server response"
+    );
+
+    modal_dialog_set_progress(
+        dialog,
+        15U,
+        true
+    );
+
+    modal_dialog_set_secondary_enabled(
+        dialog,
+        false
+    );
+}
+
 static void ota_button_action(void)
 {
+    ota_service_info_t info;
+
+    const bool request_check =
+        (ota_service_get_info(&info) == ESP_OK) &&
+        ((info.backend_state ==
+          OTA_SERVICE_BACKEND_STATE_NOT_CHECKED) ||
+         (info.backend_state ==
+         OTA_SERVICE_BACKEND_STATE_ERROR));
+
+    s_update_dialog_ota_state =
+        OTA_SERVICE_STATE_COUNT;
+
+    s_update_dialog_backend_state =
+        OTA_SERVICE_BACKEND_STATE_COUNT;
+
+    s_update_dialog_backend_error = ESP_FAIL;
+    s_update_dialog_version[0] = '\0';
+
     const modal_dialog_config_t config = {
         .title = "Software Update",
-        .message = "Checking for available updates...",
+        .message = "Reading update status...",
 
         .icon = NULL,
 
@@ -1515,13 +1921,13 @@ static void ota_button_action(void)
         .primary_action = NULL,
         .close_on_primary_action = true,
 
-        .secondary_button_text = NULL,
-        .secondary_action = NULL,
+        .secondary_button_text = "Check Again",
+        .secondary_action = ota_dialog_secondary_action,
         .close_on_secondary_action = false,
 
-        .show_progress_bar = true,
+        .show_progress_bar = false,
         .initial_progress = 0U,
-        .progress_text = "Connecting to server...",
+        .progress_text = "Waiting for server response",
 
         .animate_open =
             gui_config_get_animations_enabled(),
@@ -1542,32 +1948,13 @@ static void ota_button_action(void)
         return;
     }
 
-    modal_dialog_set_progress_text(
-        &s_update_dialog,
-        "Downloading update..."
-    );
+    main_screen_update_ota_dialog();
 
-    modal_dialog_set_progress(
-        &s_update_dialog,
-        45U,
-        true
-    );
-
-    modal_dialog_set_title(
-        &s_update_dialog,
-        "Update Ready"
-    );
-
-    modal_dialog_set_message(
-        &s_update_dialog,
-        "The update was downloaded successfully."
-    );
-
-    modal_dialog_set_progress(
-        &s_update_dialog,
-        100U,
-        true
-    );
+    if (request_check) {
+        ota_dialog_secondary_action(
+            &s_update_dialog
+        );
+    }
 }
 
 static void main_screen_style_card(
