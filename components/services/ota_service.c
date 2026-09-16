@@ -6,7 +6,9 @@
 #include "ota_service.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -18,7 +20,10 @@
 #include "esp_partition.h"
 #include "sdkconfig.h"
 
+#include "storage_sd_service.h"
+
 #define OTA_SERVICE_LOCK_TIMEOUT_MS  (1000U)
+#define OTA_SERVICE_SD_BUFFER_SIZE    (4U * 1024U)
 
 static const char *TAG = "ota_service";
 
@@ -189,6 +194,55 @@ static void ota_service_clear_image_info(void)
     s_info.progress_percent = 0U;
     s_info.project_name[0] = '\0';
     s_info.version[0] = '\0';
+}
+
+static bool ota_service_path_is_sd_update(
+    const char *path
+)
+{
+    if (path == NULL) {
+        return false;
+    }
+
+    static const char prefix[] =
+        OTA_SERVICE_SD_UPDATE_DIRECTORY "/";
+
+    if (strncmp(
+            path,
+            prefix,
+            sizeof(prefix) - 1U
+        ) != 0) {
+
+        return false;
+    }
+
+    const char *name =
+        path + sizeof(prefix) - 1U;
+
+    if ((name[0] == '\0') ||
+        (strchr(name, '/') != NULL) ||
+        (strchr(name, '\\') != NULL)) {
+
+        return false;
+    }
+
+    const size_t name_length = strlen(name);
+
+    if (name_length < 5U) {
+        return false;
+    }
+
+    const char *extension =
+        name + name_length - 4U;
+
+    return
+        (extension[0] == '.') &&
+        ((extension[1] == 'b') ||
+         (extension[1] == 'B')) &&
+        ((extension[2] == 'i') ||
+         (extension[2] == 'I')) &&
+        ((extension[3] == 'n') ||
+         (extension[3] == 'N'));
 }
 
 static esp_err_t ota_service_fail(
@@ -539,6 +593,134 @@ esp_err_t ota_service_finish(void)
     );
 
     ota_service_unlock();
+
+    return ESP_OK;
+}
+
+esp_err_t ota_service_install_from_sd(
+    const char *path
+)
+{
+    if (!ota_service_path_is_sd_update(path)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    struct stat file_status;
+
+    esp_err_t result =
+        storage_sd_service_stat(
+            path,
+            &file_status
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (!S_ISREG(file_status.st_mode) ||
+        (file_status.st_size <= 0)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    FILE *file = NULL;
+
+    result = storage_sd_service_open(
+        path,
+        "rb",
+        &file
+    );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result = ota_service_begin(
+        (size_t)file_status.st_size
+    );
+
+    uint8_t *buffer = NULL;
+
+    if (result == ESP_OK) {
+        buffer = malloc(OTA_SERVICE_SD_BUFFER_SIZE);
+
+        if (buffer == NULL) {
+            result = ESP_ERR_NO_MEM;
+        }
+    }
+
+    size_t total_read = 0U;
+
+    while ((result == ESP_OK) &&
+           (total_read < (size_t)file_status.st_size)) {
+
+        const size_t remaining =
+            (size_t)file_status.st_size - total_read;
+
+        const size_t requested =
+            remaining < OTA_SERVICE_SD_BUFFER_SIZE
+                ? remaining
+                : OTA_SERVICE_SD_BUFFER_SIZE;
+
+        size_t bytes_read = 0U;
+
+        result = storage_sd_service_read(
+            file,
+            buffer,
+            requested,
+            &bytes_read
+        );
+
+        if ((result == ESP_OK) &&
+            (bytes_read == 0U)) {
+
+            result = ESP_ERR_INVALID_SIZE;
+        }
+
+        if (result == ESP_OK) {
+            result = ota_service_write(
+                buffer,
+                bytes_read
+            );
+        }
+
+        total_read += bytes_read;
+    }
+
+    free(buffer);
+
+    const esp_err_t close_result =
+        storage_sd_service_close(&file);
+
+    if ((result == ESP_OK) &&
+        (close_result != ESP_OK)) {
+
+        result = close_result;
+    }
+
+    if (result == ESP_OK) {
+        result = ota_service_finish();
+    }
+
+    if (result != ESP_OK) {
+        (void)ota_service_cancel();
+
+        ESP_LOGE(
+            TAG,
+            "Failed to install SD image '%s': %s",
+            path,
+            esp_err_to_name(result)
+        );
+
+        return result;
+    }
+
+    ESP_LOGI(
+        TAG,
+        "SD image installed: path=%s, size=%u",
+        path,
+        (unsigned int)total_read
+    );
 
     return ESP_OK;
 }

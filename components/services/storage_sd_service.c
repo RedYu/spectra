@@ -1811,6 +1811,19 @@ esp_err_t storage_sd_service_mount(void)
         return result;
     }
 
+    const esp_err_t directory_result =
+        storage_sd_service_ensure_directory(
+            "/updates"
+        );
+
+    if (directory_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Failed to create OTA update directory: %s",
+            esp_err_to_name(directory_result)
+        );
+    }
+
     app_settings_t settings;
 
     const esp_err_t settings_result =
@@ -1909,6 +1922,7 @@ esp_err_t storage_sd_service_format(void)
         "/config/uds/dids",
         "/dbc",
         "/firmwares",
+        "/updates",
         "/logs",
         "/logs/can",
         "/logs/firmware",

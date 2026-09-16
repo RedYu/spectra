@@ -587,7 +587,7 @@ volume-relative `path`, and one of these `action` values:
 Uploads are streamed through a bounded 16 KiB PSRAM buffer and are limited to
 256 MiB per request. An interrupted or failed upload removes its partial file.
 Formatting is rejected while a file is open and recreates `/config`, `/dbc`,
-`/firmwares`, `/logs/can`, and `/logs/firmware` afterwards.
+`/firmwares`, `/updates`, `/logs/can`, and `/logs/firmware` afterwards.
 
 Example:
 
@@ -650,6 +650,11 @@ Important response fields include:
 | `project_name` | Project name read from a validated image |
 | `version` | Version read from a validated image |
 
+Use `GET /api/ota?action=files` to list regular `.bin` images stored directly
+inside `/sdcard/updates`. The response contains the SD-relative directory and
+an array of file names and sizes. Other file types and subdirectories are not
+returned.
+
 ### `POST /api/ota`
 
 Without an `action` query parameter, the request body is treated as a complete
@@ -677,6 +682,20 @@ Cancel an active transfer or prepared update:
 ```bash
 curl -X POST "http://spectra.device/api/ota?action=cancel"
 ```
+
+Install an image already stored on the SD card:
+
+```bash
+curl -X POST \
+  --data-binary '/updates/spectra.bin' \
+  "http://spectra.device/api/ota?action=install-sd"
+```
+
+The path is restricted to one regular `.bin` file immediately inside
+`/sdcard/updates`. The image is read in bounded 4 KiB blocks and streamed into
+the inactive OTA partition without retaining the complete file in RAM. The
+same battery, CAN-recording, project-name, image, and partition-size checks as
+the browser upload remain active.
 
 Restart into a successfully validated image:
 

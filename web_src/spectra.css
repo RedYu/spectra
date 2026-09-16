@@ -1212,6 +1212,21 @@ body:where(.page-settings) {
     white-space: nowrap;
 }
 
+:where(body.page-settings) .ota-sd-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto auto;
+    align-items: end;
+    gap: 10px;
+}
+
+:where(body.page-settings) .ota-sd-row .field-group {
+    min-width: 0;
+}
+
+:where(body.page-settings) .ota-sd-row .select-control {
+    width: 100%;
+}
+
 :where(body.page-settings) .ota-progress-block {
     display: grid;
     gap: 8px;
@@ -1282,6 +1297,14 @@ body:where(.page-settings) {
     :where(body.page-settings) .ota-actions {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    :where(body.page-settings) .ota-sd-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    :where(body.page-settings) .ota-sd-row .button {
+        width: 100%;
     }
     :where(body.page-settings) .ota-actions .button {
         width: 100%;

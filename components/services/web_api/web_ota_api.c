@@ -17,6 +17,8 @@
 #include "battery_service.h"
 #include "can_logger_service.h"
 #include "ota_service.h"
+#include "storage_sd_service.h"
+#include "storage_types.h"
 #include "system_service.h"
 #include "web_api_common.h"
 
@@ -25,8 +27,18 @@
 #define WEB_OTA_RESTART_DELAY_MS          (1500U)
 #define WEB_OTA_QUERY_MAX_LENGTH          (64U)
 #define WEB_OTA_MAX_RECEIVE_TIMEOUTS       (3U)
+#define WEB_OTA_SD_FILE_LIMIT             (32U)
+#define WEB_OTA_SD_PATH_MAX_LENGTH \
+    (STORAGE_FILE_NAME_MAX_LENGTH + 16U)
 
 static const char *TAG = "web_ota_api";
+
+static bool web_ota_api_get_query_value(
+    httpd_req_t *request,
+    const char *key,
+    char *value,
+    size_t value_size
+);
 
 static const char *web_ota_api_state_name(
     ota_service_state_t state
@@ -408,10 +420,171 @@ static esp_err_t web_ota_api_upload(
     return web_ota_api_send_info(request);
 }
 
-static bool web_ota_api_get_action(
+static bool web_ota_api_file_has_bin_extension(
+    const char *name
+)
+{
+    if (name == NULL) {
+        return false;
+    }
+
+    const size_t length = strlen(name);
+
+    if (length < 5U) {
+        return false;
+    }
+
+    const char *extension = name + length - 4U;
+
+    return
+        (extension[0] == '.') &&
+        ((extension[1] == 'b') ||
+         (extension[1] == 'B')) &&
+        ((extension[2] == 'i') ||
+         (extension[2] == 'I')) &&
+        ((extension[3] == 'n') ||
+         (extension[3] == 'N'));
+}
+
+static esp_err_t web_ota_api_send_sd_files(
+    httpd_req_t *request
+)
+{
+    esp_err_t result =
+        storage_sd_service_ensure_directory(
+            OTA_SERVICE_SD_UPDATE_DIRECTORY
+        );
+
+    if (result != ESP_OK) {
+        return web_api_send_message(
+            request,
+            "503 Service Unavailable",
+            false,
+            esp_err_to_name(result)
+        );
+    }
+
+    storage_file_entry_t *entries =
+        calloc(
+            WEB_OTA_SD_FILE_LIMIT,
+            sizeof(*entries)
+        );
+
+    if (entries == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t entry_count = 0U;
+    bool has_more = false;
+
+    result = storage_sd_service_list(
+        OTA_SERVICE_SD_UPDATE_DIRECTORY,
+        0U,
+        entries,
+        WEB_OTA_SD_FILE_LIMIT,
+        &entry_count,
+        &has_more
+    );
+
+    if (result != ESP_OK) {
+        free(entries);
+
+        return web_api_send_message(
+            request,
+            "503 Service Unavailable",
+            false,
+            esp_err_to_name(result)
+        );
+    }
+
+    cJSON *response = cJSON_CreateObject();
+    cJSON *files = cJSON_CreateArray();
+
+    if ((response == NULL) ||
+        (files == NULL)) {
+
+        cJSON_Delete(response);
+        cJSON_Delete(files);
+        free(entries);
+
+        return ESP_ERR_NO_MEM;
+    }
+
+    cJSON_AddItemToObject(response, "files", files);
+
+    bool valid =
+        (cJSON_AddStringToObject(
+            response,
+            "directory",
+            OTA_SERVICE_SD_UPDATE_DIRECTORY
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "truncated",
+            has_more
+        ) != NULL);
+
+    for (size_t index = 0U;
+         valid && (index < entry_count);
+         ++index) {
+
+        if (entries[index].is_directory ||
+            !web_ota_api_file_has_bin_extension(
+                entries[index].name
+            )) {
+
+            continue;
+        }
+
+        cJSON *file = cJSON_CreateObject();
+
+        if (file == NULL) {
+            valid = false;
+            break;
+        }
+
+        valid =
+            (cJSON_AddStringToObject(
+                file,
+                "name",
+                entries[index].name
+            ) != NULL) &&
+            (cJSON_AddNumberToObject(
+                file,
+                "size",
+                (double)entries[index].size
+            ) != NULL);
+
+        if (!valid) {
+            cJSON_Delete(file);
+            break;
+        }
+
+        cJSON_AddItemToArray(files, file);
+    }
+
+    free(entries);
+
+    if (!valid) {
+        cJSON_Delete(response);
+        return ESP_ERR_NO_MEM;
+    }
+
+    result = web_api_send_json(
+        request,
+        response
+    );
+
+    cJSON_Delete(response);
+
+    return result;
+}
+
+static bool web_ota_api_get_query_value(
     httpd_req_t *request,
-    char *action,
-    size_t action_size
+    const char *key,
+    char *value,
+    size_t value_size
 )
 {
     const size_t query_length =
@@ -436,10 +609,43 @@ static bool web_ota_api_get_action(
 
     return httpd_query_key_value(
         query,
+        key,
+        value,
+        value_size
+    ) == ESP_OK;
+}
+
+static bool web_ota_api_get_action(
+    httpd_req_t *request,
+    char *action,
+    size_t action_size
+)
+{
+    return web_ota_api_get_query_value(
+        request,
         "action",
         action,
         action_size
-    ) == ESP_OK;
+    );
+}
+
+static esp_err_t web_ota_api_get_handler(
+    httpd_req_t *request
+)
+{
+    char action[16] = {0};
+
+    if (web_ota_api_get_action(
+            request,
+            action,
+            sizeof(action)
+        ) &&
+        (strcmp(action, "files") == 0)) {
+
+        return web_ota_api_send_sd_files(request);
+    }
+
+    return web_ota_api_send_info(request);
 }
 
 static esp_err_t web_ota_api_post_handler(
@@ -504,6 +710,95 @@ static esp_err_t web_ota_api_post_handler(
         );
     }
 
+    if (strcmp(action, "install-sd") == 0) {
+        if ((request->content_len == 0U) ||
+            (request->content_len >=
+             WEB_OTA_SD_PATH_MAX_LENGTH)) {
+
+            return web_api_send_message(
+                request,
+                "400 Bad Request",
+                false,
+                "Invalid SD firmware path length"
+            );
+        }
+
+        char path[WEB_OTA_SD_PATH_MAX_LENGTH] = {0};
+        size_t received_size = 0U;
+        uint32_t receive_timeouts = 0U;
+        esp_err_t result = ESP_OK;
+
+        while ((result == ESP_OK) &&
+               (received_size < request->content_len)) {
+
+            const int received = httpd_req_recv(
+                request,
+                path + received_size,
+                request->content_len - received_size
+            );
+
+            if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+                ++receive_timeouts;
+
+                if (receive_timeouts >=
+                    WEB_OTA_MAX_RECEIVE_TIMEOUTS) {
+
+                    result = ESP_ERR_TIMEOUT;
+                }
+
+                continue;
+            }
+
+            if (received <= 0) {
+                result = ESP_FAIL;
+                break;
+            }
+
+            receive_timeouts = 0U;
+            received_size += (size_t)received;
+        }
+
+        if ((result == ESP_OK) &&
+            (memchr(path, '\0', received_size) != NULL)) {
+
+            result = ESP_ERR_INVALID_ARG;
+        }
+
+        path[received_size] = '\0';
+
+        bool install_allowed = false;
+
+        if (result == ESP_OK) {
+            result = web_ota_api_check_upload_allowed(
+                request,
+                &install_allowed
+            );
+        }
+
+        if ((result != ESP_OK) ||
+            !install_allowed) {
+
+            return result;
+        }
+
+        result = ota_service_install_from_sd(path);
+
+        if (result != ESP_OK) {
+            return web_api_send_message(
+                request,
+                result == ESP_ERR_INVALID_ARG
+                    ? "400 Bad Request"
+                    : result == ESP_ERR_INVALID_STATE
+                        ? "409 Conflict"
+                        : "500 Internal Server Error",
+                false,
+                esp_err_to_name(result)
+            );
+        }
+
+        return web_ota_api_send_info(request);
+    }
+
     return web_api_send_message(
         request,
         "400 Bad Request",
@@ -523,7 +818,7 @@ esp_err_t web_ota_api_register(
     static const httpd_uri_t get_uri = {
         .uri = "/api/ota",
         .method = HTTP_GET,
-        .handler = web_ota_api_send_info,
+        .handler = web_ota_api_get_handler,
         .user_ctx = NULL,
     };
 

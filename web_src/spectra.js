@@ -1771,6 +1771,15 @@
             otaUpload:
                 document.getElementById("ota-upload"),
 
+            otaSdFile:
+                document.getElementById("ota-sd-file"),
+
+            otaSdRefresh:
+                document.getElementById("ota-sd-refresh"),
+
+            otaSdInstall:
+                document.getElementById("ota-sd-install"),
+
             otaCancel:
                 document.getElementById("ota-cancel"),
 
@@ -2405,6 +2414,17 @@
 
             elements.otaFile.disabled =
                 otaBusy || receiving || ready;
+
+            elements.otaSdFile.disabled =
+                otaBusy || receiving || ready;
+
+            elements.otaSdRefresh.disabled = otaBusy;
+
+            elements.otaSdInstall.disabled =
+                otaBusy ||
+                receiving ||
+                ready ||
+                !elements.otaSdFile.value;
         }
 
         function renderOtaInfo(info) {
@@ -2536,6 +2556,118 @@
                     system.firmware_version || "-";
             } catch {
                 elements.otaCurrentVersion.textContent = "-";
+            }
+        }
+
+        async function loadOtaSdFiles() {
+            const previous = elements.otaSdFile.value;
+
+            elements.otaSdFile.disabled = true;
+            elements.otaSdFile.innerHTML =
+                '<option value="">Loading /updates...</option>';
+
+            try {
+                const response = await fetchJson(
+                    "/api/ota?action=files",
+                    {
+                        cache: "no-store"
+                    }
+                );
+
+                const files = Array.isArray(response.files)
+                    ? response.files
+                    : [];
+
+                elements.otaSdFile.innerHTML =
+                    '<option value="">Choose SD firmware</option>';
+
+                for (const file of files) {
+                    const option = document.createElement("option");
+
+                    option.value = `/updates/${file.name}`;
+                    option.textContent =
+                        `${file.name} · ${formatOtaBytes(file.size)}`;
+
+                    elements.otaSdFile.appendChild(option);
+                }
+
+                if ([...elements.otaSdFile.options].some(
+                        option => option.value === previous
+                    )) {
+
+                    elements.otaSdFile.value = previous;
+                }
+
+                if (files.length === 0) {
+                    setOtaStatus(
+                        "No .bin images found in /updates."
+                    );
+                }
+            } catch (error) {
+                elements.otaSdFile.innerHTML =
+                    '<option value="">SD /updates unavailable</option>';
+
+                setOtaStatus(
+                    `Failed to list SD updates: ${error.message}`,
+                    "error"
+                );
+            } finally {
+                updateOtaControls();
+            }
+        }
+
+        async function installOtaFromSd() {
+            const path = elements.otaSdFile.value;
+
+            if (otaBusy || !path) {
+                return;
+            }
+
+            const selected =
+                elements.otaSdFile.selectedOptions[0];
+
+            if (!window.confirm(
+                    `Install ${selected?.textContent || path}?\n\n` +
+                    "Keep external power connected during the update."
+                )) {
+
+                return;
+            }
+
+            otaBusy = true;
+            updateOtaControls();
+            elements.otaProgressLabel.textContent =
+                `Installing ${path.split("/").pop()}`;
+
+            setOtaStatus(
+                "Reading firmware from SD and validating it..."
+            );
+
+            try {
+                const info = await fetchJson(
+                    "/api/ota?action=install-sd",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "text/plain"
+                        },
+                        body: path
+                    }
+                );
+
+                renderOtaInfo(info);
+                setOtaStatus(
+                    "SD firmware is validated and ready to boot.",
+                    "success"
+                );
+            } catch (error) {
+                setOtaStatus(
+                    `SD firmware installation failed: ${error.message}`,
+                    "error"
+                );
+            } finally {
+                otaBusy = false;
+                await refreshOtaInfo();
             }
         }
 
@@ -3749,6 +3881,21 @@
             uploadOtaFirmware
         );
 
+        elements.otaSdFile.addEventListener(
+            "change",
+            updateOtaControls
+        );
+
+        elements.otaSdRefresh.addEventListener(
+            "click",
+            loadOtaSdFiles
+        );
+
+        elements.otaSdInstall.addEventListener(
+            "click",
+            installOtaFromSd
+        );
+
         elements.otaCancel.addEventListener(
             "click",
             cancelOtaUpdate
@@ -3783,6 +3930,7 @@
         loadSettings();
         loadWifiScanStatus();
         loadCurrentFirmwareVersion();
+        loadOtaSdFiles();
         refreshOtaInfo();
     
     }

@@ -22,8 +22,8 @@
 
     <title>Spectra Settings</title>
 
-    <link rel="stylesheet" href="spectra.css?v=31">
-    <script src="spectra.js?v=31" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=32">
+    <script src="spectra.js?v=32" defer></script>
 </head>
 
 <body class="page-settings">
@@ -1183,6 +1183,40 @@
                             </span>
                         </div>
 
+                        <div class="ota-sd-row">
+                            <div class="field-group">
+                                <label for="ota-sd-file">
+                                    Image from SD · /updates
+                                </label>
+
+                                <select
+                                    id="ota-sd-file"
+                                    class="select-control"
+                                >
+                                    <option value="">
+                                        Loading SD images...
+                                    </option>
+                                </select>
+                            </div>
+
+                            <button
+                                id="ota-sd-refresh"
+                                class="button button-secondary"
+                                type="button"
+                            >
+                                Refresh
+                            </button>
+
+                            <button
+                                id="ota-sd-install"
+                                class="button button-primary"
+                                type="button"
+                                disabled
+                            >
+                                Install from SD
+                            </button>
+                        </div>
+
                         <div class="ota-progress-block">
                             <div class="ota-progress-heading">
                                 <span id="ota-progress-label">
@@ -1237,9 +1271,10 @@
                         </div>
 
                         <p class="setting-description ota-warning">
-                            Keep external power connected. Upload only the
+                            Keep external power connected. Use only the
                             application image generated as
-                            <code>build/spectra.bin</code>.
+                            <code>build/spectra.bin</code>. SD images belong
+                            in <code>/updates</code>.
                         </p>
                     </div>
                 </section>

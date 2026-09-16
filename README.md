@@ -556,7 +556,8 @@ To exit the serial monitor, press `Ctrl+]`.
   seed/key access, and programming
 - [ ] CAN traffic replay
 - [ ] Persistent customizable live signal dashboards
-- [x] Streaming OTA firmware updates with automatic rollback
+- [x] Streaming OTA firmware updates from browser or `/sdcard/updates`, with
+  automatic rollback
 - [ ] Device registration and authentication
 - [ ] Remote backend integration
 

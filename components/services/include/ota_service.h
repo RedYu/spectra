@@ -18,6 +18,7 @@ extern "C" {
 #define OTA_SERVICE_PARTITION_LABEL_MAX_LENGTH  (17U)
 #define OTA_SERVICE_PROJECT_NAME_MAX_LENGTH     (32U)
 #define OTA_SERVICE_VERSION_MAX_LENGTH          (32U)
+#define OTA_SERVICE_SD_UPDATE_DIRECTORY         "/updates"
 
 /**
  * @file ota_service.h
@@ -150,6 +151,22 @@ esp_err_t ota_service_write(
  * @return ESP_OK when the image is ready to boot, otherwise an ESP-IDF error.
  */
 esp_err_t ota_service_finish(void);
+
+/**
+ * @brief Install an application image stored in the SD update directory.
+ *
+ * The file is read in bounded blocks and written directly to the inactive
+ * OTA partition. Only regular .bin files located immediately inside
+ * /updates are accepted.
+ *
+ * @param[in] path Absolute SD-relative path beginning with /updates/.
+ *
+ * @return ESP_OK when the image is validated and ready to boot, otherwise
+ * an ESP-IDF storage, OTA, or image-validation error code.
+ */
+esp_err_t ota_service_install_from_sd(
+    const char *path
+);
 
 /**
  * @brief Abort an active transfer or cancel a prepared boot selection.
