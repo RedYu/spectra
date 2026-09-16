@@ -742,7 +742,9 @@ The device also recognizes the beginning of the future manifest format:
 This stage only reports availability. It intentionally does not download or
 install a backend image yet. A firmware check runs once after Internet first
 becomes available during startup and whenever the user explicitly requests a
-check. Periodic Internet health checks do not query the firmware endpoint.
+check. The device does not run periodic HTTPS health checks. It checks
+`/health` after the Station obtains an IP address and as part of a manual
+update check.
 
 Restart into a successfully validated image:
 

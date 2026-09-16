@@ -12,12 +12,12 @@ extern "C" {
 #endif
 
 /**
- * @brief Start periodic Spectra backend availability checks.
+ * @brief Start Spectra backend availability monitoring.
  *
- * The service periodically sends an HTTPS request to the configured
- * Spectra health endpoint. The result is stored in the system model as
- * the current Internet availability state. Firmware availability is
- * checked once after Internet first becomes available during startup.
+ * The service checks the configured Spectra health endpoint after the
+ * Station obtains an IP address and on an explicit request. It does not
+ * perform periodic HTTPS requests. Firmware availability is checked once
+ * after Internet first becomes available during startup.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
  * already running, ESP_ERR_NO_MEM if the service task cannot be

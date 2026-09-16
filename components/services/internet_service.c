@@ -19,7 +19,6 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
-#include "sdkconfig.h"
 
 #include "app_task_priorities.h"
 #include "ota_service.h"
@@ -33,11 +32,6 @@
 #define INTERNET_SERVICE_TASK_STACK_SIZE (6144U)
 #define INTERNET_SERVICE_TASK_PRIORITY \
     APP_TASK_PRIORITY_INTERNET
-
-#define INTERNET_SERVICE_CHECK_INTERVAL_TICKS \
-    ((TickType_t) \
-     CONFIG_SPECTRA_OTA_BACKEND_CHECK_INTERVAL_MINUTES * \
-     pdMS_TO_TICKS(60000U))
 
 #define INTERNET_SERVICE_NOTIFY_CHECK \
     (1UL << 0U)
@@ -292,12 +286,11 @@ static void internet_service_task(
                 0U,
                 UINT32_MAX,
                 &notification,
-                INTERNET_SERVICE_CHECK_INTERVAL_TICKS
+                portMAX_DELAY
             );
 
         if (notified != pdTRUE) {
-            notification =
-                INTERNET_SERVICE_NOTIFY_CHECK;
+            continue;
         }
 
         if ((notification &
