@@ -1013,6 +1013,61 @@
 
                         <div class="setting-row">
                             <div>
+                                <div class="setting-label">
+                                    Audible feedback
+                                </div>
+
+                                <div class="setting-description">
+                                    Enable buzzer sounds for interface actions
+                                    and device notifications
+                                </div>
+                            </div>
+
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="sound-enabled"
+                                        type="checkbox"
+                                    >
+
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Sound volume
+                                </div>
+
+                                <div class="setting-description">
+                                    Buzzer duty level from 0 to 100 percent
+                                </div>
+                            </div>
+
+                            <div class="setting-control">
+                                <div class="range-control">
+                                    <input
+                                        id="sound-volume"
+                                        type="range"
+                                        min="0"
+                                        max="100"
+                                        value="70"
+                                    >
+
+                                    <span
+                                        id="sound-volume-value"
+                                        class="range-value"
+                                    >
+                                        70%
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
                                 <div class="setting-label">POSIX timezone</div>
                                 <div class="setting-description">
                                     For example CET-1CEST,M3.5.0,M10.5.0/3

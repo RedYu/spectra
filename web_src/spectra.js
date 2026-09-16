@@ -1580,6 +1580,15 @@
             animations:
                 document.getElementById("animations"),
 
+            soundEnabled:
+                document.getElementById("sound-enabled"),
+
+            soundVolume:
+                document.getElementById("sound-volume"),
+
+            soundVolumeValue:
+                document.getElementById("sound-volume-value"),
+
             theme:
                 document.getElementById("theme"),
 
@@ -1837,6 +1846,9 @@
 
             elements.animations.disabled =
                 operationBusy;
+
+            elements.soundEnabled.disabled =
+                operationBusy;
             
             elements.theme.disabled =
                 operationBusy;
@@ -1846,6 +1858,8 @@
             elements.displayOffTimeout.disabled = operationBusy;
             elements.batteryLowLevel.disabled = operationBusy;
             elements.batteryCriticalLevel.disabled = operationBusy;
+
+            updateSoundControls();
 
             elements.timeSyncEnabled.disabled = operationBusy;
             elements.timeTimezone.disabled = operationBusy;
@@ -1889,6 +1903,15 @@
         function updateBrightness() {
             elements.brightnessValue.textContent =
                 `${elements.brightness.value}%`;
+        }
+
+        function updateSoundControls() {
+            elements.soundVolume.disabled =
+                operationBusy ||
+                !elements.soundEnabled.checked;
+
+            elements.soundVolumeValue.textContent =
+                `${elements.soundVolume.value}%`;
         }
 
         function updateApControls() {
@@ -3001,6 +3024,9 @@
             const battery =
                 settings.battery || {};
 
+            const sound =
+                settings.sound || {};
+
             const network =
                 settings.network || {};
 
@@ -3054,6 +3080,12 @@
 
             elements.batteryCriticalLevel.value =
                 battery.critical_level_percent ?? 5;
+
+            elements.soundEnabled.checked =
+                sound.enabled !== false;
+
+            elements.soundVolume.value =
+                sound.volume_percent ?? 70;
 
             elements.animations.checked =
                 ui.animations_enabled === true;
@@ -3202,6 +3234,7 @@
             );
 
             updateBrightness();
+            updateSoundControls();
             updateApControls();
             updateStaControls();
 
@@ -3224,6 +3257,9 @@
 
             const batteryCritical =
                 Number(elements.batteryCriticalLevel.value);
+
+            const soundVolume =
+                Number(elements.soundVolume.value);
 
             if (!Number.isInteger(dimBrightness) ||
                 (dimBrightness < 0) ||
@@ -3265,6 +3301,15 @@
 
                 throw new Error(
                     "Critical battery level must be lower than Low level"
+                );
+            }
+
+            if (!Number.isInteger(soundVolume) ||
+                (soundVolume < 0) ||
+                (soundVolume > 100)) {
+
+                throw new Error(
+                    "Sound volume must be 0 to 100 percent"
                 );
             }
 
@@ -3449,6 +3494,14 @@
 
                     critical_level_percent:
                         Number(elements.batteryCriticalLevel.value)
+                },
+
+                sound: {
+                    enabled:
+                        elements.soundEnabled.checked,
+
+                    volume_percent:
+                        Number(elements.soundVolume.value)
                 },
 
                 logging: {
@@ -3813,6 +3866,16 @@
         elements.brightness.addEventListener(
             "input",
             updateBrightness
+        );
+
+        elements.soundEnabled.addEventListener(
+            "change",
+            updateSoundControls
+        );
+
+        elements.soundVolume.addEventListener(
+            "input",
+            updateSoundControls
         );
 
         elements.timeSyncEnabled.addEventListener(

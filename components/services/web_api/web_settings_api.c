@@ -227,6 +227,12 @@ static esp_err_t web_settings_api_get_handler(
             "battery"
         );
 
+    cJSON *sound =
+        cJSON_AddObjectToObject(
+            response,
+            "sound"
+        );
+
     cJSON *logging =
         cJSON_AddObjectToObject(
             response,
@@ -304,6 +310,7 @@ static esp_err_t web_settings_api_get_handler(
         (display != NULL) &&
         (time_object != NULL) &&
         (battery != NULL) &&
+        (sound != NULL) &&
         (logging != NULL) &&
         (tag_levels != NULL) &&
         (ui != NULL) &&
@@ -375,6 +382,18 @@ static esp_err_t web_settings_api_get_handler(
             battery,
             "critical_level_percent",
             settings->battery.critical_level_percent
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            sound,
+            "enabled",
+            settings->sound.enabled
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            sound,
+            "volume_percent",
+            settings->sound.volume_percent
         ) != NULL);
 
     time_service_info_t time_info = {0};
@@ -936,6 +955,92 @@ static esp_err_t web_settings_api_put_handler(
             &current->battery
         );
         heap_caps_free(current);
+
+        if (result != ESP_OK) {
+            goto apply_failed;
+        }
+
+        applied = true;
+    }
+
+    const cJSON *sound =
+        cJSON_GetObjectItemCaseSensitive(
+            root,
+            "sound"
+        );
+
+    if (sound != NULL) {
+        if (!cJSON_IsObject(sound)) {
+            goto invalid_settings;
+        }
+
+        const cJSON *enabled =
+            cJSON_GetObjectItemCaseSensitive(
+                sound,
+                "enabled"
+            );
+
+        const cJSON *volume_percent =
+            cJSON_GetObjectItemCaseSensitive(
+                sound,
+                "volume_percent"
+            );
+
+        if ((enabled == NULL) &&
+            (volume_percent == NULL)) {
+
+            goto invalid_settings;
+        }
+
+        if (((enabled != NULL) &&
+             !cJSON_IsBool(enabled)) ||
+            ((volume_percent != NULL) &&
+             (!cJSON_IsNumber(volume_percent) ||
+              (volume_percent->valuedouble !=
+               (double)volume_percent->valueint) ||
+              (volume_percent->valueint <
+               (int)SETTINGS_SOUND_VOLUME_MIN) ||
+              (volume_percent->valueint >
+               (int)SETTINGS_SOUND_VOLUME_MAX)))) {
+
+            goto invalid_settings;
+        }
+
+        app_settings_t *current =
+            web_settings_api_allocate_settings();
+
+        if (current == NULL) {
+            result = ESP_ERR_NO_MEM;
+            goto apply_failed;
+        }
+
+        result =
+            settings_model_get(
+                current
+            );
+
+        if (result != ESP_OK) {
+            heap_caps_free(current);
+            goto apply_failed;
+        }
+
+        const bool requested_enabled =
+            enabled != NULL
+                ? cJSON_IsTrue(enabled)
+                : current->sound.enabled;
+
+        const uint8_t requested_volume =
+            volume_percent != NULL
+                ? (uint8_t)volume_percent->valueint
+                : current->sound.volume_percent;
+
+        heap_caps_free(current);
+
+        result =
+            settings_service_set_sound(
+                requested_enabled,
+                requested_volume
+            );
 
         if (result != ESP_OK) {
             goto apply_failed;

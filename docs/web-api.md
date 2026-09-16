@@ -352,6 +352,10 @@ Representative response:
     "low_level_percent": 15,
     "critical_level_percent": 5
   },
+  "sound": {
+    "enabled": true,
+    "volume_percent": 70
+  },
   "time": {
     "synchronization_enabled": true,
     "timezone": "CET-1CEST,M3.5.0,M10.5.0/3",
@@ -444,6 +448,7 @@ Validation includes, among other constraints:
 - display brightness and idle-backlight ranges;
 - display-off timeout greater than the dim timeout when both are enabled;
 - battery Critical threshold lower than the Low threshold;
+- sound volume from 0 to 100 percent;
 - supported UI theme values;
 - POSIX timezone and SNTP server lengths;
 - Wi-Fi SSID/password requirements;
