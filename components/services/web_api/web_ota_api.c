@@ -858,7 +858,9 @@ static esp_err_t web_ota_api_post_handler(
             request,
             result == ESP_OK
                 ? "202 Accepted"
-                : "503 Service Unavailable",
+                : result == ESP_ERR_INVALID_STATE
+                    ? "409 Conflict"
+                    : "503 Service Unavailable",
             result == ESP_OK,
             result == ESP_OK
                 ? "Backend firmware check requested"

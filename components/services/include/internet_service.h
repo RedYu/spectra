@@ -32,7 +32,8 @@ esp_err_t internet_service_start(void);
  * not block the caller.
  *
  * @return ESP_OK when the request is queued or ESP_ERR_INVALID_STATE when the
- * service is not running.
+ * service is not running, the network is unavailable, or another backend
+ * check is already queued or running.
  */
 esp_err_t internet_service_request_check(void);
 

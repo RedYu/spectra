@@ -6,6 +6,7 @@
 #include "internet_service.h"
 
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -50,11 +51,49 @@ static const char *TAG =
 
 static TaskHandle_t s_task = NULL;
 
+static atomic_bool s_check_pending =
+    ATOMIC_VAR_INIT(false);
+
 static esp_event_handler_instance_t
     s_ip_event_instance = NULL;
 
 static esp_event_handler_instance_t
     s_wifi_event_instance = NULL;
+
+static esp_err_t internet_service_notify_check(
+    TaskHandle_t task,
+    uint32_t notification
+)
+{
+    bool expected = false;
+
+    if ((task == NULL) ||
+        !atomic_compare_exchange_strong(
+            &s_check_pending,
+            &expected,
+            true
+        )) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xTaskNotify(
+            task,
+            notification |
+            INTERNET_SERVICE_NOTIFY_CHECK,
+            eSetBits
+        ) != pdPASS) {
+
+        atomic_store(
+            &s_check_pending,
+            false
+        );
+
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
 
 static bool internet_service_network_ready(void)
 {
@@ -222,10 +261,9 @@ static void internet_service_event_handler(
     if ((event_base == IP_EVENT) &&
         (event_id == IP_EVENT_STA_GOT_IP)) {
 
-        (void)xTaskNotify(
+        (void)internet_service_notify_check(
             task,
-            INTERNET_SERVICE_NOTIFY_CHECK,
-            eSetBits
+            0U
         );
 
         return;
@@ -295,6 +333,11 @@ static void internet_service_task(
 
         if ((notification &
              INTERNET_SERVICE_NOTIFY_STOP) != 0U) {
+
+            atomic_store(
+                &s_check_pending,
+                false
+            );
 
             break;
         }
@@ -379,6 +422,15 @@ static void internet_service_task(
             availability_known =
                 true;
         }
+
+        if ((notification &
+             INTERNET_SERVICE_NOTIFY_CHECK) != 0U) {
+
+            atomic_store(
+                &s_check_pending,
+                false
+            );
+        }
     }
 
     (void)system_model_set_internet_available(
@@ -386,6 +438,11 @@ static void internet_service_task(
     );
 
     internet_service_unregister_handlers();
+
+    atomic_store(
+        &s_check_pending,
+        false
+    );
 
     s_task = NULL;
 
@@ -400,6 +457,11 @@ esp_err_t internet_service_start(void)
 
         return ESP_ERR_INVALID_STATE;
     }
+
+    atomic_store(
+        &s_check_pending,
+        false
+    );
 
     esp_err_t result =
         system_model_set_internet_available(
@@ -468,10 +530,9 @@ esp_err_t internet_service_start(void)
      * this service was started.
      */
     if (internet_service_network_ready()) {
-        (void)xTaskNotify(
+        (void)internet_service_notify_check(
             s_task,
-            INTERNET_SERVICE_NOTIFY_CHECK,
-            eSetBits
+            0U
         );
     }
 
@@ -502,12 +563,8 @@ esp_err_t internet_service_request_check(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    return xTaskNotify(
+    return internet_service_notify_check(
         task,
-        INTERNET_SERVICE_NOTIFY_CHECK |
-        INTERNET_SERVICE_NOTIFY_OTA_CHECK,
-        eSetBits
-    ) == pdPASS
-        ? ESP_OK
-        : ESP_FAIL;
+        INTERNET_SERVICE_NOTIFY_OTA_CHECK
+    );
 }
