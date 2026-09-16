@@ -1564,7 +1564,7 @@ static void main_screen_update_ota_dialog(void)
 
         modal_dialog_set_secondary_text(
             &s_update_dialog,
-            "Restart"
+            "Check Again"
         );
 
         return;
@@ -1858,6 +1858,20 @@ static void ota_dialog_secondary_action(
 
         return;
     }
+
+    /*
+     * The backend may complete the request between two GUI refreshes.
+     * Invalidate the displayed snapshot so the final result is rendered
+     * even when the CHECKING state was not observed by the GUI timer.
+     */
+    s_update_dialog_ota_state =
+        OTA_SERVICE_STATE_COUNT;
+
+    s_update_dialog_backend_state =
+        OTA_SERVICE_BACKEND_STATE_COUNT;
+
+    s_update_dialog_backend_error = ESP_FAIL;
+    s_update_dialog_version[0] = '\0';
 
     modal_dialog_set_title(
         dialog,
