@@ -14,6 +14,7 @@
 #include "web_system_api.h"
 #include "web_diagnostics_api.h"
 #include "web_power_api.h"
+#include "web_ota_api.h"
 #include "web_settings_api.h"
 #include "web_files_api.h"
 #include "web_network_api.h"
@@ -129,6 +130,15 @@ esp_err_t web_service_start(void)
 
     result =
         web_power_api_register(
+            s_server
+        );
+
+    if (result != ESP_OK) {
+        goto registration_failed;
+    }
+
+    result =
+        web_ota_api_register(
             s_server
         );
 

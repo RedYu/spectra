@@ -620,6 +620,65 @@ download headers, including the file name, when the request succeeds.
 Typical failures include an invalid volume/path, unavailable SD card, missing
 file, an attempt to download a directory, and filesystem I/O failure.
 
+## Firmware OTA API
+
+The OTA API uses one URI with two HTTP methods to conserve HTTP-server URI
+handler slots. Firmware data is written directly to the inactive OTA partition
+through a bounded 4 KiB receive buffer. The complete image is never retained
+in RAM.
+
+### `GET /api/ota`
+
+Returns the current transfer state, progress, running and target partitions,
+validated image version, and the last ESP-IDF error.
+
+Important response fields include:
+
+| Field | Meaning |
+|---|---|
+| `state` | `idle`, `receiving`, `ready`, `error`, or `uninitialized` |
+| `image_size` | Declared complete image size |
+| `written_size` | Bytes written into the update partition |
+| `progress_percent` | Integer transfer progress from 0 to 100 |
+| `running_partition` | Partition containing the current firmware |
+| `boot_partition` | Partition selected for the next boot |
+| `update_partition` | Inactive destination partition |
+| `update_partition_size` | Maximum accepted image size |
+| `project_name` | Project name read from a validated image |
+| `version` | Version read from a validated image |
+
+### `POST /api/ota`
+
+Without an `action` query parameter, the request body is treated as a complete
+ESP-IDF application `.bin` image. A valid `Content-Length` is required.
+
+```bash
+curl --data-binary @build/spectra.bin \
+  http://spectra.device/api/ota
+```
+
+The upload is rejected while CAN recording is active or when a present and
+measured battery is below 20 percent. ESP-IDF validates the application image,
+chip compatibility, image hash or signature when configured, and secure
+version. Spectra additionally requires the image project name to match the
+running application. A successful upload selects the inactive OTA partition
+for the next boot but does not restart immediately.
+
+Cancel an active transfer or prepared update:
+
+```bash
+curl -X POST "http://spectra.device/api/ota?action=cancel"
+```
+
+Restart into a successfully validated image:
+
+```bash
+curl -X POST "http://spectra.device/api/ota?action=restart"
+```
+
+The restart action is accepted only while the OTA state is `ready`. The normal
+graceful restart path is used so other services can stop cleanly.
+
 ## HTTP status handling
 
 Clients should be prepared for:
