@@ -40,12 +40,32 @@ typedef enum
 } ota_service_state_t;
 
 /**
+ * @brief Validation state of the currently running application image.
+ */
+typedef enum
+{
+    OTA_SERVICE_IMAGE_STATE_UNKNOWN = 0,
+    OTA_SERVICE_IMAGE_STATE_NEW,
+    OTA_SERVICE_IMAGE_STATE_PENDING_VERIFY,
+    OTA_SERVICE_IMAGE_STATE_VALID,
+    OTA_SERVICE_IMAGE_STATE_INVALID,
+    OTA_SERVICE_IMAGE_STATE_ABORTED,
+
+    OTA_SERVICE_IMAGE_STATE_COUNT,
+
+} ota_service_image_state_t;
+
+/**
  * @brief Current OTA service and transfer information.
  */
 typedef struct
 {
     bool initialized;
+    bool rollback_enabled;
+    bool verification_pending;
+
     ota_service_state_t state;
+    ota_service_image_state_t running_image_state;
 
     size_t image_size;
     size_t written_size;
@@ -141,6 +161,18 @@ esp_err_t ota_service_finish(void);
  * been initialized, otherwise an ESP-IDF OTA or Flash error code.
  */
 esp_err_t ota_service_cancel(void);
+
+/**
+ * @brief Confirm that the running OTA image passed startup validation.
+ *
+ * When rollback support is enabled, a newly booted image remains pending
+ * until this function marks it valid. Calling the function for an already
+ * valid image has no effect.
+ *
+ * @return ESP_OK when the image is valid or does not require confirmation,
+ * otherwise an ESP-IDF OTA error code.
+ */
+esp_err_t ota_service_confirm_running_image(void);
 
 /**
  * @brief Copy current OTA service information.

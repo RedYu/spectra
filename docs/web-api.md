@@ -637,6 +637,9 @@ Important response fields include:
 | Field | Meaning |
 |---|---|
 | `state` | `idle`, `receiving`, `ready`, `error`, or `uninitialized` |
+| `rollback_enabled` | Whether automatic application rollback is enabled |
+| `verification_pending` | The running image still awaits startup confirmation |
+| `running_image_state` | `pending_verify`, `valid`, `invalid`, `aborted`, `new`, or `unknown` |
 | `image_size` | Declared complete image size |
 | `written_size` | Bytes written into the update partition |
 | `progress_percent` | Integer transfer progress from 0 to 100 |
@@ -663,6 +666,11 @@ chip compatibility, image hash or signature when configured, and secure
 version. Spectra additionally requires the image project name to match the
 running application. A successful upload selects the inactive OTA partition
 for the next boot but does not restart immediately.
+
+After the first boot, the new image remains in `pending_verify` state while
+Spectra starts its required services and applies configuration. The startup
+task then waits five seconds and confirms the image. A reset or crash before
+confirmation causes the bootloader to return to the previous valid image.
 
 Cancel an active transfer or prepared update:
 

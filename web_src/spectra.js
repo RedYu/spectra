@@ -1736,6 +1736,11 @@
                     "ota-running-partition"
                 ),
 
+            otaRollbackState:
+                document.getElementById(
+                    "ota-rollback-state"
+                ),
+
             otaUpdatePartition:
                 document.getElementById(
                     "ota-update-partition"
@@ -2419,6 +2424,22 @@
 
             elements.otaRunningPartition.textContent =
                 info.running_partition || "-";
+
+            const imageStateNames = {
+                new: "New image",
+                pending_verify: "Pending verification",
+                valid: "Active · verified",
+                invalid: "Invalid image",
+                aborted: "Rollback completed",
+                unknown: "Not applicable"
+            };
+
+            elements.otaRollbackState.textContent =
+                info.rollback_enabled
+                    ? imageStateNames[
+                        info.running_image_state
+                    ] || "Enabled"
+                    : "Disabled";
 
             elements.otaUpdatePartition.textContent =
                 info.update_partition

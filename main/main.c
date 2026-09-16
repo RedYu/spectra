@@ -51,6 +51,7 @@
 
 #define STARTUP_TASK_STACK_SIZE  (6144U)
 #define STARTUP_TASK_PRIORITY    (5U)
+#define OTA_VALIDATION_DELAY_MS  (5000U)
 
 typedef enum
 {
@@ -1333,6 +1334,46 @@ static void startup_task(
                 ? "yes"
                 : "no"
         );
+    }
+
+    ota_service_info_t ota_info;
+
+    const esp_err_t ota_info_result =
+        ota_service_get_info(&ota_info);
+
+    if ((ota_info_result == ESP_OK) &&
+        ota_info.verification_pending) {
+
+        (void)gui_service_set_boot_progress(
+            99U,
+            "Verifying firmware"
+        );
+
+        ESP_LOGI(
+            TAG,
+            "New OTA image is pending verification; "
+            "waiting %u ms before confirmation",
+            (unsigned int)OTA_VALIDATION_DELAY_MS
+        );
+
+        vTaskDelay(
+            pdMS_TO_TICKS(
+                OTA_VALIDATION_DELAY_MS
+            )
+        );
+
+        const esp_err_t confirmation_result =
+            ota_service_confirm_running_image();
+
+        if (confirmation_result != ESP_OK) {
+            startup_warning = true;
+
+            ESP_LOGE(
+                TAG,
+                "OTA image confirmation failed: %s",
+                esp_err_to_name(confirmation_result)
+            );
+        }
     }
 
     log_memory_status(

@@ -53,6 +53,32 @@ static const char *web_ota_api_state_name(
     }
 }
 
+static const char *web_ota_api_image_state_name(
+    ota_service_image_state_t state
+)
+{
+    switch (state) {
+        case OTA_SERVICE_IMAGE_STATE_NEW:
+            return "new";
+
+        case OTA_SERVICE_IMAGE_STATE_PENDING_VERIFY:
+            return "pending_verify";
+
+        case OTA_SERVICE_IMAGE_STATE_VALID:
+            return "valid";
+
+        case OTA_SERVICE_IMAGE_STATE_INVALID:
+            return "invalid";
+
+        case OTA_SERVICE_IMAGE_STATE_ABORTED:
+            return "aborted";
+
+        case OTA_SERVICE_IMAGE_STATE_UNKNOWN:
+        default:
+            return "unknown";
+    }
+}
+
 static esp_err_t web_ota_api_send_info(
     httpd_req_t *request
 )
@@ -87,6 +113,23 @@ static esp_err_t web_ota_api_send_info(
             response,
             "state",
             web_ota_api_state_name(info.state)
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "rollback_enabled",
+            info.rollback_enabled
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "verification_pending",
+            info.verification_pending
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            response,
+            "running_image_state",
+            web_ota_api_image_state_name(
+                info.running_image_state
+            )
         ) != NULL) &&
         (cJSON_AddNumberToObject(
             response,
