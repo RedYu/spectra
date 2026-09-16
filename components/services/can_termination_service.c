@@ -126,7 +126,7 @@ esp_err_t can_termination_service_deinit(void)
 }
 
 esp_err_t can_termination_service_set_enabled(
-    can_bus_t bus,
+    can_bus_id_t bus,
     bool enabled
 )
 {

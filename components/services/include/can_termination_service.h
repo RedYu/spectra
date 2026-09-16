@@ -49,7 +49,7 @@ esp_err_t can_termination_service_deinit(void);
  * @param[in] enabled True to connect the external 120-ohm resistor.
  */
 esp_err_t can_termination_service_set_enabled(
-    can_bus_t bus,
+    can_bus_id_t bus,
     bool enabled
 );
 
