@@ -4998,7 +4998,7 @@ button:disabled, .button:disabled {
 
 .dbc-value-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
 }
 
@@ -5012,12 +5012,28 @@ button:disabled, .button:disabled {
 }
 
 .dbc-value {
+    position: relative;
     display: grid;
+    min-width: 0;
     gap: 5px;
     padding: 12px;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--panel-alt, rgba(255, 255, 255, 0.02));
+}
+
+.dbc-value[data-size="2"] {
+    grid-column: span 2;
+}
+
+.dbc-value[data-size="4"] {
+    grid-column: span 4;
+}
+
+.dbc-value.dashboard-editing {
+    padding-bottom: 50px;
+    outline: 1px dashed rgba(61, 133, 245, 0.6);
+    outline-offset: -5px;
 }
 
 .dbc-value span {
@@ -5046,6 +5062,69 @@ button:disabled, .button:disabled {
     border-top: 1px solid var(--border);
 }
 
+.dbc-dashboard-editor {
+    margin-bottom: 10px;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-alt, rgba(255, 255, 255, 0.02));
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.dbc-dashboard-editor[hidden] {
+    display: none;
+}
+
+.dbc-dashboard-controls {
+    position: absolute;
+    right: 9px;
+    bottom: 9px;
+    left: 9px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dbc-dashboard-controls button,
+.dbc-dashboard-controls select {
+    width: auto;
+    min-height: 29px;
+    padding: 4px 7px;
+    font-size: 11px;
+}
+
+.dbc-dashboard-controls .remove {
+    margin-left: auto;
+    color: var(--danger);
+}
+
+.dbc-value-gauge {
+    height: 7px;
+    overflow: hidden;
+    margin-top: 10px;
+    border-radius: 999px;
+    background: var(--border);
+}
+
+.dbc-value-gauge > i {
+    display: block;
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 160ms ease;
+}
+
+.dbc-value-range {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10px;
+}
+
 .dbc-history-controls {
     display: flex;
     align-items: center;
@@ -5065,6 +5144,27 @@ button:disabled, .button:disabled {
 .dbc-history-controls select,
 .dbc-history-controls button {
     width: auto;
+}
+
+@media (max-width: 960px) {
+    .dbc-value-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .dbc-value[data-size="4"] {
+        grid-column: span 2;
+    }
+}
+
+@media (max-width: 640px) {
+    .dbc-value-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dbc-value[data-size="2"],
+    .dbc-value[data-size="4"] {
+        grid-column: span 1;
+    }
 }
 
 .dbc-browser .table-wrapper {

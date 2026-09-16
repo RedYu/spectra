@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.ico">
     <title>DBC Explorer · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=33">
-    <script src="spectra.js?v=33" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=34">
+    <script src="spectra.js?v=34" defer></script>
 </head>
 
 <body class="page-dbc">
@@ -90,8 +90,30 @@
                                 </select>
                             </label>
                             <button id="dbc-clear-history" type="button">Clear graphs</button>
+                            <button
+                                id="dbc-dashboard-customize"
+                                type="button"
+                                aria-pressed="false"
+                            >
+                                Customize
+                            </button>
+                            <button
+                                id="dbc-dashboard-reset"
+                                type="button"
+                                hidden
+                            >
+                                Reset layout
+                            </button>
                             <span id="dbc-selected-count">0 signals</span>
                         </div>
+                    </div>
+                    <div
+                        id="dbc-dashboard-editor"
+                        class="dbc-dashboard-editor"
+                        hidden
+                    >
+                        Move, resize or change the presentation of each signal.
+                        The layout is saved for this DBC file in this browser.
                     </div>
                     <div id="dbc-value-grid" class="dbc-value-grid">
                         <p class="note">Select signals from a message to build your dashboard.</p>

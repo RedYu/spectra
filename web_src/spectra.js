@@ -11819,6 +11819,26 @@
         const latest = new Map();
         const histories = new Map();
         let selected = new Set();
+        let dashboardEditing = false;
+        let dashboardLayout = [];
+        let dashboardLayouts = {};
+
+        try {
+            const storedLayouts = JSON.parse(
+                localStorage.getItem(
+                    'spectra:dbc-dashboard-layouts:v1'
+                ) || '{}'
+            );
+
+            if (storedLayouts &&
+                typeof storedLayouts === 'object' &&
+                !Array.isArray(storedLayouts)) {
+
+                dashboardLayouts = storedLayouts;
+            }
+        } catch (_) {
+            dashboardLayouts = {};
+        }
 
         try {
             selected = new Set(JSON.parse(
@@ -12035,6 +12055,118 @@
             return signal.unit ? `${value} ${signal.unit}` : value;
         }
 
+        function dashboardDatabaseKey() {
+            return database
+                ? database.name.trim().toLowerCase()
+                : '';
+        }
+
+        function findDashboardSignal(key) {
+            if (!database) {
+                return null;
+            }
+
+            for (const definition of database.messages.values()) {
+                for (const signal of definition.signals) {
+                    if (signalKey(definition, signal) === key) {
+                        return {
+                            definition,
+                            signal
+                        };
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        function saveDashboardLayout() {
+            const databaseKey = dashboardDatabaseKey();
+
+            if (!databaseKey) {
+                return;
+            }
+
+            dashboardLayouts[databaseKey] =
+                dashboardLayout.map(widget => ({
+                    key: widget.key,
+                    view: widget.view,
+                    size: widget.size
+                }));
+
+            try {
+                localStorage.setItem(
+                    'spectra:dbc-dashboard-layouts:v1',
+                    JSON.stringify(dashboardLayouts)
+                );
+            } catch (_) {
+                /* Layout remains available until the page is closed. */
+            }
+        }
+
+        function loadDashboardLayout() {
+            const stored =
+                dashboardLayouts[dashboardDatabaseKey()];
+
+            dashboardLayout = [];
+
+            if (Array.isArray(stored)) {
+                for (const widget of stored.slice(0, 64)) {
+                    if (!widget ||
+                        typeof widget.key !== 'string' ||
+                        !findDashboardSignal(widget.key)) {
+
+                        continue;
+                    }
+
+                    dashboardLayout.push({
+                        key: widget.key,
+                        view:
+                            ['value', 'gauge', 'graph']
+                                .includes(widget.view)
+                                ? widget.view
+                                : 'graph',
+                        size:
+                            [1, 2, 4].includes(
+                                Number(widget.size)
+                            )
+                                ? Number(widget.size)
+                                : 1
+                    });
+                }
+            }
+
+            if (dashboardLayout.length === 0) {
+                for (const key of selected) {
+                    if (findDashboardSignal(key)) {
+                        dashboardLayout.push({
+                            key,
+                            view: 'graph',
+                            size: 1
+                        });
+                    }
+                }
+            }
+
+            selected = new Set(
+                dashboardLayout.map(widget => widget.key)
+            );
+        }
+
+        function addDashboardSignal(key) {
+            if (dashboardLayout.some(
+                widget => widget.key === key
+            )) {
+                return;
+            }
+
+            dashboardLayout.push({
+                key,
+                view: 'graph',
+                size: 1
+            });
+        }
+
         function saveSelection() {
             try {
                 localStorage.setItem(
@@ -12044,6 +12176,8 @@
             } catch (_) {
                 /* Selection remains available until the page is closed. */
             }
+
+            saveDashboardLayout();
         }
 
         function renderMessages() {
@@ -12135,7 +12269,18 @@
                 input.onchange = () => {
                     const signal = currentMessage.signals.find(item => item.name === input.dataset.signal);
                     const key = signalKey(currentMessage, signal);
-                    input.checked ? selected.add(key) : selected.delete(key);
+
+                    if (input.checked) {
+                        selected.add(key);
+                        addDashboardSignal(key);
+                    } else {
+                        selected.delete(key);
+                        dashboardLayout =
+                            dashboardLayout.filter(
+                                widget => widget.key !== key
+                            );
+                    }
+
                     saveSelection();
                     renderValues();
                 };
@@ -12256,44 +12401,122 @@
             const historyLimit = Number(element('dbc-history-limit').value);
 
             if (database) {
-                for (const definition of database.messages.values()) {
+                dashboardLayout = dashboardLayout.filter(
+                    widget => findDashboardSignal(widget.key)
+                );
+
+                dashboardLayout.forEach((widget, index) => {
+                    const entry = findDashboardSignal(widget.key);
+
+                    if (!entry) {
+                        return;
+                    }
+
+                    const {definition, signal} = entry;
                     const frame = selectedFrame(definition);
+                    const decoded = decodeSignal(
+                        definition,
+                        signal,
+                        frame
+                    );
+                    const key = signalKey(definition, signal);
+                    let history = histories.get(key);
 
-                    for (const signal of definition.signals) {
-                        if (!selected.has(signalKey(definition, signal)))
-                            continue;
+                    if (!history) {
+                        history = [];
+                        histories.set(key, history);
+                    }
 
-                        const decoded = decodeSignal(definition, signal, frame);
-                        const key = signalKey(definition, signal);
-                        let history = histories.get(key);
+                    if (decoded && !decoded.inactive && frame &&
+                        history.at(-1)?.timestamp !== frame.timestamp) {
 
-                        if (!history) {
-                            history = [];
-                            histories.set(key, history);
+                        history.push({
+                            timestamp : frame.timestamp,
+                            value : decoded.physical
+                        });
+
+                        if (history.length > historyLimit) {
+                            history.splice(
+                                0,
+                                history.length - historyLimit
+                            );
                         }
+                    }
 
-                        if (decoded && !decoded.inactive && frame &&
-                            history.at(-1)?.timestamp !== frame.timestamp) {
+                    let visualization = '';
 
-                            history.push({
-                                timestamp : frame.timestamp,
-                                value : decoded.physical
-                            });
-
-                            if (history.length > historyLimit)
-                                history.splice(0, history.length - historyLimit);
-                        }
-
+                    if (widget.view === 'graph') {
                         const plotId = `dbc-plot-${plots.length}`;
                         plots.push({id : plotId, history});
-                        values.push(`<article class="dbc-value${decoded && !decoded.inactive && !decoded.valid ? ' invalid' : ''}">`
-                            + `<span>${escapeHtml(definition.name)} · 0x${hex(definition.id, definition.extended ? 8 : 3)}</span>`
-                            + `<strong>${escapeHtml(signal.name)}</strong>`
-                            + `<b>${escapeHtml(formatValue(decoded, signal))}</b>`
-                            + `<canvas id="${plotId}" class="dbc-sparkline" aria-label="${escapeHtml(signal.name)} history"></canvas>`
-                            + `</article>`);
+
+                        visualization =
+                            `<canvas id="${plotId}" class="dbc-sparkline" `
+                            + `aria-label="${escapeHtml(signal.name)} history"></canvas>`;
+                    } else if (widget.view === 'gauge') {
+                        const physical = decoded &&
+                            !decoded.inactive
+                            ? Number(decoded.physical)
+                            : Number.NaN;
+
+                        const range =
+                            signal.maximum - signal.minimum;
+
+                        const percentage =
+                            Number.isFinite(physical) &&
+                            Number.isFinite(range) &&
+                            range > 0
+                                ? Math.max(
+                                    0,
+                                    Math.min(
+                                        100,
+                                        (physical - signal.minimum) *
+                                        100 / range
+                                    )
+                                )
+                                : 0;
+
+                        visualization =
+                            `<div class="dbc-value-gauge"><i style="width:${percentage.toFixed(2)}%"></i></div>`
+                            + `<div class="dbc-value-range"><span>${escapeHtml(signal.minimum)}</span>`
+                            + `<span>${escapeHtml(signal.maximum)} ${escapeHtml(signal.unit || '')}</span></div>`;
                     }
-                }
+
+                    let controls = '';
+
+                    if (dashboardEditing) {
+                        controls =
+                            `<div class="dbc-dashboard-controls" data-dashboard-index="${index}">`
+                            + `<button type="button" data-dashboard-action="left" title="Move left">←</button>`
+                            + `<button type="button" data-dashboard-action="right" title="Move right">→</button>`
+                            + `<select data-dashboard-action="view" aria-label="Widget presentation">`
+                            + `<option value="value"${widget.view === 'value' ? ' selected' : ''}>Value</option>`
+                            + `<option value="gauge"${widget.view === 'gauge' ? ' selected' : ''}>Gauge</option>`
+                            + `<option value="graph"${widget.view === 'graph' ? ' selected' : ''}>Graph</option>`
+                            + `</select>`
+                            + `<select data-dashboard-action="size" aria-label="Widget width">`
+                            + `<option value="1"${widget.size === 1 ? ' selected' : ''}>Small</option>`
+                            + `<option value="2"${widget.size === 2 ? ' selected' : ''}>Medium</option>`
+                            + `<option value="4"${widget.size === 4 ? ' selected' : ''}>Wide</option>`
+                            + `</select>`
+                            + `<button type="button" class="remove" data-dashboard-action="remove">Remove</button>`
+                            + `</div>`;
+                    }
+
+                    values.push(
+                        `<article class="dbc-value${
+                            decoded && !decoded.inactive &&
+                            !decoded.valid
+                                ? ' invalid'
+                                : ''
+                        }${dashboardEditing ? ' dashboard-editing' : ''}" data-size="${widget.size}">`
+                        + `<span>${escapeHtml(definition.name)} · 0x${hex(definition.id, definition.extended ? 8 : 3)}</span>`
+                        + `<strong>${escapeHtml(signal.name)}</strong>`
+                        + `<b>${escapeHtml(formatValue(decoded, signal))}</b>`
+                        + visualization
+                        + controls
+                        + `</article>`
+                    );
+                });
             }
 
             selectedCount.textContent = `${values.length} signal${values.length === 1 ? '' : 's'}`;
@@ -12443,6 +12666,7 @@
             currentMessage = database.messages.values().next().value || null;
             latest.clear();
             histories.clear();
+            loadDashboardLayout();
             messageListDirty = true;
             element('dbc-summary').textContent =
                 `${name} · ${database.messages.size} messages · `
@@ -12620,6 +12844,135 @@
         element('dbc-search').oninput = renderMessages;
         element('dbc-active-only').onchange = renderMessages;
         element('dbc-bus').onchange = render;
+        valueGrid.onclick = event => {
+            const action = event.target.closest(
+                '[data-dashboard-action]'
+            );
+
+            if (!action || action.tagName !== 'BUTTON') {
+                return;
+            }
+
+            const controls = action.closest(
+                '[data-dashboard-index]'
+            );
+
+            const index = Number(
+                controls?.dataset.dashboardIndex
+            );
+
+            if (!Number.isInteger(index) ||
+                !dashboardLayout[index]) {
+
+                return;
+            }
+
+            if (action.dataset.dashboardAction === 'left' &&
+                index > 0) {
+
+                [dashboardLayout[index - 1], dashboardLayout[index]] =
+                    [dashboardLayout[index], dashboardLayout[index - 1]];
+            } else if (
+                action.dataset.dashboardAction === 'right' &&
+                index + 1 < dashboardLayout.length
+            ) {
+                [dashboardLayout[index], dashboardLayout[index + 1]] =
+                    [dashboardLayout[index + 1], dashboardLayout[index]];
+            } else if (
+                action.dataset.dashboardAction === 'remove'
+            ) {
+                selected.delete(dashboardLayout[index].key);
+                dashboardLayout.splice(index, 1);
+                renderSignals();
+            } else {
+                return;
+            }
+
+            saveSelection();
+            renderValues();
+        };
+        valueGrid.onchange = event => {
+            const control = event.target.closest(
+                'select[data-dashboard-action]'
+            );
+
+            if (!control) {
+                return;
+            }
+
+            const container = control.closest(
+                '[data-dashboard-index]'
+            );
+
+            const index = Number(
+                container?.dataset.dashboardIndex
+            );
+
+            if (!Number.isInteger(index) ||
+                !dashboardLayout[index]) {
+
+                return;
+            }
+
+            if (control.dataset.dashboardAction === 'view') {
+                dashboardLayout[index].view = control.value;
+            } else if (
+                control.dataset.dashboardAction === 'size'
+            ) {
+                dashboardLayout[index].size =
+                    Number(control.value);
+            }
+
+            saveDashboardLayout();
+            renderValues();
+        };
+        element('dbc-dashboard-customize').onclick = () => {
+            dashboardEditing = !dashboardEditing;
+
+            const button =
+                element('dbc-dashboard-customize');
+
+            button.textContent = dashboardEditing
+                ? 'Done'
+                : 'Customize';
+
+            button.setAttribute(
+                'aria-pressed',
+                String(dashboardEditing)
+            );
+
+            element('dbc-dashboard-editor').hidden =
+                !dashboardEditing;
+
+            element('dbc-dashboard-reset').hidden =
+                !dashboardEditing;
+
+            renderValues();
+        };
+        element('dbc-dashboard-reset').onclick = () => {
+            dashboardLayout = [];
+
+            if (database) {
+                for (const definition of database.messages.values()) {
+                    for (const signal of definition.signals) {
+                        const key = signalKey(definition, signal);
+
+                        if (selected.has(key)) {
+                            dashboardLayout.push({
+                                key,
+                                view: 'graph',
+                                size: 1
+                            });
+                        }
+                    }
+                }
+            }
+
+            saveDashboardLayout();
+            renderValues();
+            message.textContent =
+                'DBC dashboard layout reset.';
+        };
         element('dbc-history-limit').onchange = () => {
             const limit = Number(element('dbc-history-limit').value);
 
