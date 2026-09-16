@@ -1723,6 +1723,55 @@
                     "can-secondary-listen-only"
                 ),
 
+            otaCurrentVersion:
+                document.getElementById(
+                    "ota-current-version"
+                ),
+
+            otaState:
+                document.getElementById("ota-state"),
+
+            otaRunningPartition:
+                document.getElementById(
+                    "ota-running-partition"
+                ),
+
+            otaUpdatePartition:
+                document.getElementById(
+                    "ota-update-partition"
+                ),
+
+            otaFile:
+                document.getElementById("ota-file"),
+
+            otaFileName:
+                document.getElementById("ota-file-name"),
+
+            otaProgress:
+                document.getElementById("ota-progress"),
+
+            otaProgressLabel:
+                document.getElementById(
+                    "ota-progress-label"
+                ),
+
+            otaProgressValue:
+                document.getElementById(
+                    "ota-progress-value"
+                ),
+
+            otaStatus:
+                document.getElementById("ota-status"),
+
+            otaUpload:
+                document.getElementById("ota-upload"),
+
+            otaCancel:
+                document.getElementById("ota-cancel"),
+
+            otaRestart:
+                document.getElementById("ota-restart"),
+
             restart:
                 document.getElementById("restart"),
 
@@ -1744,6 +1793,10 @@
         let operationBusy = false;
         let scanRunning = false;
         let scanPollTimer = null;
+        let otaBusy = false;
+        let otaInfo = null;
+        let otaPollTimer = null;
+        let otaRequest = null;
 
         function updateActionStates() {
             elements.restart.disabled =
@@ -2288,6 +2341,417 @@
             }
 
             return result;
+        }
+
+        function formatOtaBytes(value) {
+            const bytes = Number(value);
+
+            if (!Number.isFinite(bytes) ||
+                (bytes < 0)) {
+
+                return "-";
+            }
+
+            if (bytes < 1024) {
+                return `${bytes} B`;
+            }
+
+            if (bytes < (1024 * 1024)) {
+                return `${(bytes / 1024).toFixed(1)} KiB`;
+            }
+
+            return `${(
+                bytes / (1024 * 1024)
+            ).toFixed(2)} MiB`;
+        }
+
+        function setOtaStatus(
+            text,
+            type = ""
+        ) {
+            elements.otaStatus.textContent = text;
+            elements.otaStatus.className =
+                `status ${type}`.trim();
+        }
+
+        function updateOtaControls() {
+            const state = otaInfo?.state ||
+                "unavailable";
+
+            const file = elements.otaFile.files[0];
+            const receiving = state === "receiving";
+            const ready = state === "ready";
+
+            elements.otaUpload.disabled =
+                otaBusy ||
+                receiving ||
+                ready ||
+                !file;
+
+            elements.otaCancel.disabled =
+                otaBusy
+                    ? otaRequest === null
+                    : !receiving && !ready &&
+                        state !== "error";
+
+            elements.otaRestart.disabled =
+                otaBusy ||
+                !ready;
+
+            elements.otaFile.disabled =
+                otaBusy || receiving || ready;
+        }
+
+        function renderOtaInfo(info) {
+            otaInfo = info;
+
+            const state = info.state || "unknown";
+            const stateNames = {
+                uninitialized: "Unavailable",
+                idle: "Ready for upload",
+                receiving: "Receiving firmware",
+                ready: "Validated · restart required",
+                error: "Update error"
+            };
+
+            elements.otaState.textContent =
+                stateNames[state] || state;
+
+            elements.otaRunningPartition.textContent =
+                info.running_partition || "-";
+
+            elements.otaUpdatePartition.textContent =
+                info.update_partition
+                    ? `${info.update_partition} · ${
+                        formatOtaBytes(
+                            info.update_partition_size
+                        )
+                    }`
+                    : "-";
+
+            if (!otaBusy) {
+                const progress = Math.max(
+                    0,
+                    Math.min(
+                        100,
+                        Number(info.progress_percent) || 0
+                    )
+                );
+
+                elements.otaProgress.value = progress;
+                elements.otaProgressValue.textContent =
+                    `${progress}%`;
+
+                if (state === "ready") {
+                    elements.otaProgressLabel.textContent =
+                        `${info.version || "Firmware"} validated`;
+
+                    setOtaStatus(
+                        "Firmware is ready. Restart to activate it.",
+                        "success"
+                    );
+                } else if (state === "receiving") {
+                    elements.otaProgressLabel.textContent =
+                        `${formatOtaBytes(info.written_size)} / ${
+                            formatOtaBytes(info.image_size)
+                        }`;
+                } else if (state === "error") {
+                    elements.otaProgressLabel.textContent =
+                        "Firmware update failed";
+
+                    setOtaStatus(
+                        info.last_error_name || "OTA error",
+                        "error"
+                    );
+                } else {
+                    elements.otaProgressLabel.textContent =
+                        "Waiting for firmware image";
+
+                    setOtaStatus(
+                        "Choose build/spectra.bin to begin."
+                    );
+                }
+            }
+
+            updateOtaControls();
+        }
+
+        async function refreshOtaInfo() {
+            try {
+                const info = await fetchJson(
+                    "/api/ota",
+                    {
+                        cache: "no-store"
+                    }
+                );
+
+                renderOtaInfo(info);
+            } catch (error) {
+                elements.otaState.textContent = "Unavailable";
+                setOtaStatus(
+                    `OTA status unavailable: ${error.message}`,
+                    "error"
+                );
+            } finally {
+                window.clearTimeout(otaPollTimer);
+
+                otaPollTimer = window.setTimeout(
+                    refreshOtaInfo,
+                    2000
+                );
+            }
+        }
+
+        async function loadCurrentFirmwareVersion() {
+            try {
+                const system = await fetchJson(
+                    "/api/system",
+                    {
+                        cache: "no-store"
+                    }
+                );
+
+                elements.otaCurrentVersion.textContent =
+                    system.firmware_version || "-";
+            } catch {
+                elements.otaCurrentVersion.textContent = "-";
+            }
+        }
+
+        function uploadOtaFirmware() {
+            if (otaBusy) {
+                return;
+            }
+
+            const file = elements.otaFile.files[0];
+
+            if (!file) {
+                setOtaStatus(
+                    "Choose a firmware image first.",
+                    "error"
+                );
+
+                return;
+            }
+
+            if (!/\.bin$/i.test(file.name)) {
+                setOtaStatus(
+                    "Firmware file must use the .bin extension.",
+                    "error"
+                );
+
+                return;
+            }
+
+            if (otaInfo &&
+                Number(otaInfo.update_partition_size) > 0 &&
+                file.size >
+                    Number(otaInfo.update_partition_size)) {
+
+                setOtaStatus(
+                    "Firmware image does not fit the OTA partition.",
+                    "error"
+                );
+
+                return;
+            }
+
+            const confirmed = window.confirm(
+                `Upload ${file.name} (${formatOtaBytes(file.size)})?\n\n` +
+                "Keep external power connected during the update."
+            );
+
+            if (!confirmed) {
+                return;
+            }
+
+            otaBusy = true;
+            elements.otaProgress.value = 0;
+            elements.otaProgressValue.textContent = "0%";
+            elements.otaProgressLabel.textContent =
+                `Uploading ${file.name}`;
+
+            setOtaStatus(
+                "Uploading firmware to the inactive partition..."
+            );
+
+            const request = new XMLHttpRequest();
+            otaRequest = request;
+            updateOtaControls();
+
+            request.open(
+                "POST",
+                "/api/ota"
+            );
+
+            request.timeout = 10 * 60 * 1000;
+
+            request.setRequestHeader(
+                "Content-Type",
+                "application/octet-stream"
+            );
+
+            request.upload.onprogress = event => {
+                if (!event.lengthComputable) {
+                    return;
+                }
+
+                const progress = Math.round(
+                    event.loaded * 100 / event.total
+                );
+
+                elements.otaProgress.value = progress;
+                elements.otaProgressValue.textContent =
+                    `${progress}%`;
+
+                elements.otaProgressLabel.textContent =
+                    `${formatOtaBytes(event.loaded)} / ${
+                        formatOtaBytes(event.total)
+                    }`;
+            };
+
+            const complete = async (
+                error = null
+            ) => {
+                otaRequest = null;
+                otaBusy = false;
+
+                if (error !== null) {
+                    setOtaStatus(error, "error");
+                }
+
+                updateOtaControls();
+                await refreshOtaInfo();
+            };
+
+            request.onload = () => {
+                let response = null;
+
+                try {
+                    response = JSON.parse(
+                        request.responseText || "{}"
+                    );
+                } catch {
+                    /* HTTP status is reported below. */
+                }
+
+                if ((request.status >= 200) &&
+                    (request.status < 300)) {
+
+                    if (response) {
+                        renderOtaInfo(response);
+                    }
+
+                    void complete();
+                } else {
+                    void complete(
+                        response?.message ||
+                        `Firmware upload failed: HTTP ${request.status}`
+                    );
+                }
+            };
+
+            request.onerror = () => {
+                void complete(
+                    "Firmware upload connection failed."
+                );
+            };
+
+            request.ontimeout = () => {
+                void complete(
+                    "Firmware upload timed out."
+                );
+            };
+
+            request.onabort = () => {
+                void complete(
+                    "Firmware upload cancelled."
+                );
+            };
+
+            request.send(file);
+        }
+
+        async function cancelOtaUpdate() {
+            if (otaRequest !== null) {
+                otaRequest.abort();
+            }
+
+            otaBusy = true;
+            updateOtaControls();
+            setOtaStatus("Cancelling OTA update...");
+
+            try {
+                await fetchJson(
+                    "/api/ota?action=cancel",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                setOtaStatus(
+                    "OTA update cancelled.",
+                    "success"
+                );
+            } catch (error) {
+                setOtaStatus(
+                    `Failed to cancel OTA update: ${error.message}`,
+                    "error"
+                );
+            } finally {
+                otaBusy = false;
+                await refreshOtaInfo();
+            }
+        }
+
+        async function restartIntoOtaUpdate() {
+            if (otaBusy ||
+                otaInfo?.state !== "ready") {
+
+                return;
+            }
+
+            if (!window.confirm(
+                    "Restart into the validated firmware now?"
+                )) {
+
+                return;
+            }
+
+            otaBusy = true;
+            updateOtaControls();
+            setOtaStatus(
+                "Scheduling restart into the updated firmware..."
+            );
+
+            try {
+                await fetchJson(
+                    "/api/ota?action=restart",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                setOtaStatus(
+                    "Device is restarting into the update...",
+                    "success"
+                );
+
+                window.setTimeout(
+                    () => {
+                        window.location.href = "/";
+                    },
+                    10000
+                );
+            } catch (error) {
+                otaBusy = false;
+                updateOtaControls();
+
+                setOtaStatus(
+                    `Failed to restart: ${error.message}`,
+                    "error"
+                );
+            }
         }
 
         function populateSettings(settings) {
@@ -3239,6 +3703,41 @@
             startWifiScan
         );
 
+        elements.otaFile.addEventListener(
+            "change",
+            () => {
+                const file =
+                    elements.otaFile.files[0];
+
+                elements.otaFileName.textContent =
+                    file
+                        ? `${file.name} · ${
+                            formatOtaBytes(file.size)
+                        }`
+                        : "No file chosen";
+
+                elements.otaFileName.title =
+                    file?.name || "No file chosen";
+
+                updateOtaControls();
+            }
+        );
+
+        elements.otaUpload.addEventListener(
+            "click",
+            uploadOtaFirmware
+        );
+
+        elements.otaCancel.addEventListener(
+            "click",
+            cancelOtaUpdate
+        );
+
+        elements.otaRestart.addEventListener(
+            "click",
+            restartIntoOtaUpdate
+        );
+
         window.addEventListener(
             "beforeunload",
             () => {
@@ -3249,11 +3748,21 @@
 
                     scanPollTimer = null;
                 }
+
+                if (otaPollTimer !== null) {
+                    window.clearTimeout(
+                        otaPollTimer
+                    );
+
+                    otaPollTimer = null;
+                }
             }
         );
 
         loadSettings();
         loadWifiScanStatus();
+        loadCurrentFirmwareVersion();
+        refreshOtaInfo();
     
     }
 
