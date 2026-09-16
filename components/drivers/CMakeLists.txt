@@ -5,6 +5,7 @@ idf_component_register(
         "display_driver.c"
         "touch_driver.c"
         "axp313a_driver.c"
+        "mcp23017_driver.c"
         "battery_adc_driver.c"
         "buzzer_driver.c"
         "can_twai_driver.c"

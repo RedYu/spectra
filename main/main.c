@@ -19,6 +19,7 @@
 #include "board.h"
 #include "display_driver.h"
 #include "touch_driver.h"
+#include "mcp23017_driver.h"
 #include "system_model.h"
 #include "system_service.h"
 #include "power_service.h"
@@ -503,6 +504,26 @@ static void startup_task(
                         ->dcdc_overvoltage_shutdown_enabled
             );
         }
+    }
+
+    /*
+     * Detect the GPIO expander without changing its reset-default input
+     * configuration. Pin assignments are applied by their owning service.
+     */
+    result =
+        mcp23017_driver_init(
+            board_i2c_get_handle(),
+            NULL
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "MCP23017 initialization failed: %s",
+            esp_err_to_name(result)
+        );
+
+        startup_warning = true;
     }
 
     /*
