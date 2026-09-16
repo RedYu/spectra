@@ -44,6 +44,7 @@
 #include "can_transmit_service.h"
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
+#include "can_termination_service.h"
 #include "ota_service.h"
 #include "isotp_service.h"
 #include "xcp_service.h"
@@ -524,6 +525,19 @@ static void startup_task(
         );
 
         startup_warning = true;
+    } else {
+        result =
+            can_termination_service_init();
+
+        if (result != ESP_OK) {
+            ESP_LOGW(
+                TAG,
+                "CAN termination initialization failed: %s",
+                esp_err_to_name(result)
+            );
+
+            startup_warning = true;
+        }
     }
 
     /*

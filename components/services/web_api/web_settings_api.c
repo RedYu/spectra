@@ -18,6 +18,7 @@
 
 #include "settings_model.h"
 #include "settings_service.h"
+#include "can_termination_service.h"
 #include "time_service.h"
 #include "web_api_common.h"
 
@@ -186,6 +187,13 @@ static esp_err_t web_settings_api_get_handler(
             esp_err_to_name(credentials_result)
         );
     }
+
+    can_termination_service_info_t termination = {0};
+
+    const bool termination_supported =
+        can_termination_service_get_info(
+            &termination
+        ) == ESP_OK;
 
     cJSON *response =
         cJSON_CreateObject();
@@ -582,6 +590,21 @@ static esp_err_t web_settings_api_get_handler(
 
     valid = valid &&
         (cJSON_AddBoolToObject(
+            can_primary,
+            "termination_supported",
+            termination_supported
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            can_primary,
+            "termination_enabled",
+            termination_supported &&
+            termination.primary_enabled
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
             can_secondary,
             "enabled",
             settings->can_secondary.enabled
@@ -620,6 +643,21 @@ static esp_err_t web_settings_api_get_handler(
             can_secondary,
             "listen_only",
             settings->can_secondary.listen_only
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            can_secondary,
+            "termination_supported",
+            termination_supported
+        ) != NULL);
+
+    valid = valid &&
+        (cJSON_AddBoolToObject(
+            can_secondary,
+            "termination_enabled",
+            termination_supported &&
+            termination.secondary_enabled
         ) != NULL);
 
     /*
@@ -1504,9 +1542,16 @@ static esp_err_t web_settings_api_put_handler(
                     "listen_only"
                 );
 
+            const cJSON *termination_enabled =
+                cJSON_GetObjectItemCaseSensitive(
+                    primary,
+                    "termination_enabled"
+                );
+
             if ((enabled == NULL) &&
                 (bitrate == NULL) &&
-                (listen_only == NULL)) {
+                (listen_only == NULL) &&
+                (termination_enabled == NULL)) {
 
                 goto invalid_settings;
             }
@@ -1530,6 +1575,12 @@ static esp_err_t web_settings_api_put_handler(
 
             if ((listen_only != NULL) &&
                 !cJSON_IsBool(listen_only)) {
+
+                goto invalid_settings;
+            }
+
+            if ((termination_enabled != NULL) &&
+                !cJSON_IsBool(termination_enabled)) {
 
                 goto invalid_settings;
             }
@@ -1591,6 +1642,18 @@ static esp_err_t web_settings_api_put_handler(
                 goto apply_failed;
             }
 
+            if (termination_enabled != NULL) {
+                result =
+                    can_termination_service_set_enabled(
+                        CAN_BUS_PRIMARY,
+                        cJSON_IsTrue(termination_enabled)
+                    );
+
+                if (result != ESP_OK) {
+                    goto apply_failed;
+                }
+            }
+
             applied = true;
         }
 
@@ -1643,6 +1706,12 @@ static esp_err_t web_settings_api_put_handler(
                     "listen_only"
                 );
 
+            const cJSON *termination_enabled =
+                cJSON_GetObjectItemCaseSensitive(
+                    secondary,
+                    "termination_enabled"
+                );
+
             /*
              * An empty Secondary CAN object is not a valid update.
              */
@@ -1651,7 +1720,8 @@ static esp_err_t web_settings_api_put_handler(
                 (data_bitrate == NULL) &&
                 (fd_enabled == NULL) &&
                 (brs_enabled == NULL) &&
-                (listen_only == NULL)) {
+                (listen_only == NULL) &&
+                (termination_enabled == NULL)) {
 
                 goto invalid_settings;
             }
@@ -1663,7 +1733,9 @@ static esp_err_t web_settings_api_put_handler(
                 ((brs_enabled != NULL) &&
                 !cJSON_IsBool(brs_enabled)) ||
                 ((listen_only != NULL) &&
-                !cJSON_IsBool(listen_only))) {
+                !cJSON_IsBool(listen_only)) ||
+                ((termination_enabled != NULL) &&
+                !cJSON_IsBool(termination_enabled))) {
 
                 goto invalid_settings;
             }
@@ -1767,6 +1839,18 @@ static esp_err_t web_settings_api_put_handler(
 
             if (result != ESP_OK) {
                 goto apply_failed;
+            }
+
+            if (termination_enabled != NULL) {
+                result =
+                    can_termination_service_set_enabled(
+                        CAN_BUS_SECONDARY,
+                        cJSON_IsTrue(termination_enabled)
+                    );
+
+                if (result != ESP_OK) {
+                    goto apply_failed;
+                }
             }
 
             applied = true;

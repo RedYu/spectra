@@ -8279,7 +8279,9 @@
                               : ""}
             </div>
             <div class="can-config-card-footer">
-                <span title="No termination control is exposed by this firmware">120 Ω · Not supported</span>
+                <label title="Connect the onboard 120-ohm CAN termination resistor">
+                    <input data-field="termination" type="checkbox">120 Ω termination
+                </label>
                 <button type="button" data-action="apply">Apply ${
                     secondary ? "Secondary" : "Primary"}</button>
             </div>
@@ -8292,8 +8294,8 @@
             <span class="can-config-status" role="status" aria-live="polite">Loading CAN settings…</span>
             <button type="button" data-action="reload">Reload</button>
             <button type="button" data-action="save">Save to device</button>
-            <small>Apply restarts the selected CAN interface. Save stores all current device settings.
-                120 Ω control is not exposed by the firmware.</small>
+            <small>Apply updates the selected CAN interface and termination output.
+                Termination state is runtime-only and starts disabled after reboot.</small>
         </div>`;
 
             const status = host.querySelector(".can-config-status");
@@ -8353,6 +8355,12 @@
                     throw new Error("Unsupported CAN settings response");
                 }
                 field(panel, "enabled").checked = config.enabled;
+                const termination = field(panel, "termination");
+                termination.checked = config.termination_enabled === true;
+                termination.disabled = config.termination_supported !== true;
+                termination.parentElement.title = config.termination_supported === true
+                    ? "Connect the onboard 120-ohm CAN termination resistor"
+                    : "CAN termination control is unavailable";
                 field(panel, "mode").value = config.listen_only ? "listen" : "normal";
                 field(panel, "rate").value =
                     String(secondary ? config.nominal_bitrate : config.bitrate);
@@ -8403,6 +8411,8 @@
                     enabled : field(panel, "enabled").checked,
                     listen_only : field(panel, "mode").value === "listen"
                 };
+                if (!field(panel, "termination").disabled)
+                    config.termination_enabled = field(panel, "termination").checked;
                 if (bus === "primary") {
                     config.bitrate = rate;
                 } else {

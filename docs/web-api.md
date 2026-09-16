@@ -396,7 +396,9 @@ Representative response:
     "primary": {
       "enabled": true,
       "bitrate": 500000,
-      "listen_only": true
+      "listen_only": true,
+      "termination_supported": true,
+      "termination_enabled": false
     },
     "secondary": {
       "enabled": true,
@@ -404,7 +406,9 @@ Representative response:
       "data_bitrate": 2000000,
       "fd_enabled": true,
       "brs_enabled": true,
-      "listen_only": true
+      "listen_only": true,
+      "termination_supported": true,
+      "termination_enabled": false
     }
   }
 }
@@ -456,7 +460,8 @@ Example changing both CAN channels:
     "primary": {
       "enabled": true,
       "bitrate": 500000,
-      "listen_only": true
+      "listen_only": true,
+      "termination_enabled": false
     },
     "secondary": {
       "enabled": true,
@@ -464,11 +469,17 @@ Example changing both CAN channels:
       "data_bitrate": 2000000,
       "fd_enabled": true,
       "brs_enabled": true,
-      "listen_only": true
+      "listen_only": true,
+      "termination_enabled": false
     }
   }
 }
 ```
+
+`termination_supported` is read-only and reports whether the MCP23017-backed
+control is available. `termination_enabled` can be applied independently for
+each CAN channel. The termination state is currently runtime-only and returns
+to the safe disabled state after reboot.
 
 Do not assume a change was persisted merely because it was applied
 successfully.

@@ -37,6 +37,19 @@
 #define TOUCH_PIN_INT          GPIO_NUM_13
 #define TOUCH_PIN_RST          GPIO_NUM_NC
 
+/*
+ * MCP23017 GPIO-expander assignments.
+ *
+ * Each output controls an external switch or transistor that connects a
+ * 120-ohm resistor between CAN_H and CAN_L. The MCP23017 pin must never
+ * carry CAN-bus current directly.
+ */
+#define CAN_PRIMARY_TERMINATION_EXPANDER_PIN   (0U)
+#define CAN_SECONDARY_TERMINATION_EXPANDER_PIN (1U)
+
+#define CAN_PRIMARY_TERMINATION_ACTIVE_LEVEL   (1)
+#define CAN_SECONDARY_TERMINATION_ACTIVE_LEVEL (1)
+
 #define LCD_SWAP_XY   true
 #define LCD_MIRROR_X  true
 #define LCD_MIRROR_Y  false
