@@ -27,7 +27,7 @@
 #include "isotp_service.h"
 #include "xcp_service.h"
 
-#define WEB_SERVICE_MAX_URI_HANDLERS  (40U)
+#define WEB_SERVICE_MAX_URI_HANDLERS  (48U)
 
 static const char *TAG = "web_service";
 
