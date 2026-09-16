@@ -430,35 +430,17 @@ static esp_err_t web_content_diagnostics_page_handler(
     );
 }
 
-static esp_err_t web_content_legacy_can_test_handler(
+static esp_err_t web_content_obd2_page_handler(
     httpd_req_t *request
 )
 {
-    esp_err_t result =
-        httpd_resp_set_status(
-            request,
-            "302 Found"
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    result =
-        httpd_resp_set_hdr(
-            request,
-            "Location",
-            "/diagnostics"
-        );
-
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    return httpd_resp_send(
+    return web_content_send_storage_file(
         request,
-        NULL,
-        0U
+        WEB_CONTENT_TEXT_DIRECTORY
+        "obd2.html"
+        WEB_CONTENT_TEXT_SUFFIX,
+        "text/html; charset=utf-8",
+        WEB_CONTENT_TEXT_COMPRESSED
     );
 }
 
@@ -664,15 +646,15 @@ esp_err_t web_content_service_register(
             NULL,
     };
 
-    static const httpd_uri_t legacy_can_test_uri = {
+    static const httpd_uri_t obd2_page_uri = {
         .uri =
-            "/can_test",
+            "/obd2",
 
         .method =
             HTTP_GET,
 
         .handler =
-            web_content_legacy_can_test_handler,
+            web_content_obd2_page_handler,
 
         .user_ctx =
             NULL,
@@ -833,13 +815,13 @@ esp_err_t web_content_service_register(
     result =
         httpd_register_uri_handler(
             server,
-            &legacy_can_test_uri
+            &obd2_page_uri
         );
 
     if (result != ESP_OK) {
         ESP_LOGE(
             TAG,
-            "Failed to register legacy GET /can_test: %s",
+            "Failed to register GET /obd2: %s",
             esp_err_to_name(result)
         );
 

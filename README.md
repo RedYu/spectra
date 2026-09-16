@@ -128,6 +128,7 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Raw UDS service requests through the Web interface
 - Dedicated ISO-TP/UDS diagnostics and UDS Programming pages
 - Live decoded raw CAN trace for ISO-TP, UDS, and XCP diagnostics
+- OBD-II console with live Mode 01 PIDs, DTCs, VIN, calibration data, and raw trace
 - Stateful multi-session XCP master over CAN
 - XCP RES, ERR, EV, SERV, and DAQ packet classification
 - CONNECT and discovery response decoding with standard XCP errors
@@ -192,8 +193,9 @@ The detailed firmware architecture is documented in
 The shared CAN types and validation rules are documented in
 [docs/can-frame-model.md](docs/can-frame-model.md).
 The diagnostic protocols are documented in
-[docs/isotp.md](docs/isotp.md), [docs/uds.md](docs/uds.md), and
-[docs/xcp.md](docs/xcp.md). Hardware acceptance filters and the HTTP API are
+[docs/isotp.md](docs/isotp.md), [docs/uds.md](docs/uds.md),
+[docs/obd2.md](docs/obd2.md), and [docs/xcp.md](docs/xcp.md).
+Hardware acceptance filters and the HTTP API are
 described in [docs/can-hardware-filters.md](docs/can-hardware-filters.md) and
 [docs/web-api.md](docs/web-api.md). Streaming firmware image readers are
 described in [docs/firmware-images.md](docs/firmware-images.md).

@@ -5254,6 +5254,36 @@
         return `UDS ${positive ? 'response' : 'request'} · ${description}`;
     }
 
+    function decodeObdPayload(payload, response) {
+        if (!payload.length)
+            return 'OBD-II · empty payload';
+
+        if ((payload[0] === 0x7f) && (payload.length >= 3)) {
+            return `OBD-II negative response · mode 0x${protocolTraceHex(payload[1])} · ` +
+                `code 0x${protocolTraceHex(payload[2])}`;
+        }
+
+        const mode = response && (payload[0] >= 0x40)
+            ? payload[0] - 0x40
+            : payload[0];
+        const modeNames = new Map([
+            [0x01, 'Current powertrain data'],
+            [0x02, 'Freeze-frame data'],
+            [0x03, 'Stored diagnostic trouble codes'],
+            [0x04, 'Clear diagnostic information'],
+            [0x07, 'Pending diagnostic trouble codes'],
+            [0x09, 'Vehicle information'],
+            [0x0a, 'Permanent diagnostic trouble codes']
+        ]);
+        let description =
+            modeNames.get(mode) || `Mode 0x${protocolTraceHex(mode)}`;
+
+        if ([0x01, 0x02, 0x09].includes(mode) && (payload.length >= 2))
+            description += ` · PID 0x${protocolTraceHex(payload[1])}`;
+
+        return `OBD-II ${response ? 'response' : 'request'} · ${description}`;
+    }
+
     function decodeIsoTpFrame(event, configuration) {
         const data = event.data;
         const addressOffset = configuration.addressed ? 1 : 0;
@@ -5296,6 +5326,9 @@
             payloadOffset,
             payloadOffset + Math.min(payloadLength, available)
         );
+
+        if (configuration.obd && payload.length)
+            return `${frameDescription} · ${decodeObdPayload(payload, configuration.response)}`;
 
         if (configuration.uds && payload.length)
             return `${frameDescription} · ${decodeUdsPayload(payload, configuration.response)}`;
@@ -5460,6 +5493,27 @@
             return {roles, titles};
         }
 
+        if (configuration.obd && (payloadOffset < payloadEnd)) {
+            const mode = event.data[payloadOffset];
+
+            if (mode === 0x7f) {
+                mark(payloadOffset, 'error', 'OBD-II negative response');
+                mark(payloadOffset + 1, 'service', 'Rejected OBD-II mode');
+                mark(payloadOffset + 2, 'error', 'Negative response code');
+            } else {
+                mark(payloadOffset, 'service', 'OBD-II mode');
+
+                const baseMode = configuration.response && (mode >= 0x40)
+                    ? mode - 0x40
+                    : mode;
+
+                if ([0x01, 0x02, 0x09].includes(baseMode))
+                    mark(payloadOffset + 1, 'command', 'OBD-II PID');
+            }
+
+            return {roles, titles};
+        }
+
         if (!configuration.uds || (payloadOffset >= payloadEnd))
             return {roles, titles};
 
@@ -5614,6 +5668,26 @@
                         id : parseIdentifier('xcp-response-id'),
                         response : true,
                         xcp : true
+                    }
+                ];
+            }
+
+            if (protocol === 'obd2') {
+                const bus = selectedBus('obd-bus');
+                return [
+                    {
+                        bus,
+                        id : parseIdentifier('obd-request-id'),
+                        response : false,
+                        obd : true,
+                        addressed : false
+                    },
+                    {
+                        bus,
+                        id : parseIdentifier('obd-response-id'),
+                        response : true,
+                        obd : true,
+                        addressed : false
                     }
                 ];
             }
@@ -5794,7 +5868,7 @@
         });
 
         for (const selector of [
-            '#isotp-bus', '#uds-bus', '#xcp-bus'
+            '#isotp-bus', '#uds-bus', '#xcp-bus', '#obd-bus'
         ]) {
             const input = document.querySelector(selector);
             if (input)
@@ -10268,6 +10342,374 @@
         setInterval(refresh, 300);
     }
 
+    function init_obd2() {
+        const element = id => document.getElementById(id);
+        const status = element('obd-status');
+        const message = element('obd-message');
+        const value = element('obd-value');
+        const valueName = element('obd-value-name');
+        const responseData = element('obd-response-data');
+        const responseSummary = element('obd-response-summary');
+        const information = element('obd-information-data');
+        let channelOpen = false;
+        let live = false;
+        let liveTimer = null;
+
+        const pidDefinitions = new Map([
+            [0x00, ['Supported PIDs 01–20', bytes => {
+                if (bytes.length < 4)
+                    return 'Invalid response';
+
+                const supported = [];
+                const mask =
+                    ((bytes[0] << 24) >>> 0) |
+                    (bytes[1] << 16) |
+                    (bytes[2] << 8) |
+                    bytes[3];
+
+                for (let pid = 1; pid <= 32; pid++) {
+                    if ((mask & (1 << (32 - pid))) !== 0)
+                        supported.push(`01 ${protocolTraceHex(pid)}`);
+                }
+
+                return supported.length ? supported.join(', ') : 'None reported';
+            }]],
+            [0x01, ['Monitor status', bytes => bytes.length >= 4
+                ? `${bytes[0] & 0x7f} stored DTCs · MIL ${(bytes[0] & 0x80) ? 'on' : 'off'}`
+                : 'Invalid response']],
+            [0x04, ['Calculated engine load', bytes => bytes.length
+                ? `${(bytes[0] * 100 / 255).toFixed(1)} %`
+                : 'Invalid response']],
+            [0x05, ['Engine coolant temperature', bytes => bytes.length
+                ? `${bytes[0] - 40} °C`
+                : 'Invalid response']],
+            [0x0c, ['Engine speed', bytes => bytes.length >= 2
+                ? `${((bytes[0] * 256 + bytes[1]) / 4).toFixed(0)} rpm`
+                : 'Invalid response']],
+            [0x0d, ['Vehicle speed', bytes => bytes.length
+                ? `${bytes[0]} km/h`
+                : 'Invalid response']],
+            [0x0f, ['Intake air temperature', bytes => bytes.length
+                ? `${bytes[0] - 40} °C`
+                : 'Invalid response']],
+            [0x10, ['MAF air flow', bytes => bytes.length >= 2
+                ? `${((bytes[0] * 256 + bytes[1]) / 100).toFixed(2)} g/s`
+                : 'Invalid response']],
+            [0x11, ['Throttle position', bytes => bytes.length
+                ? `${(bytes[0] * 100 / 255).toFixed(1)} %`
+                : 'Invalid response']],
+            [0x1f, ['Engine run time', bytes => bytes.length >= 2
+                ? `${bytes[0] * 256 + bytes[1]} s`
+                : 'Invalid response']],
+            [0x2f, ['Fuel tank level', bytes => bytes.length
+                ? `${(bytes[0] * 100 / 255).toFixed(1)} %`
+                : 'Invalid response']],
+            [0x42, ['Control module voltage', bytes => bytes.length >= 2
+                ? `${((bytes[0] * 256 + bytes[1]) / 1000).toFixed(3)} V`
+                : 'Invalid response']],
+            [0x46, ['Ambient air temperature', bytes => bytes.length
+                ? `${bytes[0] - 40} °C`
+                : 'Invalid response']],
+            [0x5c, ['Engine oil temperature', bytes => bytes.length
+                ? `${bytes[0] - 40} °C`
+                : 'Invalid response']]
+        ]);
+
+        function parseIdentifier(input) {
+            const text = input.value.trim();
+
+            if (!/^[0-9a-f]{1,8}$/i.test(text))
+                throw new Error('CAN identifier must contain hexadecimal digits.');
+
+            const identifier = parseInt(text, 16);
+
+            if (identifier > 0x7ff)
+                throw new Error('This OBD-II page currently uses 11-bit CAN identifiers.');
+
+            return identifier;
+        }
+
+        async function api(body = null) {
+            const options = body
+                ? {
+                    method : 'POST',
+                    headers : {'Content-Type' : 'application/json'},
+                    body : JSON.stringify(body)
+                }
+                : {cache : 'no-store'};
+            const reply = await fetch('/api/uds', options);
+            const result = await reply.json();
+
+            if (!reply.ok || (body && !result.success))
+                throw new Error(result.message || `HTTP ${reply.status}`);
+
+            return result;
+        }
+
+        function updateControls() {
+            status.textContent = channelOpen ? 'Ready' : 'Closed';
+            status.classList.toggle('open', channelOpen);
+            element('obd-close').disabled = !channelOpen;
+
+            for (const button of document.querySelectorAll(
+                    '#obd-read, #obd-live-toggle, #obd-dtc-stored, ' +
+                    '#obd-dtc-pending, #obd-dtc-permanent, #obd-dtc-clear, ' +
+                    '#obd-vin, #obd-calibration, #obd-cvn')) {
+                button.disabled = !channelOpen;
+            }
+        }
+
+        function stopLive() {
+            live = false;
+            clearTimeout(liveTimer);
+            liveTimer = null;
+            element('obd-live-toggle').textContent = 'Start live';
+            element('obd-live-state').textContent = 'Stopped';
+        }
+
+        function hexBytes(text) {
+            return text.trim()
+                ? text.trim().split(/\s+/).map(byte => parseInt(byte, 16))
+                : [];
+        }
+
+        async function requestMode(mode, parameters = []) {
+            const before = await api();
+            await api({
+                action : 'request',
+                kind : 'raw',
+                sid : mode,
+                data : parameters.map(byte => protocolTraceHex(byte)).join(' ')
+            });
+            const deadline = performance.now() +
+                Number(element('obd-timeout').value) + 1000;
+
+            while (performance.now() < deadline) {
+                await new Promise(resolve => setTimeout(resolve, 80));
+                const result = await api();
+
+                if ((result.sequence !== before.sequence) &&
+                    [5, 6, 7].includes(result.state)) {
+
+                    responseData.textContent = result.payload || 'No payload bytes';
+                    responseSummary.textContent = result.positive
+                        ? `Mode ${protocolTraceHex(mode)} response`
+                        : `NRC 0x${protocolTraceHex(result.nrc)}`;
+
+                    if (!result.positive) {
+                        throw new Error(
+                            `OBD-II request failed: NRC 0x${protocolTraceHex(result.nrc)} ` +
+                            `${result.nrc_name || ''}`.trim()
+                        );
+                    }
+
+                    if (result.response_sid !== (mode + 0x40))
+                        throw new Error('Unexpected OBD-II response mode.');
+
+                    return hexBytes(result.payload);
+                }
+            }
+
+            throw new Error('OBD-II response timed out.');
+        }
+
+        async function readSelectedPid() {
+            const pid = parseInt(element('obd-pid').value, 16);
+            const definition = pidDefinitions.get(pid);
+            const payload = await requestMode(0x01, [pid]);
+
+            if (!definition || (payload[0] !== pid))
+                throw new Error('The ECU returned an unexpected PID.');
+
+            value.textContent = definition[1](payload.slice(1));
+            valueName.textContent = `${definition[0]} · PID 01 ${protocolTraceHex(pid)}`;
+            message.textContent = `${definition[0]} updated.`;
+        }
+
+        async function liveStep() {
+            if (!live)
+                return;
+
+            try {
+                await readSelectedPid();
+            } catch (error) {
+                message.textContent = error.message;
+                stopLive();
+                return;
+            }
+
+            liveTimer = setTimeout(
+                liveStep,
+                Number(element('obd-interval').value)
+            );
+        }
+
+        function decodeDtc(first, second) {
+            const systems = ['P', 'C', 'B', 'U'];
+            return systems[first >> 6] +
+                ((first >> 4) & 0x03).toString(16).toUpperCase() +
+                (first & 0x0f).toString(16).toUpperCase() +
+                (second >> 4).toString(16).toUpperCase() +
+                (second & 0x0f).toString(16).toUpperCase();
+        }
+
+        async function readDtcs(mode, label) {
+            const payload = await requestMode(mode);
+            const codes = [];
+
+            for (let index = 0; (index + 1) < payload.length; index += 2) {
+                if ((payload[index] !== 0) || (payload[index + 1] !== 0))
+                    codes.push(decodeDtc(payload[index], payload[index + 1]));
+            }
+
+            element('obd-dtc-count').textContent =
+                `${codes.length} ${codes.length === 1 ? 'code' : 'codes'}`;
+            element('obd-dtc-list').replaceChildren(
+                ...(codes.length
+                    ? codes.map(code => {
+                        const item = document.createElement('span');
+                        item.className = 'obd-dtc-code';
+                        item.textContent = code;
+                        return item;
+                    })
+                    : [Object.assign(document.createElement('p'), {
+                        className : 'note',
+                        textContent : `No ${label.toLowerCase()} DTCs reported.`
+                    })])
+            );
+            message.textContent = `${label} DTC request completed.`;
+        }
+
+        async function readVehicleInformation(pid, label) {
+            const payload = await requestMode(0x09, [pid]);
+
+            if (payload[0] !== pid)
+                throw new Error('The ECU returned unexpected vehicle information.');
+
+            const data = payload.slice(payload.length > 1 ? 2 : 1);
+            let decoded;
+
+            if ((pid === 0x02) || (pid === 0x04)) {
+                decoded = data
+                    .filter(byte => byte !== 0)
+                    .map(byte => byte >= 32 && byte <= 126
+                        ? String.fromCharCode(byte)
+                        : '·')
+                    .join('');
+            } else {
+                decoded = data.map(byte => protocolTraceHex(byte)).join(' ');
+            }
+
+            information.textContent = `${label}\n${decoded || 'No data'}`;
+            message.textContent = `${label} received.`;
+        }
+
+        element('obd-addressing').addEventListener('change', event => {
+            element('obd-request-id').value =
+                event.target.value === 'functional' ? '7DF' : '7E0';
+        });
+        element('obd-connect').addEventListener('click', async () => {
+            try {
+                stopLive();
+                const timeout = Number(element('obd-timeout').value);
+                await api({
+                    action : 'configure',
+                    bus : Number(element('obd-bus').value),
+                    tx_id : parseIdentifier(element('obd-request-id')),
+                    rx_id : parseIdentifier(element('obd-response-id')),
+                    extended : false,
+                    fd : false,
+                    brs : false,
+                    link_data_length : 8,
+                    block_size : 0,
+                    st_min : 0,
+                    p2_ms : timeout,
+                    p2_star_ms : Math.max(timeout, 5000),
+                    tester_present_enabled : false
+                });
+                channelOpen = true;
+                message.textContent = 'OBD-II connection is ready.';
+            } catch (error) {
+                channelOpen = false;
+                message.textContent = error.message;
+            }
+
+            updateControls();
+        });
+        element('obd-close').addEventListener('click', async () => {
+            stopLive();
+
+            try {
+                await api({action : 'close'});
+                channelOpen = false;
+                message.textContent = 'OBD-II connection closed.';
+            } catch (error) {
+                message.textContent = error.message;
+            }
+
+            updateControls();
+        });
+        element('obd-read').addEventListener('click', async () => {
+            try {
+                await readSelectedPid();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+        element('obd-live-toggle').addEventListener('click', () => {
+            if (live) {
+                stopLive();
+                return;
+            }
+
+            live = true;
+            element('obd-live-toggle').textContent = 'Stop live';
+            element('obd-live-state').textContent = 'Polling';
+            liveStep();
+        });
+        element('obd-pid').addEventListener('change', () => {
+            if (live) {
+                clearTimeout(liveTimer);
+                liveStep();
+            }
+        });
+        element('obd-dtc-stored').addEventListener('click', () =>
+            readDtcs(0x03, 'Stored').catch(error => message.textContent = error.message));
+        element('obd-dtc-pending').addEventListener('click', () =>
+            readDtcs(0x07, 'Pending').catch(error => message.textContent = error.message));
+        element('obd-dtc-permanent').addEventListener('click', () =>
+            readDtcs(0x0a, 'Permanent').catch(error => message.textContent = error.message));
+        element('obd-dtc-clear').addEventListener('click', async () => {
+            if (!window.confirm(
+                    'Clear diagnostic information and freeze-frame data from the selected ECU?'
+                )) {
+                return;
+            }
+
+            try {
+                await requestMode(0x04);
+                element('obd-dtc-list').innerHTML =
+                    '<p class="note">Diagnostic information cleared.</p>';
+                element('obd-dtc-count').textContent = '0 codes';
+                message.textContent = 'The ECU accepted Mode 04.';
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+        element('obd-vin').addEventListener('click', () =>
+            readVehicleInformation(0x02, 'Vehicle identification number')
+                .catch(error => message.textContent = error.message));
+        element('obd-calibration').addEventListener('click', () =>
+            readVehicleInformation(0x04, 'Calibration identification')
+                .catch(error => message.textContent = error.message));
+        element('obd-cvn').addEventListener('click', () =>
+            readVehicleInformation(0x06, 'Calibration verification number')
+                .catch(error => message.textContent = error.message));
+
+        initProtocolCanTrace('obd2');
+        updateControls();
+    }
+
     function init_xcp() {
         const element = id => document.getElementById(id);
         const status = element('xcp-status');
@@ -11495,6 +11937,7 @@
             ['/can_analyzer', 'CAN Analyzer'],
             ['/dbc', 'DBC'],
             ['/isotp', 'ISO-TP'],
+            ['/obd2', 'OBD-II'],
             ['/xcp', 'XCP'],
             ['/uds_programming', 'Programming'],
             ['/files', 'Files'],
@@ -11529,6 +11972,7 @@
         'page-logger' : init_logger,
         'page-analyzer' : init_analyzer,
         'page-dbc' : init_dbc,
+        'page-obd2' : init_obd2,
         'page-xcp' : init_xcp,
         'page-isotp' : init_diagnostics_transport,
         'page-uds-programming' : init_uds_programming

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en" class="page-obd2 page-isotp">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="/favicon.ico">
+    <title>OBD-II Diagnostics · Spectra</title>
+    <link rel="stylesheet" href="spectra.css?v=41">
+    <script src="spectra.js?v=41" defer></script>
+</head>
+
+<body class="page-obd2 page-isotp">
+    <header class="spectra-header">
+        <a class="spectra-brand" href="/">
+            <span aria-hidden="true">▧</span>
+            Spectra
+        </a>
+
+        <nav class="spectra-nav" aria-label="Main navigation"></nav>
+        <span id="obd-status" role="status">Closed</span>
+    </header>
+
+    <main class="spectra-page">
+        <div class="page-header isotp-page-header">
+            <div>
+                <h1>OBD-II Diagnostics</h1>
+                <p>
+                    Read standardized live vehicle data, trouble codes and
+                    identification information over ISO-TP.
+                </p>
+            </div>
+        </div>
+
+        <div class="protocol-workspace">
+            <div class="isotp-layout obd-layout">
+                <section class="card isotp-card obd-transport">
+                    <div class="panel-title">
+                        <h2>Vehicle connection</h2>
+                        <span>ISO 15765-4</span>
+                    </div>
+
+                    <div class="isotp-form-grid">
+                        <label>
+                            CAN bus
+                            <select id="obd-bus">
+                                <option value="0">Primary · TWAI</option>
+                                <option value="1">Secondary · MCP2518FD</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            Request type
+                            <select id="obd-addressing">
+                                <option value="functional">Functional · 7DF</option>
+                                <option value="physical">Physical · 7E0</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            Request ID
+                            <input id="obd-request-id" value="7DF" spellcheck="false">
+                        </label>
+
+                        <label>
+                            ECU response ID
+                            <input id="obd-response-id" value="7E8" spellcheck="false">
+                        </label>
+
+                        <label>
+                            Response timeout
+                            <span class="input-with-unit">
+                                <input id="obd-timeout" type="number" min="100" max="10000" value="1500">
+                                <span>ms</span>
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="isotp-actions">
+                        <button id="obd-connect" class="primary">Apply connection</button>
+                        <button id="obd-close" disabled>Close</button>
+                    </div>
+
+                    <p class="note">
+                        Functional requests use ID 7DF. Select one ECU response
+                        ID, normally 7E8–7EF, because one ISO-TP channel tracks
+                        one responder at a time.
+                    </p>
+                </section>
+
+                <section class="card isotp-card obd-live">
+                    <div class="panel-title">
+                        <h2>Live data · Mode 01</h2>
+                        <span id="obd-live-state">Stopped</span>
+                    </div>
+
+                    <div class="isotp-form-grid">
+                        <label>
+                            Parameter
+                            <select id="obd-pid">
+                                <option value="00">Supported PIDs 01–20</option>
+                                <option value="01">Monitor status</option>
+                                <option value="04">Calculated engine load</option>
+                                <option value="05">Engine coolant temperature</option>
+                                <option value="0C" selected>Engine speed</option>
+                                <option value="0D">Vehicle speed</option>
+                                <option value="0F">Intake air temperature</option>
+                                <option value="10">MAF air flow</option>
+                                <option value="11">Throttle position</option>
+                                <option value="1F">Engine run time</option>
+                                <option value="2F">Fuel tank level</option>
+                                <option value="42">Control module voltage</option>
+                                <option value="46">Ambient air temperature</option>
+                                <option value="5C">Engine oil temperature</option>
+                            </select>
+                        </label>
+
+                        <label>
+                            Poll interval
+                            <span class="input-with-unit">
+                                <input id="obd-interval" type="number" min="100" max="10000" value="500">
+                                <span>ms</span>
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="isotp-actions">
+                        <button id="obd-read" class="primary" disabled>Read once</button>
+                        <button id="obd-live-toggle" disabled>Start live</button>
+                    </div>
+
+                    <div class="obd-value-panel">
+                        <strong id="obd-value">—</strong>
+                        <span id="obd-value-name">Select a parameter and connect.</span>
+                    </div>
+                </section>
+
+                <section class="card isotp-card obd-dtc">
+                    <div class="panel-title">
+                        <h2>Diagnostic trouble codes</h2>
+                        <span id="obd-dtc-count">0 codes</span>
+                    </div>
+
+                    <div class="isotp-actions">
+                        <button id="obd-dtc-stored" disabled>Stored · Mode 03</button>
+                        <button id="obd-dtc-pending" disabled>Pending · Mode 07</button>
+                        <button id="obd-dtc-permanent" disabled>Permanent · Mode 0A</button>
+                        <button id="obd-dtc-clear" class="danger" disabled>Clear DTCs · Mode 04</button>
+                    </div>
+
+                    <div id="obd-dtc-list" class="obd-dtc-list">
+                        <p class="note">No trouble codes requested.</p>
+                    </div>
+                </section>
+
+                <section class="card isotp-card obd-information">
+                    <div class="panel-title">
+                        <h2>Vehicle information · Mode 09</h2>
+                        <span>ECU supplied</span>
+                    </div>
+
+                    <div class="isotp-actions">
+                        <button id="obd-vin" disabled>Read VIN</button>
+                        <button id="obd-calibration" disabled>Calibration ID</button>
+                        <button id="obd-cvn" disabled>Calibration verification number</button>
+                    </div>
+
+                    <pre id="obd-information-data">No vehicle information requested.</pre>
+                </section>
+
+                <section class="card isotp-card obd-response">
+                    <div class="panel-title">
+                        <h2>Latest OBD-II response</h2>
+                        <span id="obd-response-summary">No response</span>
+                    </div>
+
+                    <pre id="obd-response-data">No response received.</pre>
+                    <div id="obd-message" role="status">Configure a vehicle connection to begin.</div>
+                </section>
+            </div>
+
+            <aside class="card protocol-trace" aria-label="Raw CAN trace">
+                <div class="panel-title">
+                    <div>
+                        <h2>Raw CAN trace</h2>
+                        <span id="protocol-trace-status">Connecting…</span>
+                    </div>
+
+                    <div class="protocol-trace-actions">
+                        <button id="protocol-trace-pause">Pause</button>
+                        <button id="protocol-trace-clear">Clear</button>
+                    </div>
+                </div>
+
+                <label class="protocol-trace-option">
+                    <input id="protocol-trace-relevant" type="checkbox" checked>
+                    Only configured OBD-II identifiers
+                </label>
+
+                <div class="protocol-trace-legend" aria-label="Byte color legend">
+                    <span class="length">Length / PCI</span>
+                    <span class="service">Mode</span>
+                    <span class="command">PID</span>
+                    <span class="address">Address</span>
+                    <span class="error">Error</span>
+                </div>
+
+                <div id="protocol-trace-list" class="protocol-trace-list">
+                    <p class="protocol-trace-empty">Waiting for CAN traffic…</p>
+                </div>
+            </aside>
+        </div>
+    </main>
+</body>
+</html>

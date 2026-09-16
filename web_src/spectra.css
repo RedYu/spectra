@@ -3184,7 +3184,8 @@ body:where(.page-isotp) {
     white-space: nowrap;
 }
 
-:where(body.page-xcp) #xcp-status {
+:where(body.page-xcp) #xcp-status,
+:where(body.page-obd2) #obd-status {
     margin-left: auto;
     padding: 5px 10px;
     border: 1px solid var(--border);
@@ -3195,7 +3196,8 @@ body:where(.page-isotp) {
     white-space: nowrap;
 }
 
-:where(body.page-xcp) #xcp-status.open {
+:where(body.page-xcp) #xcp-status.open,
+:where(body.page-obd2) #obd-status.open {
     border-color: #276554;
     background: #13302a;
     color: #73dfbb;
@@ -3438,6 +3440,71 @@ body:where(.page-isotp) {
 
 :where(body.page-isotp) .protocol-byte.padding {
     color: #596675;
+}
+
+:where(body.page-obd2) .obd-layout > section {
+    grid-column: 1 / -1;
+}
+
+:where(body.page-obd2) .obd-value-panel {
+    display: grid;
+    gap: 5px;
+    margin-top: 16px;
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--input);
+}
+
+:where(body.page-obd2) .obd-value-panel strong {
+    color: #73dfbb;
+    font: 600 28px/1.2 "Cascadia Mono", Consolas, monospace;
+}
+
+:where(body.page-obd2) .obd-value-panel span {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+:where(body.page-obd2) .obd-dtc-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 52px;
+    margin-top: 16px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--input);
+}
+
+:where(body.page-obd2) .obd-dtc-code {
+    padding: 6px 9px;
+    border: 1px solid #713b3b;
+    border-radius: 6px;
+    background: #351b1d;
+    color: #ffaaa7;
+    font: 600 12px/1.2 "Cascadia Mono", Consolas, monospace;
+}
+
+:where(body.page-obd2) .obd-information pre,
+:where(body.page-obd2) .obd-response pre {
+    min-height: 78px;
+    margin: 14px 0 0;
+    padding: 14px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--input);
+    color: var(--text);
+    white-space: pre-wrap;
+    font: 13px/1.6 "Cascadia Mono", Consolas, monospace;
+}
+
+:where(body.page-obd2) #obd-message {
+    margin-top: 12px;
+    color: var(--muted);
+    line-height: 1.5;
 }
 
 :where(body.page-isotp) .protocol-trace-empty {
