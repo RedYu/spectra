@@ -13,7 +13,7 @@ menu "Spectra OTA backend"
 
 config SPECTRA_OTA_BACKEND_CHECK_URL
     string "Firmware update check URL"
-    default "https://api.spectra.ridel.com.ua/health"
+    default "https://api.spectra.ridel.com.ua/firmware/check"
     help
         HTTPS endpoint queried by the device for firmware availability.
         A successful response without an update manifest means that no
