@@ -38,6 +38,8 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Configurable Low and Critical battery-level thresholds
 - Configurable display dimming and backlight-off idle timers
 - Passive buzzer with configurable volume and asynchronous signals
+- MCP23017 I/O expander with centralized pin ownership
+- Software-controlled 120-ohm termination for both CAN channels
 - Internal SPIFFS and removable SD-card storage
 - Selected task stacks and buffers allocated in PSRAM
 - Centralized application task-priority configuration
@@ -48,6 +50,7 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Secondary Classical CAN and CAN FD interface using MCP2518FD over SPI
 - TCAN1042HGV transceivers for both physical CAN channels
 - Runtime enable, disable, bitrate, and listen-only configuration
+- Runtime control of onboard 120-ohm termination on each CAN channel
 - CAN FD nominal and data-phase bitrate configuration
 - CAN FD BRS configuration
 - Hardware timestamps from MCP2518FD
@@ -89,6 +92,8 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - DBC Explorer with local and SD-card database loading
 - Grouped message browser, signal selection, live physical-value decoding,
   history graphs, and byte/bit frame inspection
+- Persistent customizable device and DBC-signal dashboards stored locally in
+  the browser
 
 ### CAN recording
 
@@ -141,7 +146,8 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 
 - JSON-based settings model and service
 - Primary and Secondary CAN settings in the GUI and Web API
-- Wi-Fi, display, battery, sound, time, logging, and UI settings
+- Wi-Fi, display, battery, sound, time, logging, and UI settings in the device
+  GUI and Web interface
 - Settings persistence before controlled restart and shutdown
 - UART and optional SD-card file logging
 - Configurable per-tag ESP-IDF log levels
@@ -163,7 +169,9 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - DHCP and local DNS services
 - Per-device mDNS hostname
 - Embedded Web UI and REST API
-- Internet connectivity checks through the Spectra backend
+- Internet connectivity and firmware checks at startup and on explicit request
+- Backend firmware-manifest discovery with device, firmware, and hardware
+  identification headers
 - Human-readable Wi-Fi disconnection reasons
 - SNTP synchronization with configurable servers and POSIX timezone
 
@@ -181,6 +189,8 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 | Battery charger | ETA6003 |
 | Battery monitoring | ADC voltage measurement through a resistor divider |
 | Audible feedback | Passive PWM-controlled buzzer |
+| I/O expansion | MCP23017 over I2C |
+| CAN termination | Independently controlled 120-ohm resistors through MCP23017 |
 | Internal storage | SPIFFS |
 | Removable storage | SD card over SPI |
 | USB connectivity | USB RNDIS network interface |
@@ -253,6 +263,8 @@ The project separates responsibilities into layers:
 - **Models** hold synchronized application state.
 - **GUI** presents device state and sends actions to services.
 - **Web API and WebSocket** expose configuration, diagnostics, files, and live CAN events.
+- **I/O Expander service** owns MCP23017 outputs and prevents feature services
+  from modifying unrelated pins.
 
 Web UI files must be edited in `web_src/`. The build runs
 `scripts/build_web.py` automatically and recreates `spiffs_data/www/` before
@@ -404,6 +416,7 @@ available at:
 http://spectra.device/can_logger
 http://spectra.device/can_analyzer
 http://spectra.device/isotp
+http://spectra.device/obd2
 ```
 
 Additional diagnostic and analysis tools are available at:
@@ -431,7 +444,7 @@ Detailed request and response documentation is available in
 | `POST` | `/api/network/wifi/scan` | Start a Wi-Fi network scan |
 | `GET` | `/api/power` | Read PMIC and battery information |
 | `GET` | `/api/settings` | Read current settings |
-| `PUT` | `/api/settings` | Apply device and CAN settings |
+| `PUT` | `/api/settings` | Apply device, sound, network, and CAN settings |
 | `POST` | `/api/settings/save` | Save settings to internal storage |
 | `POST` | `/api/settings/reload` | Reload settings from internal storage |
 | `DELETE` | `/api/settings/wifi/sta/credentials` | Remove stored Station credentials |
@@ -442,6 +455,7 @@ Detailed request and response documentation is available in
 | `GET`, `POST` | `/api/isotp` | Configure an ISO-TP channel and exchange payloads |
 | `GET`, `POST` | `/api/uds` | Configure the UDS client and execute diagnostic requests |
 | `GET`, `POST` | `/api/xcp` | Configure XCP sessions and execute XCP commands |
+| `GET`, `POST` | `/api/ota` | Read OTA state, check the backend, stage images, cancel, or restart |
 
 ## Storage and configuration
 
@@ -476,6 +490,10 @@ Example CAN configuration:
       "brs_enabled": true,
       "listen_only": true
     }
+  },
+  "sound": {
+    "enabled": true,
+    "volume_percent": 70
   }
 }
 ```
@@ -532,6 +550,7 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] Browser CAN Logger and CAN Analyzer
 - [x] Configurable browser buffers and CSV, SCL, and ASC export
 - [x] DBC Explorer with live signal decoding, graphs, and bit inspection
+- [x] Persistent customizable device and DBC-signal dashboards
 - [x] Resumable SD-card downloads using HTTP Range
 - [x] ISO-TP transport over Classical CAN and CAN FD
 - [x] UDS client, browser diagnostics, DID catalogs, and ECU profiles
@@ -543,22 +562,22 @@ To exit the serial monitor, press `Ctrl+]`.
   history reset, and SD benchmark control
 - [x] Browser file creation, upload, deletion, preview, and SD formatting
 - [x] USB RNDIS, Wi-Fi, DNS, and mDNS connectivity
+- [x] MCP23017 driver, shared I/O ownership, and dual CAN termination control
 - [x] Internal and SD-card storage services
+- [x] Streaming OTA firmware updates from browser or `/sdcard/updates`, with
+  automatic rollback
+- [x] Startup and manual backend firmware availability checks
 - [x] Graceful shutdown and restart
 
 ### Planned
 
 - [ ] BLF import and export
-- [ ] Functional addressing, remaining UDS services, and OBD-II workflows
+- [ ] Functional addressing and remaining UDS services
 - [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
 - [ ] Persistent resume after interrupted ECU programming
 - [ ] XCP multi-packet block transfer, DAQ/STIM, calibration-page control,
   seed/key access, and programming
 - [ ] CAN traffic replay
-- [ ] Persistent customizable live signal dashboards
-- [x] Streaming OTA firmware updates from browser or `/sdcard/updates`, with
-  automatic rollback
-- [x] Periodic backend firmware availability checks with manual Web trigger
 - [ ] Device registration and authentication
 - [ ] Remote backend integration
 
