@@ -22,8 +22,8 @@
 
     <title>Spectra Settings</title>
 
-    <link rel="stylesheet" href="spectra.css?v=32">
-    <script src="spectra.js?v=32" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=33">
+    <script src="spectra.js?v=33" defer></script>
 </head>
 
 <body class="page-settings">
@@ -1158,6 +1158,30 @@
                                     -
                                 </div>
                             </div>
+
+                            <div class="device-summary-item">
+                                <div class="device-summary-label">
+                                    Backend update
+                                </div>
+                                <div
+                                    id="ota-backend-state"
+                                    class="device-summary-value"
+                                >
+                                    Not checked
+                                </div>
+                            </div>
+
+                            <div class="device-summary-item">
+                                <div class="device-summary-label">
+                                    Backend check
+                                </div>
+                                <div
+                                    id="ota-backend-check-time"
+                                    class="device-summary-value"
+                                >
+                                    -
+                                </div>
+                            </div>
                         </div>
 
                         <div class="ota-file-row">
@@ -1242,6 +1266,14 @@
                         </p>
 
                         <div class="ota-actions">
+                            <button
+                                id="ota-backend-check"
+                                class="button button-secondary"
+                                type="button"
+                            >
+                                Check backend
+                            </button>
+
                             <button
                                 id="ota-upload"
                                 class="button button-primary"

@@ -16,6 +16,7 @@
 
 #include "battery_service.h"
 #include "can_logger_service.h"
+#include "internet_service.h"
 #include "ota_service.h"
 #include "storage_sd_service.h"
 #include "storage_types.h"
@@ -91,6 +92,29 @@ static const char *web_ota_api_image_state_name(
     }
 }
 
+static const char *web_ota_api_backend_state_name(
+    ota_service_backend_state_t state
+)
+{
+    switch (state) {
+        case OTA_SERVICE_BACKEND_STATE_CHECKING:
+            return "checking";
+
+        case OTA_SERVICE_BACKEND_STATE_NO_UPDATE:
+            return "no_update";
+
+        case OTA_SERVICE_BACKEND_STATE_UPDATE_AVAILABLE:
+            return "update_available";
+
+        case OTA_SERVICE_BACKEND_STATE_ERROR:
+            return "error";
+
+        case OTA_SERVICE_BACKEND_STATE_NOT_CHECKED:
+        default:
+            return "not_checked";
+    }
+}
+
 static esp_err_t web_ota_api_send_info(
     httpd_req_t *request
 )
@@ -142,6 +166,33 @@ static esp_err_t web_ota_api_send_info(
             web_ota_api_image_state_name(
                 info.running_image_state
             )
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            response,
+            "backend_state",
+            web_ota_api_backend_state_name(
+                info.backend_state
+            )
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "backend_last_check_ms",
+            (double)info.backend_last_check_ms
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "backend_last_error",
+            info.backend_last_error
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            response,
+            "backend_last_error_name",
+            esp_err_to_name(info.backend_last_error)
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            response,
+            "backend_version",
+            info.backend_version
         ) != NULL) &&
         (cJSON_AddNumberToObject(
             response,
@@ -797,6 +848,22 @@ static esp_err_t web_ota_api_post_handler(
         }
 
         return web_ota_api_send_info(request);
+    }
+
+    if (strcmp(action, "check-backend") == 0) {
+        const esp_err_t result =
+            internet_service_request_check();
+
+        return web_api_send_message(
+            request,
+            result == ESP_OK
+                ? "202 Accepted"
+                : "503 Service Unavailable",
+            result == ESP_OK,
+            result == ESP_OK
+                ? "Backend firmware check requested"
+                : esp_err_to_name(result)
+        );
     }
 
     return web_api_send_message(

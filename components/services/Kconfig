@@ -9,6 +9,27 @@ config SPECTRA_SD_BENCHMARK_ON_STARTUP
 
 endmenu
 
+menu "Spectra OTA backend"
+
+config SPECTRA_OTA_BACKEND_CHECK_URL
+    string "Firmware update check URL"
+    default "https://api.spectra.ridel.com.ua/health"
+    help
+        HTTPS endpoint queried by the device for firmware availability.
+        A successful response without an update manifest means that no
+        update is available. The URL can later be changed to the firmware
+        manifest endpoint without changing device code.
+
+config SPECTRA_OTA_BACKEND_CHECK_INTERVAL_MINUTES
+    int "Firmware update check interval in minutes"
+    range 5 10080
+    default 360
+    help
+        Interval between automatic backend firmware checks while the
+        Station interface has Internet access.
+
+endmenu
+
 menu "Spectra web content"
 
 config SPECTRA_WEB_CONTENT_GZIP

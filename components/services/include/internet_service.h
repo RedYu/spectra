@@ -25,6 +25,17 @@ extern "C" {
 esp_err_t internet_service_start(void);
 
 /**
+ * @brief Request an asynchronous backend and firmware availability check.
+ *
+ * The Internet service task performs the HTTPS requests. This function does
+ * not block the caller.
+ *
+ * @return ESP_OK when the request is queued or ESP_ERR_INVALID_STATE when the
+ * service is not running.
+ */
+esp_err_t internet_service_request_check(void);
+
+/**
  * @brief Request cooperative termination of the Internet service.
  *
  * The function returns immediately. The service task is notified and

@@ -19,8 +19,10 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_heap_caps.h"
+#include "sdkconfig.h"
 
 #include "app_task_priorities.h"
+#include "ota_service.h"
 #include "system_model.h"
 #include "wifi_service.h"
 
@@ -31,6 +33,11 @@
 #define INTERNET_SERVICE_TASK_STACK_SIZE (6144U)
 #define INTERNET_SERVICE_TASK_PRIORITY \
     APP_TASK_PRIORITY_INTERNET
+
+#define INTERNET_SERVICE_CHECK_INTERVAL_TICKS \
+    ((TickType_t) \
+     CONFIG_SPECTRA_OTA_BACKEND_CHECK_INTERVAL_MINUTES * \
+     pdMS_TO_TICKS(60000U))
 
 #define INTERNET_SERVICE_NOTIFY_CHECK \
     (1UL << 0U)
@@ -281,11 +288,12 @@ static void internet_service_task(
                 0U,
                 UINT32_MAX,
                 &notification,
-                portMAX_DELAY
+                INTERNET_SERVICE_CHECK_INTERVAL_TICKS
             );
 
         if (notified != pdTRUE) {
-            continue;
+            notification =
+                INTERNET_SERVICE_NOTIFY_CHECK;
         }
 
         if ((notification &
@@ -318,6 +326,21 @@ static void internet_service_task(
 
         if (!update_required) {
             continue;
+        }
+
+        if (available) {
+            const esp_err_t ota_result =
+                ota_service_check_backend();
+
+            if ((ota_result != ESP_OK) &&
+                (ota_result != ESP_ERR_INVALID_STATE)) {
+
+                ESP_LOGD(
+                    TAG,
+                    "Firmware availability check failed: %s",
+                    esp_err_to_name(ota_result)
+                );
+            }
         }
 
         const esp_err_t result =
@@ -461,4 +484,23 @@ void internet_service_stop(void)
             eSetBits
         );
     }
+}
+
+esp_err_t internet_service_request_check(void)
+{
+    TaskHandle_t task = s_task;
+
+    if ((task == NULL) ||
+        !internet_service_network_ready()) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return xTaskNotify(
+        task,
+        INTERNET_SERVICE_NOTIFY_CHECK,
+        eSetBits
+    ) == pdPASS
+        ? ESP_OK
+        : ESP_FAIL;
 }

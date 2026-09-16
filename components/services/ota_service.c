@@ -15,15 +15,22 @@
 
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
+#include "esp_crt_bundle.h"
+#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
+#include "esp_timer.h"
 #include "sdkconfig.h"
 
+#include "cJSON.h"
 #include "storage_sd_service.h"
+#include "system_model.h"
 
 #define OTA_SERVICE_LOCK_TIMEOUT_MS  (1000U)
 #define OTA_SERVICE_SD_BUFFER_SIZE    (4U * 1024U)
+#define OTA_SERVICE_BACKEND_TIMEOUT_MS       (20000U)
+#define OTA_SERVICE_BACKEND_RESPONSE_SIZE    (1024U)
 
 static const char *TAG = "ota_service";
 
@@ -38,6 +45,55 @@ static bool s_transfer_active = false;
 static ota_service_info_t s_info = {
     .state = OTA_SERVICE_STATE_UNINITIALIZED,
 };
+
+typedef struct
+{
+    char *data;
+    size_t capacity;
+    size_t size;
+
+} ota_service_backend_response_t;
+
+static esp_err_t ota_service_backend_event_handler(
+    esp_http_client_event_t *event
+)
+{
+    if ((event == NULL) ||
+        (event->event_id != HTTP_EVENT_ON_DATA) ||
+        (event->data_len <= 0)) {
+
+        return ESP_OK;
+    }
+
+    ota_service_backend_response_t *response =
+        event->user_data;
+
+    if ((response == NULL) ||
+        (response->data == NULL)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const size_t data_size =
+        (size_t)event->data_len;
+
+    if (data_size >
+        (response->capacity - response->size - 1U)) {
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    memcpy(
+        response->data + response->size,
+        event->data,
+        data_size
+    );
+
+    response->size += data_size;
+    response->data[response->size] = '\0';
+
+    return ESP_OK;
+}
 
 static ota_service_image_state_t ota_service_convert_image_state(
     esp_ota_img_states_t state
@@ -723,6 +779,219 @@ esp_err_t ota_service_install_from_sd(
     );
 
     return ESP_OK;
+}
+
+esp_err_t ota_service_check_backend(void)
+{
+    esp_err_t result = ota_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (s_info.backend_state ==
+        OTA_SERVICE_BACKEND_STATE_CHECKING) {
+
+        ota_service_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_info.backend_state =
+        OTA_SERVICE_BACKEND_STATE_CHECKING;
+
+    s_info.backend_last_error = ESP_OK;
+    s_info.backend_version[0] = '\0';
+
+    ota_service_unlock();
+
+    system_model_t system;
+
+    result = system_model_get_snapshot(&system);
+
+    char *response_buffer = NULL;
+    esp_http_client_handle_t client = NULL;
+
+    ota_service_backend_response_t response = {
+        .capacity = OTA_SERVICE_BACKEND_RESPONSE_SIZE,
+    };
+
+    if (result == ESP_OK) {
+        response_buffer = calloc(
+            1U,
+            response.capacity
+        );
+
+        if (response_buffer == NULL) {
+            result = ESP_ERR_NO_MEM;
+        } else {
+            response.data = response_buffer;
+        }
+    }
+
+    if (result == ESP_OK) {
+        const esp_http_client_config_t config = {
+            .url = CONFIG_SPECTRA_OTA_BACKEND_CHECK_URL,
+            .method = HTTP_METHOD_GET,
+            .timeout_ms = OTA_SERVICE_BACKEND_TIMEOUT_MS,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+            .tls_version = ESP_HTTP_CLIENT_TLS_VER_TLS_1_2,
+            .keep_alive_enable = false,
+            .event_handler =
+                ota_service_backend_event_handler,
+            .user_data = &response,
+        };
+
+        client = esp_http_client_init(&config);
+
+        if (client == NULL) {
+            result = ESP_ERR_NO_MEM;
+        }
+    }
+
+    if (result == ESP_OK) {
+        result = esp_http_client_set_header(
+            client,
+            "Accept",
+            "application/json"
+        );
+    }
+
+    if (result == ESP_OK) {
+        result = esp_http_client_set_header(
+            client,
+            "X-Spectra-Device-Id",
+            system.device_id
+        );
+    }
+
+    if (result == ESP_OK) {
+        result = esp_http_client_set_header(
+            client,
+            "X-Spectra-Firmware-Version",
+            system.firmware_version
+        );
+    }
+
+    if (result == ESP_OK) {
+        result = esp_http_client_set_header(
+            client,
+            "X-Spectra-Hardware-Version",
+            system.hardware_version
+        );
+    }
+
+    if (result == ESP_OK) {
+        result = esp_http_client_perform(client);
+    }
+
+    if (result == ESP_OK) {
+        const int status_code =
+            esp_http_client_get_status_code(client);
+
+        if ((status_code < 200) ||
+            (status_code >= 300)) {
+
+            result = ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+
+    bool update_available = false;
+    char available_version[
+        OTA_SERVICE_VERSION_MAX_LENGTH
+    ] = {0};
+
+    if ((result == ESP_OK) &&
+        (response.size > 0U)) {
+
+        cJSON *manifest =
+            cJSON_Parse(response.data);
+
+        if (manifest != NULL) {
+            const cJSON *available =
+                cJSON_GetObjectItemCaseSensitive(
+                    manifest,
+                    "update_available"
+                );
+
+            update_available =
+                cJSON_IsTrue(available);
+
+            const cJSON *version =
+                cJSON_GetObjectItemCaseSensitive(
+                    manifest,
+                    "version"
+                );
+
+            if (cJSON_IsString(version) &&
+                (version->valuestring != NULL)) {
+
+                (void)strlcpy(
+                    available_version,
+                    version->valuestring,
+                    sizeof(available_version)
+                );
+            }
+
+            cJSON_Delete(manifest);
+        }
+    }
+
+    if (client != NULL) {
+        esp_http_client_cleanup(client);
+    }
+
+    free(response_buffer);
+
+    const esp_err_t lock_result =
+        ota_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    s_info.backend_last_check_ms =
+        (uint64_t)(esp_timer_get_time() / 1000LL);
+
+    s_info.backend_last_error = result;
+
+    if (result == ESP_OK) {
+        s_info.backend_state =
+            update_available
+                ? OTA_SERVICE_BACKEND_STATE_UPDATE_AVAILABLE
+                : OTA_SERVICE_BACKEND_STATE_NO_UPDATE;
+
+        (void)strlcpy(
+            s_info.backend_version,
+            available_version,
+            sizeof(s_info.backend_version)
+        );
+
+        if (update_available) {
+            ESP_LOGI(
+                TAG,
+                "Backend firmware update available: %s",
+                s_info.backend_version
+            );
+        } else {
+            ESP_LOGI(
+                TAG,
+                "Backend reports no firmware update"
+            );
+        }
+    } else {
+        s_info.backend_state =
+            OTA_SERVICE_BACKEND_STATE_ERROR;
+
+        ESP_LOGW(
+            TAG,
+            "Backend firmware check failed: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    ota_service_unlock();
+
+    return result;
 }
 
 esp_err_t ota_service_cancel(void)

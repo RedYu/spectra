@@ -640,6 +640,10 @@ Important response fields include:
 | `rollback_enabled` | Whether automatic application rollback is enabled |
 | `verification_pending` | The running image still awaits startup confirmation |
 | `running_image_state` | `pending_verify`, `valid`, `invalid`, `aborted`, `new`, or `unknown` |
+| `backend_state` | `not_checked`, `checking`, `no_update`, `update_available`, or `error` |
+| `backend_last_check_ms` | Monotonic timestamp of the latest completed check |
+| `backend_last_error_name` | ESP-IDF result of the latest backend check |
+| `backend_version` | Version advertised by the backend, when available |
 | `image_size` | Declared complete image size |
 | `written_size` | Bytes written into the update partition |
 | `progress_percent` | Integer transfer progress from 0 to 100 |
@@ -696,6 +700,49 @@ The path is restricted to one regular `.bin` file immediately inside
 the inactive OTA partition without retaining the complete file in RAM. The
 same battery, CAN-recording, project-name, image, and partition-size checks as
 the browser upload remain active.
+
+Request an asynchronous backend availability check:
+
+```bash
+curl -X POST \
+  "http://spectra.device/api/ota?action=check-backend"
+```
+
+The request returns immediately. The Internet service performs the HTTPS
+request and `GET /api/ota` reports its progress and result.
+
+## OTA backend check contract
+
+The configured backend URL receives a `GET` request with these headers:
+
+| Header | Meaning |
+|---|---|
+| `X-Spectra-Device-Id` | Stable device identifier |
+| `X-Spectra-Firmware-Version` | Currently running firmware version |
+| `X-Spectra-Hardware-Version` | Device hardware revision |
+
+For the initial backend implementation, either an empty successful response or
+the following JSON means that no update is available:
+
+```json
+{
+  "update_available": false
+}
+```
+
+The device also recognizes the beginning of the future manifest format:
+
+```json
+{
+  "update_available": true,
+  "version": "v0.2.0"
+}
+```
+
+This stage only reports availability. It intentionally does not download or
+install a backend image yet. Checks run when Internet connectivity is obtained,
+on manual request, and periodically according to
+`CONFIG_SPECTRA_OTA_BACKEND_CHECK_INTERVAL_MINUTES`.
 
 Restart into a successfully validated image:
 

@@ -558,6 +558,7 @@ To exit the serial monitor, press `Ctrl+]`.
 - [ ] Persistent customizable live signal dashboards
 - [x] Streaming OTA firmware updates from browser or `/sdcard/updates`, with
   automatic rollback
+- [x] Periodic backend firmware availability checks with manual Web trigger
 - [ ] Device registration and authentication
 - [ ] Remote backend integration
 

@@ -57,6 +57,21 @@ typedef enum
 } ota_service_image_state_t;
 
 /**
+ * @brief State of the latest firmware check through the Spectra backend.
+ */
+typedef enum
+{
+    OTA_SERVICE_BACKEND_STATE_NOT_CHECKED = 0,
+    OTA_SERVICE_BACKEND_STATE_CHECKING,
+    OTA_SERVICE_BACKEND_STATE_NO_UPDATE,
+    OTA_SERVICE_BACKEND_STATE_UPDATE_AVAILABLE,
+    OTA_SERVICE_BACKEND_STATE_ERROR,
+
+    OTA_SERVICE_BACKEND_STATE_COUNT,
+
+} ota_service_backend_state_t;
+
+/**
  * @brief Current OTA service and transfer information.
  */
 typedef struct
@@ -67,6 +82,14 @@ typedef struct
 
     ota_service_state_t state;
     ota_service_image_state_t running_image_state;
+    ota_service_backend_state_t backend_state;
+
+    uint64_t backend_last_check_ms;
+    esp_err_t backend_last_error;
+
+    char backend_version[
+        OTA_SERVICE_VERSION_MAX_LENGTH
+    ];
 
     size_t image_size;
     size_t written_size;
@@ -167,6 +190,18 @@ esp_err_t ota_service_finish(void);
 esp_err_t ota_service_install_from_sd(
     const char *path
 );
+
+/**
+ * @brief Query the configured backend for a firmware update manifest.
+ *
+ * This synchronous function is intended for the Internet service task. A
+ * successful backend response without an update manifest is stored as
+ * OTA_SERVICE_BACKEND_STATE_NO_UPDATE.
+ *
+ * @return ESP_OK when the backend response was processed, otherwise an
+ * ESP-IDF networking, allocation, or parsing error code.
+ */
+esp_err_t ota_service_check_backend(void);
 
 /**
  * @brief Abort an active transfer or cancel a prepared boot selection.

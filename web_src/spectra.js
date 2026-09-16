@@ -1741,6 +1741,16 @@
                     "ota-rollback-state"
                 ),
 
+            otaBackendState:
+                document.getElementById(
+                    "ota-backend-state"
+                ),
+
+            otaBackendCheckTime:
+                document.getElementById(
+                    "ota-backend-check-time"
+                ),
+
             otaUpdatePartition:
                 document.getElementById(
                     "ota-update-partition"
@@ -1779,6 +1789,9 @@
 
             otaSdInstall:
                 document.getElementById("ota-sd-install"),
+
+            otaBackendCheck:
+                document.getElementById("ota-backend-check"),
 
             otaCancel:
                 document.getElementById("ota-cancel"),
@@ -2425,6 +2438,10 @@
                 receiving ||
                 ready ||
                 !elements.otaSdFile.value;
+
+            elements.otaBackendCheck.disabled =
+                otaBusy ||
+                otaInfo?.backend_state === "checking";
         }
 
         function renderOtaInfo(info) {
@@ -2460,6 +2477,27 @@
                         info.running_image_state
                     ] || "Enabled"
                     : "Disabled";
+
+            const backendStateNames = {
+                not_checked: "Not checked",
+                checking: "Checking...",
+                no_update: "No update available",
+                update_available: info.backend_version
+                    ? `Version ${info.backend_version} available`
+                    : "Update available",
+                error: "Check failed"
+            };
+
+            elements.otaBackendState.textContent =
+                backendStateNames[info.backend_state] || "Unknown";
+
+            const backendCheckMs =
+                Number(info.backend_last_check_ms) || 0;
+
+            elements.otaBackendCheckTime.textContent =
+                backendCheckMs > 0
+                    ? `${Math.floor(backendCheckMs / 1000)} s after boot`
+                    : "-";
 
             elements.otaUpdatePartition.textContent =
                 info.update_partition
@@ -2668,6 +2706,40 @@
             } finally {
                 otaBusy = false;
                 await refreshOtaInfo();
+            }
+        }
+
+        async function requestBackendOtaCheck() {
+            if (otaBusy ||
+                otaInfo?.backend_state === "checking") {
+
+                return;
+            }
+
+            elements.otaBackendCheck.disabled = true;
+            setOtaStatus("Requesting backend firmware check...");
+
+            try {
+                await fetchJson(
+                    "/api/ota?action=check-backend",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                setOtaStatus(
+                    "Backend check queued.",
+                    "success"
+                );
+
+                await refreshOtaInfo();
+            } catch (error) {
+                setOtaStatus(
+                    `Failed to request backend check: ${error.message}`,
+                    "error"
+                );
+            } finally {
+                updateOtaControls();
             }
         }
 
@@ -3894,6 +3966,11 @@
         elements.otaSdInstall.addEventListener(
             "click",
             installOtaFromSd
+        );
+
+        elements.otaBackendCheck.addEventListener(
+            "click",
+            requestBackendOtaCheck
         );
 
         elements.otaCancel.addEventListener(
