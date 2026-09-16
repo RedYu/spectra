@@ -5099,6 +5099,711 @@
         });
     }
 
+    function parseCanStreamBatch(buffer) {
+        const view = new DataView(buffer);
+
+        if ((view.byteLength < 8) ||
+            (view.getUint8(0) !== 1) ||
+            (view.getUint8(1) !== 1) ||
+            (view.getUint32(4, true) !== (view.byteLength - 8))) {
+
+            throw new Error('Invalid CAN stream batch header.');
+        }
+
+        const events = [];
+        let offset = 8;
+
+        for (let index = 0; index < view.getUint16(2, true); index++) {
+            if ((offset + 40) > view.byteLength)
+                throw new Error('Truncated CAN stream event.');
+
+            const length = view.getUint8(offset + 5);
+            const type = view.getUint8(offset);
+            const bus = view.getUint8(offset + 1);
+            const source = view.getUint8(offset + 6);
+
+            if ((length > 64) ||
+                (bus > 1) ||
+                (type > 4) ||
+                (source > 2) ||
+                ((offset + 40 + length) > view.byteLength)) {
+
+                throw new Error('Invalid CAN stream event.');
+            }
+
+            events.push({
+                type,
+                bus,
+                direction : view.getUint8(offset + 2),
+                flags : view.getUint8(offset + 3),
+                dlc : view.getUint8(offset + 4),
+                source,
+                sequence : view.getUint32(offset + 8, true),
+                transaction : view.getUint32(offset + 12, true),
+                nativeSequence : view.getUint32(offset + 16, true),
+                id : view.getUint32(offset + 20, true),
+                result : view.getUint32(offset + 24, true),
+                timestamp : view.getBigUint64(offset + 28, true),
+                data : Array.from(
+                    new Uint8Array(buffer, offset + 40, length)
+                )
+            });
+            offset += 40 + length;
+        }
+
+        if (offset !== view.byteLength)
+            throw new Error('Unexpected CAN stream data.');
+
+        return events;
+    }
+
+    function protocolTraceHex(value, width = 2) {
+        return value
+            .toString(16)
+            .toUpperCase()
+            .padStart(width, '0');
+    }
+
+    function decodeUdsPayload(payload, response) {
+        if (!payload.length)
+            return 'UDS · empty payload';
+
+        const serviceNames = new Map([
+            [0x10, 'Diagnostic Session Control'],
+            [0x11, 'ECU Reset'],
+            [0x14, 'Clear Diagnostic Information'],
+            [0x19, 'Read DTC Information'],
+            [0x22, 'Read Data By Identifier'],
+            [0x23, 'Read Memory By Address'],
+            [0x27, 'Security Access'],
+            [0x28, 'Communication Control'],
+            [0x2e, 'Write Data By Identifier'],
+            [0x2f, 'Input Output Control By Identifier'],
+            [0x31, 'Routine Control'],
+            [0x34, 'Request Download'],
+            [0x36, 'Transfer Data'],
+            [0x37, 'Request Transfer Exit'],
+            [0x3e, 'Tester Present'],
+            [0x85, 'Control DTC Setting']
+        ]);
+        const nrcNames = new Map([
+            [0x10, 'General reject'],
+            [0x11, 'Service not supported'],
+            [0x12, 'Sub-function not supported'],
+            [0x13, 'Incorrect length or format'],
+            [0x21, 'Busy, repeat request'],
+            [0x22, 'Conditions not correct'],
+            [0x24, 'Request sequence error'],
+            [0x31, 'Request out of range'],
+            [0x33, 'Security access denied'],
+            [0x35, 'Invalid key'],
+            [0x36, 'Exceeded attempts'],
+            [0x37, 'Required delay not expired'],
+            [0x70, 'Upload/download not accepted'],
+            [0x71, 'Transfer suspended'],
+            [0x72, 'General programming failure'],
+            [0x73, 'Wrong block sequence counter'],
+            [0x78, 'Response pending']
+        ]);
+
+        if ((payload[0] === 0x7f) && (payload.length >= 3)) {
+            const requestName =
+                serviceNames.get(payload[1]) ||
+                `Service 0x${protocolTraceHex(payload[1])}`;
+            const nrcName =
+                nrcNames.get(payload[2]) ||
+                'Unknown negative response';
+
+            return `UDS negative · ${requestName} · NRC 0x${protocolTraceHex(payload[2])} ${nrcName}`;
+        }
+
+        const positive = response && (payload[0] >= 0x40);
+        const service = positive ? payload[0] - 0x40 : payload[0];
+        let description =
+            serviceNames.get(service) ||
+            `Service 0x${protocolTraceHex(service)}`;
+
+        if ((service === 0x10) && (payload.length >= 2)) {
+            const sessions = new Map([
+                [0x01, 'Default session'],
+                [0x02, 'Programming session'],
+                [0x03, 'Extended diagnostic session'],
+                [0x04, 'Safety system diagnostic session']
+            ]);
+            description = sessions.get(payload[1] & 0x7f) ||
+                `${description} · session 0x${protocolTraceHex(payload[1] & 0x7f)}`;
+        } else if (((service === 0x22) ||
+                    (service === 0x2e) ||
+                    (service === 0x2f)) &&
+                   (payload.length >= 3)) {
+            description +=
+                ` · DID 0x${protocolTraceHex(payload[1])}${protocolTraceHex(payload[2])}`;
+        } else if ((service === 0x27) && (payload.length >= 2)) {
+            description += (payload[1] & 1)
+                ? ` · request seed level 0x${protocolTraceHex(payload[1])}`
+                : ` · send key level 0x${protocolTraceHex(payload[1] - 1)}`;
+        } else if ((service === 0x31) && (payload.length >= 4)) {
+            const operations = ['Unknown', 'Start', 'Stop', 'Request results'];
+            description +=
+                ` · ${operations[payload[1] & 0x7f] || 'Unknown'} routine ` +
+                `0x${protocolTraceHex(payload[2])}${protocolTraceHex(payload[3])}`;
+        } else if ((service === 0x36) && (payload.length >= 2)) {
+            description += ` · block ${payload[1]}`;
+        }
+
+        return `UDS ${positive ? 'response' : 'request'} · ${description}`;
+    }
+
+    function decodeIsoTpFrame(event, configuration) {
+        const data = event.data;
+        const addressOffset = configuration.addressed ? 1 : 0;
+
+        if (data.length <= addressOffset)
+            return 'ISO-TP · empty frame';
+
+        const pci = data[addressOffset];
+        const frameType = pci >> 4;
+        let payloadOffset = addressOffset + 1;
+        let payloadLength = 0;
+        let frameDescription = 'ISO-TP';
+
+        if (frameType === 0) {
+            payloadLength = pci & 0x0f;
+
+            if ((payloadLength === 0) &&
+                (data.length > payloadOffset)) {
+                payloadLength = data[payloadOffset++];
+            }
+
+            frameDescription = `ISO-TP single frame · ${payloadLength} bytes`;
+        } else if (frameType === 1) {
+            payloadLength = ((pci & 0x0f) << 8) |
+                (data[payloadOffset] || 0);
+            payloadOffset++;
+            frameDescription = `ISO-TP first frame · ${payloadLength} bytes total`;
+        } else if (frameType === 2) {
+            return `ISO-TP consecutive frame · sequence ${pci & 0x0f}`;
+        } else if (frameType === 3) {
+            const flowStatus = ['Continue to send', 'Wait', 'Overflow'];
+            return `ISO-TP flow control · ${flowStatus[pci & 0x0f] || 'Reserved'} · ` +
+                `BS ${data[payloadOffset] || 0} · STmin 0x${protocolTraceHex(data[payloadOffset + 1] || 0)}`;
+        } else {
+            return 'Unknown ISO-TP frame';
+        }
+
+        const available = Math.max(0, data.length - payloadOffset);
+        const payload = data.slice(
+            payloadOffset,
+            payloadOffset + Math.min(payloadLength, available)
+        );
+
+        if (configuration.uds && payload.length)
+            return `${frameDescription} · ${decodeUdsPayload(payload, configuration.response)}`;
+
+        return frameDescription;
+    }
+
+    function decodeXcpFrame(event, configuration) {
+        if (!event.data.length)
+            return 'XCP · empty frame';
+
+        const pid = event.data[0];
+
+        if (configuration.response) {
+            const packetNames = new Map([
+                [0xff, 'Positive response'],
+                [0xfe, `Error response${event.data.length > 1 ? ` · code 0x${protocolTraceHex(event.data[1])}` : ''}`],
+                [0xfd, 'Event packet'],
+                [0xfc, 'Service request packet']
+            ]);
+            return `XCP · ${packetNames.get(pid) || `DAQ packet 0x${protocolTraceHex(pid)}`}`;
+        }
+
+        const commandNames = new Map([
+            [0xff, 'CONNECT'],
+            [0xfe, 'DISCONNECT'],
+            [0xfd, 'GET_STATUS'],
+            [0xfb, 'GET_COMM_MODE_INFO'],
+            [0xfa, 'GET_ID'],
+            [0xf6, 'SET_MTA'],
+            [0xf5, 'UPLOAD'],
+            [0xf4, 'SHORT_UPLOAD'],
+            [0xf0, 'DOWNLOAD'],
+            [0xef, 'DOWNLOAD_NEXT']
+        ]);
+
+        return `XCP command · ${commandNames.get(pid) || `PID 0x${protocolTraceHex(pid)}`}`;
+    }
+
+    function protocolTraceByteRoles(event, configuration) {
+        const roles = event.data.map(() => 'data');
+        const titles = event.data.map(() => 'Payload data');
+
+        function mark(index, role, title) {
+            if ((index >= 0) && (index < roles.length)) {
+                roles[index] = role;
+                titles[index] = title;
+            }
+        }
+
+        function markRange(start, length, role, title) {
+            for (let index = start; index < (start + length); index++)
+                mark(index, role, title);
+        }
+
+        if (!configuration)
+            return {roles, titles};
+
+        if (configuration.xcp) {
+            const pid = event.data[0];
+
+            if (configuration.response) {
+                mark(
+                    0,
+                    pid === 0xfe ? 'error' : 'service',
+                    pid === 0xfe ? 'XCP error packet' : 'XCP response PID'
+                );
+
+                if (pid === 0xfe)
+                    mark(1, 'error', 'XCP error code');
+            } else {
+                mark(0, 'command', 'XCP command PID');
+
+                const commandLengths = new Map([
+                    [0xff, 2],
+                    [0xfe, 1],
+                    [0xfd, 1],
+                    [0xfb, 1],
+                    [0xfa, 2],
+                    [0xf6, 7],
+                    [0xf5, 2],
+                    [0xf4, 8]
+                ]);
+                const commandLength = commandLengths.get(pid);
+
+                if ([0xff, 0xfa].includes(pid))
+                    mark(1, 'command', 'XCP command parameter');
+                else if ([0xf5, 0xf4, 0xf0, 0xef].includes(pid))
+                    mark(1, 'length', 'Element count');
+
+                if (pid === 0xf6) {
+                    mark(2, 'address', 'Address extension');
+                    markRange(3, 4, 'address', 'Memory address');
+                } else if (pid === 0xf4) {
+                    mark(3, 'address', 'Address extension');
+                    markRange(4, 4, 'address', 'Memory address');
+                }
+
+                if (commandLength !== undefined) {
+                    markRange(
+                        commandLength,
+                        event.data.length - commandLength,
+                        'padding',
+                        'Transport padding'
+                    );
+                }
+            }
+
+            return {roles, titles};
+        }
+
+        const addressOffset = configuration.addressed ? 1 : 0;
+
+        if (configuration.addressed)
+            mark(0, 'address', 'ISO-TP address extension');
+
+        if (event.data.length <= addressOffset)
+            return {roles, titles};
+
+        const pci = event.data[addressOffset];
+        const frameType = pci >> 4;
+        let payloadOffset = addressOffset + 1;
+        let payloadLength = 0;
+        let payloadEnd = event.data.length;
+
+        if (frameType === 0) {
+            mark(addressOffset, 'length', 'ISO-TP Single Frame PCI and length');
+            payloadLength = pci & 0x0f;
+
+            if ((payloadLength === 0) &&
+                (event.data.length > payloadOffset)) {
+                mark(payloadOffset, 'length', 'ISO-TP extended payload length');
+                payloadLength = event.data[payloadOffset++];
+            }
+
+            payloadEnd = Math.min(event.data.length, payloadOffset + payloadLength);
+            markRange(
+                payloadEnd,
+                event.data.length - payloadEnd,
+                'padding',
+                'ISO-TP padding'
+            );
+        } else if (frameType === 1) {
+            markRange(addressOffset, 2, 'length', 'ISO-TP First Frame PCI and total length');
+            payloadOffset++;
+        } else if (frameType === 2) {
+            mark(addressOffset, 'command', 'ISO-TP Consecutive Frame sequence number');
+            return {roles, titles};
+        } else if (frameType === 3) {
+            mark(addressOffset, 'command', 'ISO-TP Flow Control status');
+            mark(payloadOffset, 'length', 'ISO-TP block size');
+            mark(payloadOffset + 1, 'command', 'ISO-TP minimum separation time');
+            markRange(
+                payloadOffset + 2,
+                event.data.length - payloadOffset - 2,
+                'padding',
+                'ISO-TP padding'
+            );
+            return {roles, titles};
+        } else {
+            mark(addressOffset, 'error', 'Invalid ISO-TP PCI');
+            return {roles, titles};
+        }
+
+        if (!configuration.uds || (payloadOffset >= payloadEnd))
+            return {roles, titles};
+
+        const service = event.data[payloadOffset];
+
+        if (service === 0x7f) {
+            mark(payloadOffset, 'error', 'UDS negative response SID');
+            mark(payloadOffset + 1, 'service', 'Rejected UDS service');
+            mark(payloadOffset + 2, 'error', 'UDS negative response code');
+            return {roles, titles};
+        }
+
+        mark(payloadOffset, 'service', 'UDS service identifier');
+        const baseService = configuration.response && (service >= 0x40)
+            ? service - 0x40
+            : service;
+
+        if ([0x10, 0x11, 0x19, 0x27, 0x28, 0x31, 0x3e, 0x85]
+                .includes(baseService)) {
+            mark(payloadOffset + 1, 'command', 'UDS sub-function');
+        }
+
+        if ([0x22, 0x2e, 0x2f].includes(baseService)) {
+            markRange(
+                payloadOffset + 1,
+                2,
+                'command',
+                'UDS data identifier'
+            );
+
+            if (baseService === 0x2f)
+                mark(payloadOffset + 3, 'command', 'I/O control parameter');
+        } else if (baseService === 0x14) {
+            markRange(payloadOffset + 1, 3, 'command', 'DTC group');
+        } else if (baseService === 0x31) {
+            markRange(payloadOffset + 2, 2, 'command', 'Routine identifier');
+        } else if (baseService === 0x36) {
+            mark(payloadOffset + 1, 'command', 'Transfer block sequence counter');
+        } else if ((baseService === 0x23) &&
+                   !configuration.response) {
+            const formatIndex = payloadOffset + 1;
+            const format = event.data[formatIndex] || 0;
+            const addressLength = format & 0x0f;
+            const sizeLength = format >> 4;
+            mark(formatIndex, 'length', 'Address and size length format');
+            markRange(
+                formatIndex + 1,
+                addressLength,
+                'address',
+                'Memory address'
+            );
+            markRange(
+                formatIndex + 1 + addressLength,
+                sizeLength,
+                'length',
+                'Memory size'
+            );
+        } else if (baseService === 0x34) {
+            if (configuration.response) {
+                mark(payloadOffset + 1, 'length', 'Maximum block length format');
+                markRange(
+                    payloadOffset + 2,
+                    payloadEnd - payloadOffset - 2,
+                    'length',
+                    'Maximum transfer block length'
+                );
+            } else {
+                mark(payloadOffset + 1, 'command', 'Data format identifier');
+                mark(payloadOffset + 2, 'length', 'Address and size length format');
+
+                const format = event.data[payloadOffset + 2] || 0;
+                const addressLength = format & 0x0f;
+                const sizeLength = format >> 4;
+                markRange(
+                    payloadOffset + 3,
+                    addressLength,
+                    'address',
+                    'Download memory address'
+                );
+                markRange(
+                    payloadOffset + 3 + addressLength,
+                    sizeLength,
+                    'length',
+                    'Download memory size'
+                );
+            }
+        }
+
+        return {roles, titles};
+    }
+
+    function renderProtocolTraceData(
+        container,
+        event,
+        configuration
+    ) {
+        if (!event.data.length) {
+            container.textContent = 'No data';
+            return;
+        }
+
+        const {roles, titles} =
+            protocolTraceByteRoles(event, configuration);
+
+        event.data.forEach((byte, index) => {
+            const element = document.createElement('span');
+            element.className = `protocol-byte ${roles[index]}`;
+            element.textContent = protocolTraceHex(byte);
+            element.title = `Byte ${index} · ${titles[index]}`;
+            container.append(element);
+        });
+    }
+
+    function initProtocolCanTrace(protocol) {
+        const list = document.getElementById('protocol-trace-list');
+
+        if (!list)
+            return;
+
+        const status = document.getElementById('protocol-trace-status');
+        const pauseButton = document.getElementById('protocol-trace-pause');
+        const clearButton = document.getElementById('protocol-trace-clear');
+        const relevantOnly = document.getElementById('protocol-trace-relevant');
+        const maximumEntries = 500;
+        let socket = null;
+        let paused = false;
+        let reconnectTimer = null;
+
+        function parseIdentifier(id) {
+            const input = document.getElementById(id);
+            const value = input ? parseInt(input.value.trim(), 16) : NaN;
+            return Number.isFinite(value) ? value : null;
+        }
+
+        function selectedBus(id) {
+            const input = document.getElementById(id);
+            return input ? Number(input.value) : 0;
+        }
+
+        function configurations() {
+            if (protocol === 'xcp') {
+                const bus = selectedBus('xcp-bus');
+                return [
+                    {
+                        bus,
+                        id : parseIdentifier('xcp-command-id'),
+                        response : false,
+                        xcp : true
+                    },
+                    {
+                        bus,
+                        id : parseIdentifier('xcp-response-id'),
+                        response : true,
+                        xcp : true
+                    }
+                ];
+            }
+
+            const result = [];
+
+            for (const prefix of ['uds', 'isotp']) {
+                const bus = selectedBus(`${prefix}-bus`);
+                const addressing = document.getElementById(`${prefix}-addressing`);
+                const addressed = addressing && (addressing.value !== '0');
+                const txId = parseIdentifier(`${prefix}-tx-id`);
+                const rxId = parseIdentifier(`${prefix}-rx-id`);
+
+                result.push({
+                    bus,
+                    id : txId,
+                    response : false,
+                    uds : prefix === 'uds',
+                    addressed
+                });
+                result.push({
+                    bus,
+                    id : rxId,
+                    response : true,
+                    uds : prefix === 'uds',
+                    addressed
+                });
+            }
+
+            return result;
+        }
+
+        function configurationFor(event) {
+            return configurations().find(configuration =>
+                (configuration.id !== null) &&
+                (configuration.bus === event.bus) &&
+                (configuration.id === event.id)
+            );
+        }
+
+        function timestampText(timestamp) {
+            return `${timestamp / 1000000n}.` +
+                `${timestamp % 1000000n}`.padStart(6, '0');
+        }
+
+        function addEvent(event) {
+            if (paused || ![0, 2, 3, 4].includes(event.type))
+                return;
+
+            const configuration = configurationFor(event);
+
+            if (relevantOnly.checked && !configuration)
+                return;
+
+            const transmit = event.type !== 0;
+            const failed = (event.type === 3) || (event.type === 4);
+            const entry = document.createElement('article');
+            const decoded = document.createElement('div');
+            const meta = document.createElement('div');
+            const raw = document.createElement('div');
+            const idWidth = (event.flags & 1) ? 8 : 3;
+
+            entry.className =
+                `protocol-trace-entry ${transmit ? 'tx' : 'rx'}` +
+                (failed ? ' error' : '');
+            decoded.className = 'protocol-trace-decoded';
+            meta.className = 'protocol-trace-meta';
+            raw.className = 'protocol-trace-data';
+
+            if (failed) {
+                decoded.textContent = event.type === 3
+                    ? `CAN transmission failed · result ${event.result | 0}`
+                    : 'CAN transmission aborted';
+            } else if (configuration) {
+                decoded.textContent = configuration.xcp
+                    ? decodeXcpFrame(event, configuration)
+                    : decodeIsoTpFrame(event, configuration);
+            } else {
+                decoded.textContent = 'CAN frame outside configured protocol IDs';
+            }
+
+            const values = [
+                transmit ? 'TX' : 'RX',
+                `#${event.sequence}`,
+                `${timestampText(event.timestamp)} s`,
+                `ID ${protocolTraceHex(event.id, idWidth)}`,
+                `DLC ${event.dlc}`
+            ];
+
+            values.forEach((value, index) => {
+                const span = document.createElement('span');
+                span.textContent = value;
+
+                if (index === 0)
+                    span.className = 'protocol-trace-direction';
+
+                meta.append(span);
+            });
+            renderProtocolTraceData(raw, event, configuration);
+            entry.append(decoded, meta, raw);
+
+            const empty = list.querySelector('.protocol-trace-empty');
+            if (empty)
+                empty.remove();
+
+            list.prepend(entry);
+
+            while (list.childElementCount > maximumEntries)
+                list.lastElementChild.remove();
+        }
+
+        function subscribe() {
+            if (!socket || (socket.readyState !== WebSocket.OPEN))
+                return;
+
+            const buses = new Set(configurations().map(item => item.bus));
+            socket.send(JSON.stringify({
+                command : 'subscribe',
+                primary : buses.has(0),
+                secondary : buses.has(1),
+                rx : true,
+                tx : true,
+                paused : false
+            }));
+        }
+
+        function connect() {
+            clearTimeout(reconnectTimer);
+            status.textContent = 'Connecting…';
+            const connection = new WebSocket(
+                `${location.protocol === 'https:' ? 'wss://' : 'ws://'}${location.host}/ws/can`
+            );
+            socket = connection;
+            connection.binaryType = 'arraybuffer';
+
+            connection.onopen = () => {
+                status.textContent = 'Live';
+                subscribe();
+            };
+            connection.onmessage = event => {
+                if ((socket !== connection) ||
+                    (typeof event.data === 'string')) {
+                    return;
+                }
+
+                try {
+                    parseCanStreamBatch(event.data).forEach(addEvent);
+                } catch (error) {
+                    status.textContent = error.message;
+                }
+            };
+            connection.onerror = () => {
+                status.textContent = 'Stream unavailable';
+            };
+            connection.onclose = () => {
+                if (socket !== connection)
+                    return;
+
+                socket = null;
+                status.textContent = 'Disconnected';
+
+                if (!document.hidden)
+                    reconnectTimer = setTimeout(connect, 2000);
+            };
+        }
+
+        pauseButton.addEventListener('click', () => {
+            paused = !paused;
+            pauseButton.textContent = paused ? 'Resume' : 'Pause';
+            status.textContent = paused ? 'Paused' :
+                (socket && socket.readyState === WebSocket.OPEN
+                    ? 'Live'
+                    : 'Disconnected');
+        });
+        clearButton.addEventListener('click', () => {
+            list.innerHTML =
+                '<p class="protocol-trace-empty">Waiting for CAN traffic…</p>';
+        });
+
+        for (const selector of [
+            '#isotp-bus', '#uds-bus', '#xcp-bus'
+        ]) {
+            const input = document.querySelector(selector);
+            if (input)
+                input.addEventListener('change', subscribe);
+        }
+
+        connect();
+    }
+
     function initResizableCanTables(root = document) {
         const tables = root.querySelectorAll(
             ".resizable-can-row[data-resize-key]"
@@ -8553,6 +9258,7 @@
     function init_diagnostics_transport() {
         init_isotp();
         init_uds();
+        initProtocolCanTrace('isotp');
     }
 
     function init_uds_programming() {
@@ -9578,6 +10284,8 @@
         const byteCount = element('xcp-byte-count');
         let latestResponse = '';
         let lastSequence = -1;
+
+        initProtocolCanTrace('xcp');
 
         const stateNames = [
             'Closed',

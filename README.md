@@ -127,6 +127,7 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Timestamped ECU programming journals under `/sdcard/logs/firmware`
 - Raw UDS service requests through the Web interface
 - Dedicated ISO-TP/UDS diagnostics and UDS Programming pages
+- Live decoded raw CAN trace for ISO-TP, UDS, and XCP diagnostics
 - Stateful multi-session XCP master over CAN
 - XCP RES, ERR, EV, SERV, and DAQ packet classification
 - CONNECT and discovery response decoding with standard XCP errors

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.ico">
     <title>XCP Diagnostics · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=27">
-    <script src="spectra.js?v=27" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=40">
+    <script src="spectra.js?v=40" defer></script>
 </head>
 
 <body class="page-xcp page-isotp">
@@ -41,6 +41,7 @@
             </div>
         </div>
 
+        <div class="protocol-workspace">
         <div class="isotp-layout">
             <section class="card isotp-configuration isotp-card">
                 <h2>Slave transport</h2>
@@ -238,6 +239,40 @@
                 <div id="xcp-decoded">No decoded command response.</div>
                 <div id="xcp-message" role="status">Configure a slave transport to begin.</div>
             </section>
+        </div>
+
+        <aside class="card protocol-trace" aria-label="Raw CAN trace">
+            <div class="panel-title">
+                <div>
+                    <h2>Raw CAN trace</h2>
+                    <span id="protocol-trace-status">Connecting…</span>
+                </div>
+
+                <div class="protocol-trace-actions">
+                    <button id="protocol-trace-pause">Pause</button>
+                    <button id="protocol-trace-clear">Clear</button>
+                </div>
+            </div>
+
+            <label class="protocol-trace-option">
+                <input id="protocol-trace-relevant" type="checkbox" checked>
+                Only configured XCP identifiers
+            </label>
+
+            <div class="protocol-trace-legend" aria-label="Byte color legend">
+                <span class="length">Length / count</span>
+                <span class="service">Response</span>
+                <span class="command">Command PID</span>
+                <span class="address">Address</span>
+                <span class="error">Error</span>
+            </div>
+
+            <div id="protocol-trace-list" class="protocol-trace-list">
+                <p class="protocol-trace-empty">
+                    Waiting for CAN traffic…
+                </p>
+            </div>
+        </aside>
         </div>
     </main>
 </body>
