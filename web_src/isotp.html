@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=38">
-    <script src="spectra.js?v=38" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=39">
+    <script src="spectra.js?v=39" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -282,6 +282,10 @@
                         <select id="uds-service">
                             <option value="read_did">Read Data By Identifier</option>
                             <option value="write_did">Write Data By Identifier</option>
+                            <option value="read_memory">Read Memory By Address</option>
+                            <option value="communication_control">Communication Control</option>
+                            <option value="io_control">Input Output Control By Identifier</option>
+                            <option value="control_dtc_setting">Control DTC Setting</option>
                             <option value="read_dtc">Read DTC Information</option>
                             <option value="clear_dtc">Clear Diagnostic Information</option>
                             <option value="routine">Routine Control</option>
@@ -311,6 +315,21 @@
                     <label id="uds-subfunction-field" hidden>
                         Sub-function
                         <input id="uds-subfunction" value="03" spellcheck="false">
+                    </label>
+
+                    <label id="uds-communication-type-field" hidden>
+                        Communication type
+                        <input id="uds-communication-type" value="03" spellcheck="false">
+                    </label>
+
+                    <label id="uds-io-parameter-field" hidden>
+                        IO control parameter
+                        <input id="uds-io-parameter" value="00" spellcheck="false">
+                    </label>
+
+                    <label id="uds-control-data-field" hidden>
+                        Control data / option record (HEX bytes)
+                        <textarea id="uds-control-data" rows="4" spellcheck="false"></textarea>
                     </label>
 
                     <label id="uds-dtc-subfunction-field" hidden>

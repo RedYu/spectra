@@ -42,6 +42,22 @@ typedef enum
 
 } uds_routine_control_type_t;
 
+typedef enum
+{
+    UDS_COMMUNICATION_ENABLE_RX_AND_TX = 0x00,
+    UDS_COMMUNICATION_ENABLE_RX_DISABLE_TX = 0x01,
+    UDS_COMMUNICATION_DISABLE_RX_ENABLE_TX = 0x02,
+    UDS_COMMUNICATION_DISABLE_RX_AND_TX = 0x03,
+
+} uds_communication_control_type_t;
+
+typedef enum
+{
+    UDS_DTC_SETTING_ON = 0x01,
+    UDS_DTC_SETTING_OFF = 0x02,
+
+} uds_dtc_setting_type_t;
+
 #define UDS_SECURITY_ACCESS_LEVEL_MIN  (0x01U)
 #define UDS_SECURITY_ACCESS_LEVEL_MAX  (0x7DU)
 
@@ -80,6 +96,45 @@ esp_err_t uds_request_encode_write_data_by_identifier(
     uint16_t identifier,
     const uint8_t *data,
     size_t data_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_read_memory_by_address(
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_communication_control(
+    uint8_t control_type,
+    uint8_t communication_type,
+    bool suppress_positive_response,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_input_output_control_by_identifier(
+    uint16_t identifier,
+    uint8_t control_parameter,
+    const uint8_t *control_state,
+    size_t control_state_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_control_dtc_setting(
+    uint8_t setting_type,
+    const uint8_t *option_record,
+    size_t option_record_length,
+    bool suppress_positive_response,
     uint8_t *buffer,
     size_t capacity,
     size_t *encoded_size

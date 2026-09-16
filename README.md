@@ -110,9 +110,13 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - UDS client with P2/P2* timing and NRC `0x78` handling
 - Diagnostic Session Control, ECU Reset, Tester Present, SecurityAccess,
   Read/Write Data By Identifier, DTC reading/clearing, and RoutineControl
+- ReadMemoryByAddress, CommunicationControl,
+  InputOutputControlByIdentifier, and ControlDTCSetting
 - RequestDownload, TransferData, and RequestTransferExit primitives
 - Non-blocking ECU programming pipeline with retry, cancellation, progress,
   long-running routine polling, reset, and session restoration
+- Stage-aware NRC handling with delayed Busy/RequiredTimeDelay retries,
+  TransferData sequence recovery, and SecurityAccess reacquisition
 - ECU programming from BIN, Intel HEX, Motorola S-record, and BHX images stored
   under `/sdcard/firmwares`
 - Streaming multi-section BHX parsing with big-endian `GHDR`/`SHDR` headers,
@@ -542,7 +546,7 @@ To exit the serial monitor, press `Ctrl+]`.
 ### Planned
 
 - [ ] BLF import and export
-- [ ] Additional UDS services, functional addressing, and OBD-II workflows
+- [ ] Functional addressing, remaining UDS services, and OBD-II workflows
 - [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
 - [ ] Persistent resume after interrupted ECU programming
 - [ ] XCP multi-packet block transfer, DAQ/STIM, calibration-page control,

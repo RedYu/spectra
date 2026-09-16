@@ -33,6 +33,13 @@ WriteDataByIdentifier (`0x2E`) accepts one 16-bit DID and between 1 and 256
 data bytes. The client validates the payload before transmission and the web
 diagnostics page asks for confirmation before writing to the ECU.
 
+Additional typed diagnostic requests include ReadMemoryByAddress (`0x23`)
+with one- to eight-byte address and size fields, CommunicationControl (`0x28`),
+InputOutputControlByIdentifier (`0x2F`) with an optional control-state record,
+and ControlDTCSetting (`0x85`) with an optional option record. They are exposed
+by the manual Web diagnostics page and remain subject to the active ECU session
+and SecurityAccess permissions.
+
 RoutineControl (`0x31`) supports StartRoutine (`0x01`), StopRoutine (`0x02`),
 and RequestRoutineResults (`0x03`). Requests contain a 16-bit routine identifier
 and an optional routine-control option record of up to 256 bytes. The web page
@@ -115,8 +122,14 @@ verification. Empty files and images larger than 64 MiB are rejected before a
 diagnostic request is sent. TransferData retries the same
 payload with the same block sequence counter up to three times after a response
 timeout, `busyRepeatRequest` (`0x21`), or `wrongBlockSequenceCounter` (`0x73`).
+For other programming stages, NRC `0x21` schedules a bounded delayed retry,
+SecurityAccess NRC `0x37` waits longer before retrying the same seed/key stage,
+and NRC `0x33` during erase, RequestDownload, or verification restarts the
+configured SecurityAccess exchange before resuming that stage. Structural,
+range, programming-failure, and unsupported-service NRCs remain terminal.
 The complete automatic transfer is limited to ten minutes. Progress reports the
-acknowledged block count, total retry count, current block retry, and last NRC.
+acknowledged block count, total retry count, current block/action retry,
+selected NRC action, and last NRC.
 
 Each automatic programming attempt creates a text journal in
 `/logs/firmware`. Its filename uses local synchronized time when available and

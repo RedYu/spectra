@@ -22,6 +22,8 @@ extern "C" {
 #define UDS_DOWNLOAD_ROUTINE_RECORD_MAX_LENGTH      (256U)
 #define UDS_DOWNLOAD_DEFAULT_ROUTINE_POLL_INTERVAL_US (250000ULL)
 #define UDS_DOWNLOAD_DEFAULT_MAXIMUM_ROUTINE_POLLS    (240U)
+#define UDS_DOWNLOAD_NRC_RETRY_DELAY_US                (100000ULL)
+#define UDS_DOWNLOAD_SECURITY_DELAY_RETRY_US           (1000000ULL)
 
 typedef enum
 {
@@ -43,6 +45,15 @@ typedef enum
     UDS_DOWNLOAD_ERROR,
 
 } uds_download_state_t;
+
+typedef enum
+{
+    UDS_DOWNLOAD_NRC_FAIL = 0,
+    UDS_DOWNLOAD_NRC_RETRY,
+    UDS_DOWNLOAD_NRC_WAIT_AND_RETRY,
+    UDS_DOWNLOAD_NRC_RESTART_SECURITY,
+
+} uds_download_nrc_action_t;
 
 /* Offset is logical across all segments and excludes address gaps. */
 typedef esp_err_t (*uds_download_read_cb_t)(
@@ -144,7 +155,9 @@ typedef struct
     uint32_t acknowledged_blocks;
     uint32_t retry_count;
     uint8_t current_block_retry;
+    uint8_t current_action_retry;
     uint8_t last_negative_response_code;
+    uds_download_nrc_action_t last_nrc_action;
     esp_err_t last_result;
     bool security_unlocked;
     bool default_session_restored;
@@ -173,7 +186,9 @@ typedef struct
     uint8_t block_sequence_counter;
     uint8_t maximum_block_retries;
     uint8_t current_block_retry;
+    uint8_t current_action_retry;
     uint8_t last_negative_response_code;
+    uds_download_nrc_action_t last_nrc_action;
     uint32_t acknowledged_blocks;
     uint32_t retry_count;
     uint32_t routine_poll_count;
@@ -188,6 +203,7 @@ typedef struct
     bool restoring_after_error;
     bool routine_result_polling;
     size_t security_seed_length;
+    size_t security_key_length;
     uint64_t action_due_us;
     uint64_t routine_poll_interval_us;
     uint32_t maximum_routine_polls;
@@ -235,6 +251,11 @@ esp_err_t uds_download_get_progress(
 
 uds_client_t *uds_download_client(
     uds_download_t *download
+);
+
+uds_download_nrc_action_t uds_download_classify_nrc(
+    uds_download_state_t state,
+    uint8_t negative_response_code
 );
 
 esp_err_t uds_download_memory_read(

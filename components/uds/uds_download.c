@@ -256,10 +256,80 @@ static bool uds_download_retry_block(
     download->retry_count++;
     download->last_negative_response_code =
         negative_response_code;
+    download->last_nrc_action =
+        (negative_response_code == UDS_NRC_BUSY_REPEAT_REQUEST)
+            ? UDS_DOWNLOAD_NRC_WAIT_AND_RETRY
+            : UDS_DOWNLOAD_NRC_RETRY;
     download->retry_pending = true;
     download->action_pending = true;
     download->last_result = ESP_OK;
 
+    return true;
+}
+
+uds_download_nrc_action_t uds_download_classify_nrc(
+    uds_download_state_t state,
+    uint8_t negative_response_code
+)
+{
+    if (negative_response_code == UDS_NRC_BUSY_REPEAT_REQUEST) {
+        return UDS_DOWNLOAD_NRC_WAIT_AND_RETRY;
+    }
+
+    if ((state == UDS_DOWNLOAD_TRANSFERRING) &&
+        (negative_response_code ==
+         UDS_NRC_WRONG_BLOCK_SEQUENCE_COUNTER)) {
+
+        return UDS_DOWNLOAD_NRC_RETRY;
+    }
+
+    if (((state == UDS_DOWNLOAD_REQUESTING_SECURITY_SEED) ||
+         (state == UDS_DOWNLOAD_SENDING_SECURITY_KEY)) &&
+        (negative_response_code ==
+         UDS_NRC_REQUIRED_TIME_DELAY_NOT_EXPIRED)) {
+
+        return UDS_DOWNLOAD_NRC_WAIT_AND_RETRY;
+    }
+
+    if (((state == UDS_DOWNLOAD_ERASING_MEMORY) ||
+         (state == UDS_DOWNLOAD_REQUESTING_DOWNLOAD) ||
+         (state == UDS_DOWNLOAD_VERIFYING_MEMORY)) &&
+        (negative_response_code == UDS_NRC_SECURITY_ACCESS_DENIED)) {
+
+        return UDS_DOWNLOAD_NRC_RESTART_SECURITY;
+    }
+
+    return UDS_DOWNLOAD_NRC_FAIL;
+}
+
+static bool uds_download_retry_action(
+    uds_download_t *download,
+    uint8_t negative_response_code,
+    uint64_t delay_us
+)
+{
+    if (download->state == UDS_DOWNLOAD_TRANSFERRING) {
+        return uds_download_retry_block(
+            download,
+            negative_response_code
+        );
+    }
+
+    if (download->current_action_retry >=
+        download->maximum_block_retries) {
+
+        return false;
+    }
+
+    download->current_action_retry++;
+    download->retry_count++;
+    download->last_negative_response_code =
+        negative_response_code;
+    download->retry_pending = true;
+    download->action_pending = true;
+    download->action_due_us =
+        (uint64_t)esp_timer_get_time() + delay_us;
+    download->last_result = ESP_OK;
     return true;
 }
 
@@ -435,7 +505,9 @@ esp_err_t uds_download_start(
         download->current_block_size = 0U;
         download->block_sequence_counter = 1U;
         download->current_block_retry = 0U;
+        download->current_action_retry = 0U;
         download->last_negative_response_code = 0U;
+        download->last_nrc_action = UDS_DOWNLOAD_NRC_FAIL;
         download->acknowledged_blocks = 0U;
         download->retry_count = 0U;
         download->started_at_us = now_us;
@@ -515,6 +587,7 @@ esp_err_t uds_download_poll(
         }
 
         if (result == ESP_OK) {
+            download->security_key_length = key_length;
             result =
                 uds_client_security_access_send_key(
                     &download->client,
@@ -618,6 +691,7 @@ esp_err_t uds_download_poll(
         return result;
     }
 
+    download->retry_pending = false;
     return uds_download_submit_action(download, now_us);
 }
 
@@ -647,6 +721,17 @@ static esp_err_t uds_download_submit_action(
                     download->config.security_level,
                     NULL,
                     0U,
+                    now_us
+                );
+            break;
+
+        case UDS_DOWNLOAD_SENDING_SECURITY_KEY:
+            result =
+                uds_client_security_access_send_key(
+                    &download->client,
+                    download->config.security_level,
+                    download->config.security_key_buffer,
+                    download->security_key_length,
                     now_us
                 );
             break;
@@ -779,8 +864,10 @@ esp_err_t uds_download_get_progress(
         .acknowledged_blocks = download->acknowledged_blocks,
         .retry_count = download->retry_count,
         .current_block_retry = download->current_block_retry,
+        .current_action_retry = download->current_action_retry,
         .last_negative_response_code =
             download->last_negative_response_code,
+        .last_nrc_action = download->last_nrc_action,
         .last_result = download->last_result,
         .security_unlocked = download->security_unlocked,
         .default_session_restored =
@@ -855,6 +942,8 @@ static void uds_download_client_callback(
 
     if (event->type == UDS_CLIENT_EVENT_RESPONSE) {
         download->last_negative_response_code = 0U;
+        download->current_action_retry = 0U;
+        download->last_nrc_action = UDS_DOWNLOAD_NRC_FAIL;
     }
 
     if ((event->type == UDS_CLIENT_EVENT_RESPONSE) &&
@@ -1270,23 +1359,46 @@ static void uds_download_client_callback(
                 ESP_ERR_TIMEOUT
             );
         }
-    } else if ((event->type == UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) &&
-               (event->response.negative_response_code ==
-                UDS_NRC_SECURITY_ACCESS_DENIED) &&
-               (download->config.security_level != 0U) &&
-               !download->security_unlocked &&
-               ((download->state == UDS_DOWNLOAD_ERASING_MEMORY) ||
-                (download->state ==
-                 UDS_DOWNLOAD_REQUESTING_DOWNLOAD) ||
-                (download->state ==
-                 UDS_DOWNLOAD_VERIFYING_MEMORY))) {
-
-        download->security_resume_state = download->state;
-        download->state =
-            UDS_DOWNLOAD_REQUESTING_SECURITY_SEED;
-        download->action_pending = true;
-        download->last_negative_response_code =
+    } else if (event->type == UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) {
+        const uint8_t nrc =
             event->response.negative_response_code;
+        const uds_download_nrc_action_t action =
+            uds_download_classify_nrc(
+                download->state,
+                nrc
+            );
+
+        download->last_nrc_action = action;
+
+        if (((action == UDS_DOWNLOAD_NRC_RETRY) ||
+             (action == UDS_DOWNLOAD_NRC_WAIT_AND_RETRY)) &&
+            uds_download_retry_action(
+                download,
+                nrc,
+                (nrc == UDS_NRC_REQUIRED_TIME_DELAY_NOT_EXPIRED)
+                    ? UDS_DOWNLOAD_SECURITY_DELAY_RETRY_US
+                    : UDS_DOWNLOAD_NRC_RETRY_DELAY_US
+            )) {
+
+            /* The same stage is submitted after its NRC-specific delay. */
+        } else if ((action == UDS_DOWNLOAD_NRC_RESTART_SECURITY) &&
+                   (download->config.security_level != 0U)) {
+
+            download->security_resume_state = download->state;
+            download->security_unlocked = false;
+            download->state =
+                UDS_DOWNLOAD_REQUESTING_SECURITY_SEED;
+            download->action_pending = true;
+            download->last_negative_response_code = nrc;
+        } else {
+            download->last_negative_response_code = nrc;
+            uds_download_fail(
+                download,
+                (event->result != ESP_OK)
+                    ? event->result
+                    : ESP_FAIL
+            );
+        }
     } else if ((download->state != UDS_DOWNLOAD_CANCELLED) &&
                ((event->type ==
                  UDS_CLIENT_EVENT_NEGATIVE_RESPONSE) ||

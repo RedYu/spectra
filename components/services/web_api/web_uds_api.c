@@ -1426,6 +1426,128 @@ static esp_err_t web_uds_request(
         );
     }
 
+    if (strcmp(kind->valuestring, "read_memory") == 0) {
+        uint32_t address_length = 0U;
+        uint32_t size_length = 0U;
+        uint64_t memory_address = 0U;
+        uint64_t memory_size = 0U;
+
+        if (!web_uds_number(root, "address_length", 8U, &address_length) ||
+            !web_uds_number(root, "size_length", 8U, &size_length) ||
+            !web_uds_hex_uint64(root, "address", &memory_address) ||
+            !web_uds_hex_uint64(root, "size", &memory_size)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        return uds_client_read_memory_by_address(
+            &s_client,
+            memory_address,
+            (uint8_t)address_length,
+            memory_size,
+            (uint8_t)size_length,
+            now_us
+        );
+    }
+
+    if (strcmp(kind->valuestring, "communication_control") == 0) {
+        uint32_t communication_type = 0U;
+
+        if (!web_uds_number(root, "value", 0x03U, &value) ||
+            !web_uds_number(
+                root,
+                "communication_type",
+                UINT8_MAX,
+                &communication_type
+            ) ||
+            !web_uds_boolean(root, "suppress", false, &suppress)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        return uds_client_communication_control(
+            &s_client,
+            (uint8_t)value,
+            (uint8_t)communication_type,
+            suppress,
+            now_us
+        );
+    }
+
+    if (strcmp(kind->valuestring, "io_control") == 0) {
+        const cJSON *data =
+            cJSON_GetObjectItemCaseSensitive(root, "data");
+        uint32_t control_parameter = 0U;
+
+        if (!web_uds_number(root, "did", UINT16_MAX, &value) ||
+            !web_uds_number(
+                root,
+                "control_parameter",
+                UINT8_MAX,
+                &control_parameter
+            ) ||
+            !cJSON_IsString(data)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        uint8_t control_state[UDS_CLIENT_CONTROL_DATA_MAX_LENGTH];
+        size_t control_state_length = 0U;
+        const esp_err_t parse_result = web_uds_parse_hex(
+            data->valuestring,
+            control_state,
+            sizeof(control_state),
+            &control_state_length
+        );
+
+        if (parse_result != ESP_OK) {
+            return parse_result;
+        }
+
+        return uds_client_input_output_control_by_identifier(
+            &s_client,
+            (uint16_t)value,
+            (uint8_t)control_parameter,
+            control_state,
+            control_state_length,
+            now_us
+        );
+    }
+
+    if (strcmp(kind->valuestring, "control_dtc_setting") == 0) {
+        const cJSON *data =
+            cJSON_GetObjectItemCaseSensitive(root, "data");
+
+        if (!web_uds_number(root, "value", 0x02U, &value) ||
+            !web_uds_boolean(root, "suppress", false, &suppress) ||
+            !cJSON_IsString(data)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        uint8_t option_record[UDS_CLIENT_CONTROL_DATA_MAX_LENGTH];
+        size_t option_record_length = 0U;
+        const esp_err_t parse_result = web_uds_parse_hex(
+            data->valuestring,
+            option_record,
+            sizeof(option_record),
+            &option_record_length
+        );
+
+        if (parse_result != ESP_OK) {
+            return parse_result;
+        }
+
+        return uds_client_control_dtc_setting(
+            &s_client,
+            (uint8_t)value,
+            option_record,
+            option_record_length,
+            suppress,
+            now_us
+        );
+    }
+
     if (strcmp(kind->valuestring, "read_dtc") == 0) {
         uint32_t status_mask = 0U;
 
@@ -3911,6 +4033,16 @@ static esp_err_t web_uds_get_handler(
             response,
             "download_block_retry",
             download_progress.current_block_retry
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_action_retry",
+            download_progress.current_action_retry
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "download_nrc_action",
+            download_progress.last_nrc_action
         ) != NULL) &&
         (cJSON_AddNumberToObject(
             response,

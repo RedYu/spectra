@@ -7512,7 +7512,8 @@
             const selected = service.value;
             element('uds-did-field').hidden =
                 selected !== 'read_did' &&
-                selected !== 'write_did';
+                selected !== 'write_did' &&
+                selected !== 'io_control';
             element('uds-write-data-field').hidden =
                 selected !== 'write_did';
             element('uds-dtc-subfunction-field').hidden =
@@ -7541,12 +7542,22 @@
                 selected === 'security_key'
                     ? 'Calculated key (HEX bytes)'
                     : 'Seed request data record (HEX bytes, optional)';
+            const memory =
+                selected === 'request_download' ||
+                selected === 'read_memory';
             const download = selected === 'request_download';
             element('uds-download-format-field').hidden = !download;
-            element('uds-download-address-field').hidden = !download;
-            element('uds-download-address-length-field').hidden = !download;
-            element('uds-download-size-field').hidden = !download;
-            element('uds-download-size-length-field').hidden = !download;
+            element('uds-download-address-field').hidden = !memory;
+            element('uds-download-address-length-field').hidden = !memory;
+            element('uds-download-size-field').hidden = !memory;
+            element('uds-download-size-length-field').hidden = !memory;
+            element('uds-communication-type-field').hidden =
+                selected !== 'communication_control';
+            element('uds-io-parameter-field').hidden =
+                selected !== 'io_control';
+            element('uds-control-data-field').hidden =
+                selected !== 'io_control' &&
+                selected !== 'control_dtc_setting';
             element('uds-transfer-counter-field').hidden =
                 selected !== 'transfer_data';
             const transfer =
@@ -7558,7 +7569,10 @@
                     ? 'Transfer exit parameter record (HEX bytes, optional)'
                     : 'Transfer data (HEX bytes)';
             element('uds-subfunction-field').hidden =
-                selected !== 'session' && selected !== 'reset';
+                selected !== 'session' &&
+                selected !== 'reset' &&
+                selected !== 'communication_control' &&
+                selected !== 'control_dtc_setting';
             element('uds-raw-sid-field').hidden = selected !== 'raw';
             element('uds-raw-data-field').hidden = selected !== 'raw';
             element('uds-suppress').disabled =
@@ -7566,7 +7580,8 @@
                 selected === 'write_did' ||
                 selected === 'read_dtc' ||
                 security ||
-                download ||
+                memory ||
+                selected === 'io_control' ||
                 transfer ||
                 selected === 'raw';
 
@@ -8108,6 +8123,64 @@
                         throw new Error(
                             'Write Data payload exceeds the 256-byte limit.'
                         );
+                } else if (kind === 'read_memory') {
+                    const addressLength =
+                        Number(element('uds-download-address-length').value);
+                    const sizeLength =
+                        Number(element('uds-download-size-length').value);
+
+                    request.address_length = addressLength;
+                    request.size_length = sizeLength;
+                    request.address = parseHexIntegerText(
+                        element('uds-download-address'),
+                        addressLength,
+                        'Memory address',
+                        true
+                    );
+                    request.size = parseHexIntegerText(
+                        element('uds-download-size'),
+                        sizeLength,
+                        'Memory size',
+                        false
+                    );
+                } else if (kind === 'communication_control') {
+                    request.value = parseHexNumber(
+                        element('uds-subfunction'),
+                        0x03,
+                        'Communication control type'
+                    );
+                    request.communication_type = parseHexNumber(
+                        element('uds-communication-type'),
+                        0xff,
+                        'Communication type'
+                    );
+                    request.suppress = element('uds-suppress').checked;
+                } else if (kind === 'io_control') {
+                    request.did = parseHexNumber(
+                        element('uds-did'),
+                        0xffff,
+                        'Data identifier'
+                    );
+                    request.control_parameter = parseHexNumber(
+                        element('uds-io-parameter'),
+                        0xff,
+                        'IO control parameter'
+                    );
+                    request.data = normalizeHex(
+                        element('uds-control-data').value,
+                        true
+                    );
+                } else if (kind === 'control_dtc_setting') {
+                    request.value = parseHexNumber(
+                        element('uds-subfunction'),
+                        0x02,
+                        'DTC setting type'
+                    );
+                    request.data = normalizeHex(
+                        element('uds-control-data').value,
+                        true
+                    );
+                    request.suppress = element('uds-suppress').checked;
                 } else if (kind === 'read_dtc') {
                     request.value =
                         parseHexNumber(

@@ -126,6 +126,10 @@ const char *uds_protocol_negative_response_name(
             return "Conditions not correct";
         case UDS_NRC_REQUEST_SEQUENCE_ERROR:
             return "Request sequence error";
+        case UDS_NRC_NO_RESPONSE_FROM_SUBNET_COMPONENT:
+            return "No response from subnet component";
+        case UDS_NRC_FAILURE_PREVENTS_EXECUTION:
+            return "Failure prevents execution";
         case UDS_NRC_REQUEST_OUT_OF_RANGE:
             return "Request out of range";
         case UDS_NRC_SECURITY_ACCESS_DENIED:
@@ -136,6 +140,14 @@ const char *uds_protocol_negative_response_name(
             return "Exceeded number of attempts";
         case UDS_NRC_REQUIRED_TIME_DELAY_NOT_EXPIRED:
             return "Required time delay not expired";
+        case UDS_NRC_UPLOAD_DOWNLOAD_NOT_ACCEPTED:
+            return "Upload or download not accepted";
+        case UDS_NRC_TRANSFER_DATA_SUSPENDED:
+            return "Transfer data suspended";
+        case UDS_NRC_GENERAL_PROGRAMMING_FAILURE:
+            return "General programming failure";
+        case UDS_NRC_WRONG_BLOCK_SEQUENCE_COUNTER:
+            return "Wrong block sequence counter";
         case UDS_NRC_RESPONSE_PENDING:
             return "Response pending";
         case UDS_NRC_SUBFUNCTION_NOT_SUPPORTED_IN_ACTIVE_SESSION:
@@ -150,6 +162,8 @@ const char *uds_protocol_negative_response_name(
             return "Engine is running";
         case UDS_NRC_ENGINE_IS_NOT_RUNNING:
             return "Engine is not running";
+        case UDS_NRC_ENGINE_RUN_TIME_TOO_LOW:
+            return "Engine run time too low";
         case UDS_NRC_TEMPERATURE_TOO_HIGH:
             return "Temperature too high";
         case UDS_NRC_TEMPERATURE_TOO_LOW:

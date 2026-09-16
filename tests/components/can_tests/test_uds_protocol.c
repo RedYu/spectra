@@ -429,6 +429,95 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "UDS request helpers encode control and memory services",
+    "[uds]"
+)
+{
+    uint8_t buffer[16] = {0};
+    size_t encoded_size = 0U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_read_memory_by_address(
+            0x12345678U,
+            4U,
+            0x20U,
+            2U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    const uint8_t read_memory[] = {
+        0x23U, 0x24U,
+        0x12U, 0x34U, 0x56U, 0x78U,
+        0x00U, 0x20U,
+    };
+    TEST_ASSERT_EQUAL(sizeof(read_memory), encoded_size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        read_memory,
+        buffer,
+        sizeof(read_memory)
+    );
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_communication_control(
+            UDS_COMMUNICATION_DISABLE_RX_AND_TX,
+            0x03U,
+            true,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    const uint8_t communication[] = {0x28U, 0x83U, 0x03U};
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        communication,
+        buffer,
+        sizeof(communication)
+    );
+
+    const uint8_t state[] = {0xAAU, 0x55U};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_input_output_control_by_identifier(
+            0xF200U,
+            0x03U,
+            state,
+            sizeof(state),
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    const uint8_t io_control[] = {
+        0x2FU, 0xF2U, 0x00U, 0x03U, 0xAAU, 0x55U,
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        io_control,
+        buffer,
+        sizeof(io_control)
+    );
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_control_dtc_setting(
+            UDS_DTC_SETTING_OFF,
+            NULL,
+            0U,
+            false,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    TEST_ASSERT_EQUAL(2U, encoded_size);
+    TEST_ASSERT_EQUAL_HEX8(0x85U, buffer[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x02U, buffer[1]);
+}
+
+TEST_CASE(
     "UDS protocol decodes DTC status bits",
     "[uds]"
 )

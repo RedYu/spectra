@@ -174,3 +174,45 @@ TEST_CASE(
         uds_download_open(&download, &config)
     );
 }
+
+TEST_CASE(
+    "UDS download classifies NRC by programming stage",
+    "[uds]"
+)
+{
+    TEST_ASSERT_EQUAL(
+        UDS_DOWNLOAD_NRC_WAIT_AND_RETRY,
+        uds_download_classify_nrc(
+            UDS_DOWNLOAD_REQUESTING_DOWNLOAD,
+            UDS_NRC_BUSY_REPEAT_REQUEST
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        UDS_DOWNLOAD_NRC_RETRY,
+        uds_download_classify_nrc(
+            UDS_DOWNLOAD_TRANSFERRING,
+            UDS_NRC_WRONG_BLOCK_SEQUENCE_COUNTER
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        UDS_DOWNLOAD_NRC_WAIT_AND_RETRY,
+        uds_download_classify_nrc(
+            UDS_DOWNLOAD_SENDING_SECURITY_KEY,
+            UDS_NRC_REQUIRED_TIME_DELAY_NOT_EXPIRED
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        UDS_DOWNLOAD_NRC_RESTART_SECURITY,
+        uds_download_classify_nrc(
+            UDS_DOWNLOAD_VERIFYING_MEMORY,
+            UDS_NRC_SECURITY_ACCESS_DENIED
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        UDS_DOWNLOAD_NRC_FAIL,
+        uds_download_classify_nrc(
+            UDS_DOWNLOAD_REQUESTING_TRANSFER_EXIT,
+            UDS_NRC_GENERAL_PROGRAMMING_FAILURE
+        )
+    );
+}

@@ -178,6 +178,116 @@ esp_err_t uds_request_encode_write_data_by_identifier(
     return ESP_OK;
 }
 
+esp_err_t uds_request_encode_communication_control(
+    uint8_t control_type,
+    uint8_t communication_type,
+    bool suppress_positive_response,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((control_type > UDS_COMMUNICATION_DISABLE_RX_AND_TX) ||
+        (communication_type == 0U)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint8_t parameters[2] = {
+        control_type |
+            (suppress_positive_response
+                ? UDS_SUPPRESS_POSITIVE_RESPONSE
+                : 0U),
+        communication_type,
+    };
+
+    return uds_protocol_encode_request(
+        UDS_SERVICE_COMMUNICATION_CONTROL,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t uds_request_encode_input_output_control_by_identifier(
+    uint16_t identifier,
+    uint8_t control_parameter,
+    const uint8_t *control_state,
+    size_t control_state_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (((control_state == NULL) && (control_state_length != 0U)) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL) ||
+        (control_state_length > (SIZE_MAX - 4U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size = 4U + control_state_length;
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_INPUT_OUTPUT_CONTROL_BY_IDENTIFIER;
+    buffer[1] = (uint8_t)(identifier >> 8U);
+    buffer[2] = (uint8_t)identifier;
+    buffer[3] = control_parameter;
+
+    if (control_state_length != 0U) {
+        memcpy(&buffer[4], control_state, control_state_length);
+    }
+
+    *encoded_size = required_size;
+    return ESP_OK;
+}
+
+esp_err_t uds_request_encode_control_dtc_setting(
+    uint8_t setting_type,
+    const uint8_t *option_record,
+    size_t option_record_length,
+    bool suppress_positive_response,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (((setting_type != UDS_DTC_SETTING_ON) &&
+         (setting_type != UDS_DTC_SETTING_OFF)) ||
+        ((option_record == NULL) && (option_record_length != 0U)) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL) ||
+        (option_record_length > (SIZE_MAX - 2U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size = 2U + option_record_length;
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_CONTROL_DTC_SETTING;
+    buffer[1] = setting_type |
+        (suppress_positive_response
+            ? UDS_SUPPRESS_POSITIVE_RESPONSE
+            : 0U);
+
+    if (option_record_length != 0U) {
+        memcpy(&buffer[2], option_record, option_record_length);
+    }
+
+    *encoded_size = required_size;
+    return ESP_OK;
+}
+
 esp_err_t uds_request_encode_read_dtc_information(
     uint8_t subfunction,
     uint8_t status_mask,
@@ -397,6 +507,57 @@ static void uds_request_write_big_endian(
             (uint8_t)(value >>
                       ((length - index - 1U) * 8U));
     }
+}
+
+esp_err_t uds_request_encode_read_memory_by_address(
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((memory_size == 0U) ||
+        !uds_request_value_fits_length(
+            memory_address,
+            memory_address_length
+        ) ||
+        !uds_request_value_fits_length(
+            memory_size,
+            memory_size_length
+        ) ||
+        (buffer == NULL) ||
+        (encoded_size == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t required_size =
+        2U + memory_address_length + memory_size_length;
+
+    if (capacity < required_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    buffer[0] = UDS_SERVICE_READ_MEMORY_BY_ADDRESS;
+    buffer[1] =
+        (uint8_t)((memory_size_length << 4U) |
+                  memory_address_length);
+    uds_request_write_big_endian(
+        &buffer[2],
+        memory_address,
+        memory_address_length
+    );
+    uds_request_write_big_endian(
+        &buffer[2U + memory_address_length],
+        memory_size,
+        memory_size_length
+    );
+
+    *encoded_size = required_size;
+    return ESP_OK;
 }
 
 esp_err_t uds_request_encode_request_download(

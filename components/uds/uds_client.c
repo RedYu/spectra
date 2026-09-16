@@ -357,6 +357,154 @@ esp_err_t uds_client_write_data_by_identifier(
     );
 }
 
+esp_err_t uds_client_read_memory_by_address(
+    uds_client_t *client,
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    uint64_t now_us
+)
+{
+    uint8_t request[18] = {0};
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_read_memory_by_address(
+            memory_address,
+            memory_address_length,
+            memory_size,
+            memory_size_length,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        now_us
+    );
+}
+
+esp_err_t uds_client_communication_control(
+    uds_client_t *client,
+    uint8_t control_type,
+    uint8_t communication_type,
+    bool suppress_positive_response,
+    uint64_t now_us
+)
+{
+    uint8_t request[3] = {0};
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_communication_control(
+            control_type,
+            communication_type,
+            suppress_positive_response,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_start_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        !suppress_positive_response,
+        now_us
+    );
+}
+
+esp_err_t uds_client_input_output_control_by_identifier(
+    uds_client_t *client,
+    uint16_t identifier,
+    uint8_t control_parameter,
+    const uint8_t *control_state,
+    size_t control_state_length,
+    uint64_t now_us
+)
+{
+    if (control_state_length > UDS_CLIENT_CONTROL_DATA_MAX_LENGTH) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t request[4U + UDS_CLIENT_CONTROL_DATA_MAX_LENGTH];
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_input_output_control_by_identifier(
+            identifier,
+            control_parameter,
+            control_state,
+            control_state_length,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        now_us
+    );
+}
+
+esp_err_t uds_client_control_dtc_setting(
+    uds_client_t *client,
+    uint8_t setting_type,
+    const uint8_t *option_record,
+    size_t option_record_length,
+    bool suppress_positive_response,
+    uint64_t now_us
+)
+{
+    if (option_record_length > UDS_CLIENT_CONTROL_DATA_MAX_LENGTH) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t request[2U + UDS_CLIENT_CONTROL_DATA_MAX_LENGTH];
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_control_dtc_setting(
+            setting_type,
+            option_record,
+            option_record_length,
+            suppress_positive_response,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_start_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        !suppress_positive_response,
+        now_us
+    );
+}
+
 esp_err_t uds_client_read_dtc_information(
     uds_client_t *client,
     uint8_t subfunction,
