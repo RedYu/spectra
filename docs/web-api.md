@@ -740,9 +740,9 @@ The device also recognizes the beginning of the future manifest format:
 ```
 
 This stage only reports availability. It intentionally does not download or
-install a backend image yet. Checks run when Internet connectivity is obtained,
-on manual request, and periodically according to
-`CONFIG_SPECTRA_OTA_BACKEND_CHECK_INTERVAL_MINUTES`.
+install a backend image yet. A firmware check runs once after Internet first
+becomes available during startup and whenever the user explicitly requests a
+check. Periodic Internet health checks do not query the firmware endpoint.
 
 Restart into a successfully validated image:
 

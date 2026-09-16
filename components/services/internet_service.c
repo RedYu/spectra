@@ -48,6 +48,9 @@
 #define INTERNET_SERVICE_NOTIFY_STOP \
     (1UL << 2U)
 
+#define INTERNET_SERVICE_NOTIFY_OTA_CHECK \
+    (1UL << 3U)
+
 static const char *TAG =
     "internet_service";
 
@@ -279,6 +282,7 @@ static void internet_service_task(
 
     bool previous_available = false;
     bool availability_known = false;
+    bool initial_ota_check_pending = true;
 
     while (true) {
         uint32_t notification = 0U;
@@ -328,7 +332,16 @@ static void internet_service_task(
             continue;
         }
 
-        if (available) {
+        const bool ota_check_requested =
+            (notification &
+             INTERNET_SERVICE_NOTIFY_OTA_CHECK) != 0U;
+
+        if (available &&
+            (initial_ota_check_pending ||
+             ota_check_requested)) {
+
+            initial_ota_check_pending = false;
+
             const esp_err_t ota_result =
                 ota_service_check_backend();
 
@@ -498,7 +511,8 @@ esp_err_t internet_service_request_check(void)
 
     return xTaskNotify(
         task,
-        INTERNET_SERVICE_NOTIFY_CHECK,
+        INTERNET_SERVICE_NOTIFY_CHECK |
+        INTERNET_SERVICE_NOTIFY_OTA_CHECK,
         eSetBits
     ) == pdPASS
         ? ESP_OK

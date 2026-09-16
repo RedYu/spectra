@@ -15,8 +15,9 @@ extern "C" {
  * @brief Start periodic Spectra backend availability checks.
  *
  * The service periodically sends an HTTPS request to the configured
- * Spectra backend. The result is stored in the system model as the
- * current Internet availability state.
+ * Spectra health endpoint. The result is stored in the system model as
+ * the current Internet availability state. Firmware availability is
+ * checked once after Internet first becomes available during startup.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
  * already running, ESP_ERR_NO_MEM if the service task cannot be

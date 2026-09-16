@@ -21,12 +21,13 @@ config SPECTRA_OTA_BACKEND_CHECK_URL
         manifest endpoint without changing device code.
 
 config SPECTRA_OTA_BACKEND_CHECK_INTERVAL_MINUTES
-    int "Firmware update check interval in minutes"
+    int "Internet availability check interval in minutes"
     range 5 10080
     default 360
     help
-        Interval between automatic backend firmware checks while the
-        Station interface has Internet access.
+        Interval between automatic Spectra backend health checks while
+        the Station interface has Internet access. Firmware availability
+        is checked only after startup and on an explicit user request.
 
 endmenu
 
