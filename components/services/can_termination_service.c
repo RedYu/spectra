@@ -5,65 +5,20 @@
 
 #include "can_termination_service.h"
 
-#include <stdint.h>
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
 #include "esp_log.h"
 
-#include "board_config.h"
-#include "mcp23017_driver.h"
+#include "io_expander_service.h"
 
 #define CAN_TERMINATION_LOCK_TIMEOUT_MS  (100U)
-
-_Static_assert(
-    CAN_PRIMARY_TERMINATION_EXPANDER_PIN <
-    MCP23017_PIN_COUNT,
-    "Primary termination pin must belong to MCP23017"
-);
-
-_Static_assert(
-    CAN_SECONDARY_TERMINATION_EXPANDER_PIN <
-    MCP23017_PIN_COUNT,
-    "Secondary termination pin must belong to MCP23017"
-);
-
-_Static_assert(
-    CAN_PRIMARY_TERMINATION_EXPANDER_PIN !=
-    CAN_SECONDARY_TERMINATION_EXPANDER_PIN,
-    "CAN termination controls require distinct MCP23017 pins"
-);
 
 static const char *TAG =
     "can_termination";
 
 static SemaphoreHandle_t s_mutex = NULL;
-
 static can_termination_service_info_t s_info = {0};
-
-static uint16_t can_termination_service_pin_mask(
-    uint8_t pin
-)
-{
-    return (uint16_t)(1U << pin);
-}
-
-static uint16_t can_termination_service_level(
-    uint8_t pin,
-    bool active_high,
-    bool enabled
-)
-{
-    const bool level =
-        enabled
-            ? active_high
-            : !active_high;
-
-    return level
-        ? can_termination_service_pin_mask(pin)
-        : 0U;
-}
 
 static esp_err_t can_termination_service_lock(void)
 {
@@ -96,66 +51,23 @@ esp_err_t can_termination_service_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    const uint16_t primary_mask =
-        can_termination_service_pin_mask(
-            CAN_PRIMARY_TERMINATION_EXPANDER_PIN
-        );
-
-    const uint16_t secondary_mask =
-        can_termination_service_pin_mask(
-            CAN_SECONDARY_TERMINATION_EXPANDER_PIN
-        );
-
-    const uint16_t mask =
-        primary_mask |
-        secondary_mask;
-
-    const uint16_t inactive_levels =
-        can_termination_service_level(
-            CAN_PRIMARY_TERMINATION_EXPANDER_PIN,
-            CAN_PRIMARY_TERMINATION_ACTIVE_LEVEL != 0,
-            false
-        ) |
-        can_termination_service_level(
-            CAN_SECONDARY_TERMINATION_EXPANDER_PIN,
-            CAN_SECONDARY_TERMINATION_ACTIVE_LEVEL != 0,
-            false
-        );
-
     esp_err_t result =
-        mcp23017_driver_update_gpio(
-            mask,
-            inactive_levels
+        io_expander_service_configure_output(
+            IO_EXPANDER_OUTPUT_CAN_PRIMARY_TERMINATION,
+            false
         );
 
     if (result == ESP_OK) {
         result =
-            mcp23017_driver_set_pull_up(
-                mask,
-                0U
-            );
-    }
-
-    if (result == ESP_OK) {
-        result =
-            mcp23017_driver_set_input_polarity(
-                mask,
-                0U
-            );
-    }
-
-    if (result == ESP_OK) {
-        result =
-            mcp23017_driver_set_direction(
-                mask,
-                0U
+            io_expander_service_configure_output(
+                IO_EXPANDER_OUTPUT_CAN_SECONDARY_TERMINATION,
+                false
             );
     }
 
     if (result != ESP_OK) {
-        (void)mcp23017_driver_set_direction(
-            mask,
-            mask
+        (void)io_expander_service_release_output(
+            IO_EXPANDER_OUTPUT_CAN_PRIMARY_TERMINATION
         );
 
         vSemaphoreDelete(s_mutex);
@@ -171,12 +83,7 @@ esp_err_t can_termination_service_init(void)
 
     ESP_LOGI(
         TAG,
-        "CAN termination control initialized: primary=GPA%u, "
-        "secondary=GPA%u",
-        (unsigned int)
-            CAN_PRIMARY_TERMINATION_EXPANDER_PIN,
-        (unsigned int)
-            CAN_SECONDARY_TERMINATION_EXPANDER_PIN
+        "CAN termination control initialized"
     );
 
     return ESP_OK;
@@ -191,43 +98,15 @@ esp_err_t can_termination_service_deinit(void)
         return result;
     }
 
-    const uint16_t primary_mask =
-        can_termination_service_pin_mask(
-            CAN_PRIMARY_TERMINATION_EXPANDER_PIN
-        );
-
-    const uint16_t secondary_mask =
-        can_termination_service_pin_mask(
-            CAN_SECONDARY_TERMINATION_EXPANDER_PIN
-        );
-
-    const uint16_t mask =
-        primary_mask |
-        secondary_mask;
-
-    const uint16_t inactive_levels =
-        can_termination_service_level(
-            CAN_PRIMARY_TERMINATION_EXPANDER_PIN,
-            CAN_PRIMARY_TERMINATION_ACTIVE_LEVEL != 0,
-            false
-        ) |
-        can_termination_service_level(
-            CAN_SECONDARY_TERMINATION_EXPANDER_PIN,
-            CAN_SECONDARY_TERMINATION_ACTIVE_LEVEL != 0,
-            false
-        );
-
     result =
-        mcp23017_driver_update_gpio(
-            mask,
-            inactive_levels
+        io_expander_service_release_output(
+            IO_EXPANDER_OUTPUT_CAN_PRIMARY_TERMINATION
         );
 
     if (result == ESP_OK) {
         result =
-            mcp23017_driver_set_direction(
-                mask,
-                mask
+            io_expander_service_release_output(
+                IO_EXPANDER_OUTPUT_CAN_SECONDARY_TERMINATION
             );
     }
 
@@ -251,24 +130,17 @@ esp_err_t can_termination_service_set_enabled(
     bool enabled
 )
 {
-    uint8_t pin = 0U;
-    bool active_high = false;
+    io_expander_output_t output;
 
     switch (bus) {
         case CAN_BUS_PRIMARY:
-            pin =
-                CAN_PRIMARY_TERMINATION_EXPANDER_PIN;
-
-            active_high =
-                CAN_PRIMARY_TERMINATION_ACTIVE_LEVEL != 0;
+            output =
+                IO_EXPANDER_OUTPUT_CAN_PRIMARY_TERMINATION;
             break;
 
         case CAN_BUS_SECONDARY:
-            pin =
-                CAN_SECONDARY_TERMINATION_EXPANDER_PIN;
-
-            active_high =
-                CAN_SECONDARY_TERMINATION_ACTIVE_LEVEL != 0;
+            output =
+                IO_EXPANDER_OUTPUT_CAN_SECONDARY_TERMINATION;
             break;
 
         default:
@@ -287,17 +159,10 @@ esp_err_t can_termination_service_set_enabled(
         return ESP_ERR_INVALID_STATE;
     }
 
-    const uint16_t mask =
-        can_termination_service_pin_mask(pin);
-
     result =
-        mcp23017_driver_update_gpio(
-            mask,
-            can_termination_service_level(
-                pin,
-                active_high,
-                enabled
-            )
+        io_expander_service_set_output(
+            output,
+            enabled
         );
 
     if (result == ESP_OK) {

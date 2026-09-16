@@ -50,6 +50,22 @@
 #define CAN_PRIMARY_TERMINATION_ACTIVE_LEVEL   (1)
 #define CAN_SECONDARY_TERMINATION_ACTIVE_LEVEL (1)
 
+/* Reserved for future CAN transceiver mode control. */
+#define CAN_PRIMARY_STANDBY_EXPANDER_PIN        (2U)
+#define CAN_SECONDARY_STANDBY_EXPANDER_PIN      (3U)
+
+#define CAN_PRIMARY_STANDBY_ACTIVE_LEVEL        (1)
+#define CAN_SECONDARY_STANDBY_ACTIVE_LEVEL      (1)
+
+/* Reserved for a future automotive CAN connector multiplexer. */
+#define CAN_ROUTE_SELECT_0_EXPANDER_PIN          (4U)
+#define CAN_ROUTE_SELECT_1_EXPANDER_PIN          (5U)
+#define CAN_ROUTE_ENABLE_EXPANDER_PIN            (6U)
+
+#define CAN_ROUTE_SELECT_0_ACTIVE_LEVEL          (1)
+#define CAN_ROUTE_SELECT_1_ACTIVE_LEVEL          (1)
+#define CAN_ROUTE_ENABLE_ACTIVE_LEVEL            (1)
+
 #define LCD_SWAP_XY   true
 #define LCD_MIRROR_X  true
 #define LCD_MIRROR_Y  false

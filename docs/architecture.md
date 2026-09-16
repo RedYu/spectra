@@ -516,3 +516,26 @@ must not acquire presentation responsibilities. When two components require
 each other's concrete headers, introduce a shared interface or move the common
 contract into a lower-level component instead of creating a circular
 dependency.
+
+## Shared MCP23017 I/O ownership
+
+The MCP23017 register driver is wrapped by `io_expander_service`, which owns
+the board-level mapping between logical signals and physical GPA/GPB pins.
+Feature services do not manipulate arbitrary MCP23017 pin masks directly.
+They configure only their named outputs and return them to input mode during
+teardown.
+
+| Pin | Logical signal | Current state |
+|---|---|---|
+| GPA0 | Primary CAN 120-ohm termination | `can_termination_service` |
+| GPA1 | Secondary CAN 120-ohm termination | `can_termination_service` |
+| GPA2 | Primary CAN transceiver standby | Reserved input |
+| GPA3 | Secondary CAN transceiver standby | Reserved input |
+| GPA4 | Future CAN route select bit 0 | Reserved input |
+| GPA5 | Future CAN route select bit 1 | Reserved input |
+| GPA6 | Future CAN route enable | Reserved input |
+| GPA7, GPB0..GPB7 | Unassigned | Input |
+
+Reserved signals remain reset-safe inputs until their future owning service
+explicitly configures them. This prevents unrelated services from changing
+the same output latch and avoids activating hardware that is not fitted.

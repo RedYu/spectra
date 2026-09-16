@@ -33,7 +33,7 @@ typedef struct
  * changed from reset-default inputs to outputs. Unassigned MCP23017 pins are
  * not modified.
  *
- * The MCP23017 driver must already be initialized.
+ * The shared I/O-expander service must already be initialized.
  */
 esp_err_t can_termination_service_init(void);
 

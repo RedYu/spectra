@@ -27,6 +27,7 @@ idf_component_register(
         "web_can_stream_service.c"
         "can_logger_service.c"
         "can_transmit_service.c"
+        "io_expander_service.c"
         "can_termination_service.c"
         "can_logger_binary_format.c"
         "time_service.c"
