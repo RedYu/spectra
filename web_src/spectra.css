@@ -5637,6 +5637,221 @@ select:focus-visible {
     gap: 18px;
     align-content: start;
 }
+.page-logger .replay-panel {
+    padding: 0;
+    overflow: hidden;
+}
+.page-logger .replay-panel > summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 16px;
+    list-style-position: inside;
+}
+.page-logger .replay-panel[open] > summary {
+    border-bottom: 1px solid var(--border);
+    background: #151d27;
+}
+.page-logger .replay-panel > summary span {
+    margin-left: auto;
+}
+.page-logger .replay-content {
+    padding: 16px;
+}
+.page-logger .replay-section + .replay-section {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+.page-logger .replay-section h3 {
+    margin: 0 0 12px;
+    color: var(--text);
+    font-size: 13px;
+}
+.page-logger .replay-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+.page-logger .replay-grid > label {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+.page-logger .replay-grid > .replay-field-wide {
+    grid-column: span 2;
+}
+.page-logger .replay-grid input,
+.page-logger .replay-grid select {
+    width: 100%;
+    min-width: 0;
+    min-height: 38px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    outline: none;
+    background: var(--background);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+}
+.page-logger .replay-grid input:focus,
+.page-logger .replay-grid select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgb(59 130 246 / 18%);
+}
+.page-logger .replay-grid small {
+    color: var(--muted);
+    font-size: 10px;
+}
+.page-logger .replay-file-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+.page-logger .replay-file-control button {
+    min-height: 38px;
+}
+.page-logger .replay-input-unit {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--background);
+}
+.page-logger .replay-input-unit:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgb(59 130 246 / 18%);
+}
+.page-logger .replay-input-unit input {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+.page-logger .replay-input-unit > span {
+    padding: 0 10px;
+    color: var(--muted);
+    font-size: 11px;
+}
+.page-logger .replay-options {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px 16px;
+    margin-top: 14px;
+}
+.page-logger .replay-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: var(--text);
+    font-size: 12px;
+}
+.page-logger .replay-options input {
+    flex: 0 0 auto;
+    accent-color: var(--accent);
+}
+.page-logger .replay-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+.page-logger .replay-actions .danger {
+    border-color: #7f3639;
+    background: #32191c;
+    color: #ff9a98;
+}
+.page-logger .replay-progress-block {
+    margin-top: 14px;
+}
+.page-logger .replay-progress-block progress {
+    width: 100%;
+    height: 8px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 999px;
+    background: var(--background);
+    accent-color: var(--accent);
+}
+.page-logger .replay-progress-block progress::-webkit-progress-bar {
+    border-radius: inherit;
+    background: var(--background);
+}
+.page-logger .replay-progress-block progress::-webkit-progress-value {
+    border-radius: inherit;
+    background: var(--accent);
+}
+.page-logger .replay-progress-block progress::-moz-progress-bar {
+    border-radius: inherit;
+    background: var(--accent);
+}
+.page-logger .replay-metrics {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 1px;
+    margin-top: 14px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--border);
+}
+.page-logger .replay-metrics > div {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    padding: 11px 12px;
+    background: var(--background);
+}
+.page-logger .replay-metrics span {
+    color: var(--muted);
+    font-size: 10px;
+}
+.page-logger .replay-metrics b {
+    overflow: hidden;
+    color: var(--text);
+    font: 12px "Cascadia Mono", Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.page-logger .replay-message {
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 11px;
+}
+@media (max-width: 1100px) {
+    .page-logger .replay-grid,
+    .page-logger .replay-options {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .page-logger .replay-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 620px) {
+    .page-logger .replay-grid,
+    .page-logger .replay-options,
+    .page-logger .replay-metrics {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .page-logger .replay-grid > .replay-field-wide {
+        grid-column: auto;
+    }
+    .page-logger .replay-file-control {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .page-logger .replay-panel > summary span {
+        display: none;
+    }
+}
 .page-logger .layout, .page-analyzer .layout {
     align-items: start;
 }

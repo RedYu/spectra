@@ -15,8 +15,8 @@
 
     <title>CAN Logger · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=27">
-    <script src="spectra.js?v=27" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=28">
+    <script src="spectra.js?v=28" defer></script>
 </head>
 
 <body class="page-logger">
@@ -221,44 +221,185 @@
                     aria-label="CAN transmission"
                 ></section>
 
-                <details id="can-replay" class="tx-panel">
-                    <summary>CAN traffic replay</summary>
-                    <div class="tx-grid">
-                          <label>SD recording<select id="replay-file"><option value="">Choose a recording</option></select><button id="replay-refresh" type="button">Refresh</button></label>
-                          <label>SD log path<input id="replay-path" value="/logs/can/" spellcheck="false"></label>
-                          <label>Speed<select id="replay-speed"><option value="1/4">0.25×</option><option value="1/2">0.5×</option><option value="1/1" selected>1×</option><option value="2/1">2×</option><option value="5/1">5×</option><option value="10/1">10×</option><option value="maximum">Maximum</option></select></label>
-                        <label>Repeats<input id="replay-repeat" type="number" min="0" max="65535" value="1"><small>0 loops until Stop</small></label>
-                        <label>Start delay (ms)<input id="replay-delay" type="number" min="0" max="600000" value="0"></label>
-                        <label>Maximum lag (ms)<input id="replay-lag-limit" type="number" min="0" max="60000" value="100"></label>
-                        <label>Late frames<select id="replay-late"><option value="0">Wait</option><option value="1">Drop late</option><option value="2">Stop on lag</option></select></label>
-                        <label>Output bus<select id="replay-bus"><option value="preserve">Original buses</option><option value="0">Primary</option><option value="1">Secondary</option></select></label>
-                        <label>ID minimum<input id="replay-id-min" value="000" spellcheck="false"></label>
-                          <label>ID maximum<input id="replay-id-max" value="1FFFFFFF" spellcheck="false"></label>
-                          <label>Start time (ms)<input id="replay-time-start" type="number" min="0" max="4294967295" value="0"></label>
-                          <label>End time (ms)<input id="replay-time-end" type="number" min="0" max="4294967295" value="4294967295"></label>
+                <details id="can-replay" class="tx-panel replay-panel">
+                    <summary>
+                        CAN traffic replay
+                        <span>SCL / ASC recordings from SD card</span>
+                    </summary>
+
+                    <div class="replay-content">
+                        <section class="replay-section">
+                            <h3>Source and timing</h3>
+
+                            <div class="replay-grid">
+                                <label class="replay-field-wide">
+                                    <span>SD recording</span>
+                                    <div class="replay-file-control">
+                                        <select id="replay-file">
+                                            <option value="">
+                                                Choose a recording
+                                            </option>
+                                        </select>
+
+                                        <button
+                                            id="replay-refresh"
+                                            type="button"
+                                        >
+                                            Refresh
+                                        </button>
+                                    </div>
+                                </label>
+
+                                <label class="replay-field-wide">
+                                    <span>SD log path</span>
+                                    <input
+                                        id="replay-path"
+                                        value="/logs/can/"
+                                        spellcheck="false"
+                                    >
+                                </label>
+
+                                <label>
+                                    <span>Speed</span>
+                                    <select id="replay-speed">
+                                        <option value="1/4">0.25×</option>
+                                        <option value="1/2">0.5×</option>
+                                        <option value="1/1" selected>1×</option>
+                                        <option value="2/1">2×</option>
+                                        <option value="5/1">5×</option>
+                                        <option value="10/1">10×</option>
+                                        <option value="maximum">Maximum</option>
+                                    </select>
+                                </label>
+
+                                <label>
+                                    <span>Repeats</span>
+                                    <input id="replay-repeat" type="number"
+                                        min="0" max="65535" value="1">
+                                    <small>0 repeats until stopped</small>
+                                </label>
+
+                                <label>
+                                    <span>Start delay</span>
+                                    <div class="replay-input-unit">
+                                        <input id="replay-delay" type="number"
+                                            min="0" max="600000" value="0">
+                                        <span>ms</span>
+                                    </div>
+                                </label>
+
+                                <label>
+                                    <span>Maximum lag</span>
+                                    <div class="replay-input-unit">
+                                        <input id="replay-lag-limit" type="number"
+                                            min="0" max="60000" value="100">
+                                        <span>ms</span>
+                                    </div>
+                                </label>
+
+                                <label>
+                                    <span>Late frames</span>
+                                    <select id="replay-late">
+                                        <option value="0">Wait</option>
+                                        <option value="1">Drop late</option>
+                                        <option value="2">Stop on lag</option>
+                                    </select>
+                                </label>
+
+                                <label>
+                                    <span>Output bus</span>
+                                    <select id="replay-bus">
+                                        <option value="preserve">Original buses</option>
+                                        <option value="0">Primary</option>
+                                        <option value="1">Secondary</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </section>
+
+                        <section class="replay-section">
+                            <h3>Range and filters</h3>
+
+                            <div class="replay-grid replay-range-grid">
+                                <label>
+                                    <span>ID minimum</span>
+                                    <input id="replay-id-min" value="000"
+                                        spellcheck="false">
+                                </label>
+
+                                <label>
+                                    <span>ID maximum</span>
+                                    <input id="replay-id-max" value="1FFFFFFF"
+                                        spellcheck="false">
+                                </label>
+
+                                <label>
+                                    <span>Start time</span>
+                                    <div class="replay-input-unit">
+                                        <input id="replay-time-start" type="number"
+                                            min="0" max="4294967295" value="0">
+                                        <span>ms</span>
+                                    </div>
+                                </label>
+
+                                <label>
+                                    <span>End time</span>
+                                    <div class="replay-input-unit">
+                                        <input id="replay-time-end" type="number"
+                                            min="0" max="4294967295"
+                                            value="4294967295">
+                                        <span>ms</span>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <div class="replay-options">
+                                <label><input id="replay-primary" type="checkbox"
+                                    checked>Primary events</label>
+                                <label><input id="replay-secondary" type="checkbox"
+                                    checked>Secondary events</label>
+                                <label><input id="replay-rx" type="checkbox"
+                                    checked>RX events</label>
+                                <label><input id="replay-tx" type="checkbox">
+                                    Completed TX events</label>
+                                <label><input id="replay-id-filter" type="checkbox">
+                                    Enable ID range</label>
+                                <label><input id="replay-time-filter" type="checkbox">
+                                    Enable time range</label>
+                                <label><input id="replay-skip-remote" type="checkbox">
+                                    Skip remote frames</label>
+                                <label><input id="replay-stop-error" type="checkbox"
+                                    checked>Stop on transmission error</label>
+                            </div>
+                        </section>
+
+                        <div class="replay-actions">
+                            <button id="replay-start" class="primary">
+                                Start replay
+                            </button>
+                            <button id="replay-pause" disabled>Pause</button>
+                            <button id="replay-stop" class="danger" disabled>
+                                Stop
+                            </button>
+                        </div>
+
+                        <div class="replay-progress-block">
+                            <progress id="replay-progress" value="0" max="1">
+                            </progress>
+                        </div>
+
+                        <div class="replay-metrics">
+                            <div><span>State</span><b id="replay-state">Idle</b></div>
+                            <div><span>Position</span><b id="replay-position">0 B / 0 B</b></div>
+                            <div><span>Submitted / completed</span><b id="replay-counts">0 / 0</b></div>
+                            <div><span>Failed / dropped / skipped</span><b id="replay-errors">0 / 0 / 0</b></div>
+                            <div><span>Timing lag</span><b id="replay-lag">0 / 0 ms</b></div>
+                        </div>
+
+                        <p id="replay-message" class="replay-message">
+                            SCL and Spectra ASC recordings are supported.
+                        </p>
                     </div>
-                    <div class="program-options">
-                        <label><input id="replay-primary" type="checkbox" checked>Read Primary events</label>
-                        <label><input id="replay-secondary" type="checkbox" checked>Read Secondary events</label>
-                        <label><input id="replay-rx" type="checkbox" checked>Replay RX events</label>
-                        <label><input id="replay-tx" type="checkbox">Replay completed TX events</label>
-                          <label><input id="replay-id-filter" type="checkbox">Enable ID range</label>
-                          <label><input id="replay-time-filter" type="checkbox">Enable time range</label>
-                        <label><input id="replay-skip-remote" type="checkbox">Skip remote frames</label>
-                        <label><input id="replay-stop-error" type="checkbox" checked>Stop on transmission error</label>
-                    </div>
-                    <div class="program-actions">
-                        <button id="replay-start" class="primary">Start replay</button>
-                        <button id="replay-pause" disabled>Pause</button>
-                        <button id="replay-stop" class="danger" disabled>Stop</button>
-                    </div>
-                    <progress id="replay-progress" value="0" max="1"></progress>
-                    <div class="metric">State <b id="replay-state">Idle</b></div>
-                    <div class="metric">Position <b id="replay-position">0 B / 0 B</b></div>
-                    <div class="metric">Submitted / completed <b id="replay-counts">0 / 0</b></div>
-                    <div class="metric">Failed / dropped / skipped <b id="replay-errors">0 / 0 / 0</b></div>
-                    <div class="metric">Timing lag <b id="replay-lag">0 / 0 ms</b></div>
-                    <p id="replay-message" class="note">SCL and Spectra ASC recordings are supported.</p>
                 </details>
 
                 <div
