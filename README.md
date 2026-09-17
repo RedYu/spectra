@@ -117,6 +117,13 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
   Read/Write Data By Identifier, DTC reading/clearing, and RoutineControl
 - ReadMemoryByAddress, CommunicationControl,
   InputOutputControlByIdentifier, and ControlDTCSetting
+- ReadScalingDataByIdentifier, RequestUpload, and bounded
+  WriteMemoryByAddress requests
+- Named support for Authentication, periodic and dynamically defined DIDs,
+  RequestFileTransfer, timing control, secured transport, response-on-event,
+  and link control through bounded raw requests
+- Physical and functional UDS addressing with ISO-TP Single Frame enforcement
+  for functional requests
 - RequestDownload, TransferData, and RequestTransferExit primitives
 - Non-blocking ECU programming pipeline with retry, cancellation, progress,
   long-running routine polling, reset, and session restoration
@@ -147,6 +154,8 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Dynamic DAQ configuration, raw DTO monitoring, and STIM transmission
 - Explicit XCP programming start, clear, transfer, verify, and reset commands
 - Dedicated browser XCP console
+- Four independent XCP service sessions with a bounded command queue, one
+  outstanding CTO per session, and transmit-confirmation tracking
 
 ### Storage and configuration
 
@@ -253,7 +262,7 @@ spectra/
 │   ├── models/                 # Thread-safe application state
 │   ├── services/               # Application services and Web APIs
 │   ├── uds/                    # UDS protocol, requests, and client
-│   └── xcp/                    # XCP packet and command foundation
+│   └── xcp/                    # Stateful XCP master, DAQ/STIM, CAL/PAG, PGM
 ├── web_src/                    # Developer Web UI sources
 ├── spiffs_data/                # Generated SPIFFS content and default configuration
 ├── partitions.csv
@@ -403,6 +412,37 @@ from offset zero. This conservative behavior avoids assuming that an arbitrary
 ECU supports partial-range `RequestDownload`. Successful programming and an
 explicit cancellation remove the checkpoint; failures retain it for recovery.
 
+### UDS addressing and service coverage
+
+The manual UDS channel supports both physical and functional request
+identifiers. Functional traffic is restricted to ISO-TP Single Frames, as a
+multi-frame functional exchange cannot safely coordinate Flow Control from
+multiple ECUs. The configured response identifier still selects one physical
+ECU response, so multi-responder discovery remains planned separately.
+
+Typed allocation-free builders and client operations cover session control,
+reset, Tester Present, SecurityAccess, DID reads and writes, DTC services,
+memory reads and bounded writes, communication and DTC control, input/output
+control, routines, scaling data, upload, and the download-transfer sequence.
+Services whose records are OEM-specific remain accessible through the bounded
+raw request editor without embedding manufacturer assumptions in the protocol
+layer.
+
+### XCP master
+
+XCP runs directly over CAN or CAN FD and does not use ISO-TP. The service owns
+four independent sessions, matches CAN transmission confirmations and slave
+responses, enforces one outstanding CTO per session, and reports XCP errors,
+timeouts, cancellation, command counters, and queue statistics.
+
+The browser XCP console provides connection and discovery, MTA-based upload and
+download, slave block-mode DOWNLOAD/PROGRAM, explicit address ranges for
+memory writes, CAL/PAG page control, GET_SEED/UNLOCK, dynamic DAQ allocation
+and list control, raw DTO observation, STIM transmission, and programming
+commands. OEM seed-to-key logic, A2L-based DAQ decoding, ECU-specific erase
+parameters, and persistent XCP programming resume are intentionally not
+implemented yet.
+
 ## Network and Web Interface
 
 Spectra exposes USB RNDIS and Wi-Fi interfaces. Through USB RNDIS or the device SoftAP, the local DNS server resolves:
@@ -489,7 +529,7 @@ Detailed request and response documentation is available in
 | `GET`, `POST` | `/api/can/filters` | Read and apply hardware CAN receive filters |
 | `GET`, `POST` | `/api/isotp` | Configure an ISO-TP channel and exchange payloads |
 | `GET`, `POST` | `/api/uds` | Configure UDS, execute requests, program firmware, and resume or discard interrupted programming |
-| `GET`, `POST` | `/api/xcp` | Configure XCP sessions and execute XCP commands |
+| `GET`, `POST` | `/api/xcp` | Configure XCP sessions, memory/block transfers, DAQ/STIM, CAL/PAG, seed/key, and programming |
 | `GET`, `POST` | `/api/ota` | Read OTA state, check the backend, stage images, cancel, or restart |
 
 ## Storage and configuration
@@ -600,6 +640,8 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] Resumable SD-card downloads using HTTP Range
 - [x] ISO-TP transport over Classical CAN and CAN FD
 - [x] UDS client, browser diagnostics, DID catalogs, and ECU profiles
+- [x] Physical and functional UDS addressing with extended typed and raw
+  service requests
 - [x] Automatic UDS ECU programming with routine polling and journals
 - [x] Persistent UDS programming resume from confirmed image-segment boundaries
 - [x] Streaming BIN, Intel HEX, Motorola S-record, and BHX readers and validators
