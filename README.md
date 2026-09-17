@@ -110,6 +110,33 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Replay transmission-confirmation, timing-lag, skip, drop, and failure
   statistics in the CAN Logger Web page
 
+### CAN traffic replay
+
+The CAN Logger Web page can replay an existing SCL or Spectra-generated ASC
+recording directly from `/sdcard/logs/can`. Recordings are read as a stream;
+the complete file is never loaded into RAM. ASC input uses a 4 KiB PSRAM read
+buffer, while SCL records are decoded from their versioned binary headers.
+
+Replay supports:
+
+- file selection from `/logs/can` or manual entry of a nested path;
+- `0.25x`, `0.5x`, `1x`, `2x`, `5x`, and `10x` timestamp scaling;
+- maximum-speed submission limited by CAN arbitration and controller capacity;
+- a start delay, finite repetition, or continuous replay until stopped;
+- pause and resume without including paused time in the replay timeline;
+- an inclusive recording-time range and CAN identifier range;
+- source-channel, RX/TX direction, and Remote-frame filtering;
+- preservation of the recorded bus or remapping to Primary or Secondary CAN;
+- `WAIT`, `DROP_LATE`, and `STOP_ON_LAG` timing policies;
+- final hardware transmission confirmation for every submitted frame;
+- file progress, timing lag, completed, failed, dropped, and skipped counters.
+
+CAN FD frames cannot be remapped to the Primary TWAI channel. Replay should be
+started only after checking bitrate, operating mode, termination, and physical
+bus conditions. The Web UI displays an explicit safety confirmation before it
+starts transmitting. The complete behavior and API are documented in
+[docs/can-replay.md](docs/can-replay.md).
+
 ### Diagnostic protocols
 
 - ISO-TP over Classical CAN and CAN FD
@@ -226,7 +253,8 @@ The diagnostic protocols are documented in
 [docs/obd2.md](docs/obd2.md), and [docs/xcp.md](docs/xcp.md).
 Hardware acceptance filters and the HTTP API are
 described in [docs/can-hardware-filters.md](docs/can-hardware-filters.md) and
-[docs/web-api.md](docs/web-api.md). Streaming firmware image readers are
+[docs/web-api.md](docs/web-api.md). CAN recording playback is documented in
+[docs/can-replay.md](docs/can-replay.md). Streaming firmware image readers are
 described in [docs/firmware-images.md](docs/firmware-images.md).
 
 ```text
@@ -241,11 +269,11 @@ Primary CAN service      Secondary CAN service
            \               /
             v             v
                          CAN router
-               /       /      \       \
-              v       v        v       v
-        CAN Monitor  Logger  WebSocket  Protocols
-                                      /    |    \
-                                   ISO-TP UDS   XCP
+             /       /       /       \       \
+            v       v       v         v       v
+      CAN Monitor  Logger  Replay  WebSocket  Protocols
+                                             /    |    \
+                                          ISO-TP UDS   XCP
 ```
 
 Repository layout:
@@ -488,8 +516,8 @@ The device diagnostics page is available at:
 http://spectra.device/diagnostics
 ```
 
-The live CAN Logger, local CAN Analyzer, and ISO-TP/UDS diagnostics are
-available at:
+The live CAN Logger, including traffic recording and replay controls, local
+CAN Analyzer, and ISO-TP/UDS diagnostics are available at:
 
 ```text
 http://spectra.device/can_logger
@@ -531,7 +559,7 @@ Detailed request and response documentation is available in
 | `GET` | `/api/files/download` | Download a file |
 | `GET`, `POST` | `/api/can/transmit` | Read, start, and stop CAN transmission jobs |
 | `GET`, `POST` | `/api/can/filters` | Read and apply hardware CAN receive filters |
-| `GET`, `POST` | `/api/can/replay` | Control timed SCL/ASC traffic replay and read progress/statistics |
+| `GET`, `POST` | `/api/can/replay` | Start, pause, resume, or stop SCL/ASC replay and read progress/statistics |
 | `GET`, `POST` | `/api/isotp` | Configure an ISO-TP channel and exchange payloads |
 | `GET`, `POST` | `/api/uds` | Configure UDS, execute requests, program firmware, and resume or discard interrupted programming |
 | `GET`, `POST` | `/api/xcp` | Configure XCP sessions, memory/block transfers, DAQ/STIM, CAL/PAG, seed/key, and programming |
@@ -550,7 +578,7 @@ Important SD-card paths include:
 | --- | --- |
 | `/sdcard/firmwares` | BIN, Intel HEX, S-record, and BHX ECU images |
 | `/sdcard/logs/firmware` | Programming journals and the persistent resume checkpoint |
-| `/sdcard/logs/can` | ASC and SCL CAN recordings |
+| `/sdcard/logs/can` | ASC and SCL CAN recordings and replay sources |
 | `/sdcard/config/uds/profiles` | Persistent ECU programming profiles |
 | `/sdcard/config/uds/dids` | Persistent DID catalogs |
 | `/sdcard/updates` | Local Spectra OTA images |
