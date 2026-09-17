@@ -67,8 +67,11 @@ static uint32_t s_subscription = CAN_ROUTER_SUBSCRIPTION_ID_NONE;
 static can_replay_info_t s_info;
 static atomic_bool s_stop_requested = false;
 static atomic_bool s_pause_requested = false;
+static atomic_bool s_submission_active = false;
 static atomic_uint_fast32_t s_pending_transaction = 0U;
 static atomic_int s_confirmation_result = ESP_OK;
+static atomic_uint_fast32_t s_early_transaction = 0U;
+static atomic_int s_early_confirmation_result = ESP_OK;
 
 static uint16_t can_replay_u16_le(
     const uint8_t *data
@@ -600,8 +603,6 @@ static void can_replay_router_event(
     );
 
     if ((event == NULL) ||
-        (pending == CAN_TRANSACTION_ID_NONE) ||
-        (event->transaction_id != pending) ||
         ((event->type != CAN_EVENT_TX_COMPLETED) &&
          (event->type != CAN_EVENT_TX_FAILED) &&
          (event->type != CAN_EVENT_TX_ABORTED))) {
@@ -609,11 +610,34 @@ static void can_replay_router_event(
         return;
     }
 
-    atomic_store(
-        &s_confirmation_result,
+    const esp_err_t result =
         (event->type == CAN_EVENT_TX_COMPLETED)
             ? ESP_OK
-            : event->result
+            : event->result;
+
+    if ((pending == CAN_TRANSACTION_ID_NONE) &&
+        atomic_load(&s_submission_active)) {
+
+        atomic_store(
+            &s_early_confirmation_result,
+            result
+        );
+        atomic_store(
+            &s_early_transaction,
+            event->transaction_id
+        );
+        return;
+    }
+
+    if ((pending == CAN_TRANSACTION_ID_NONE) ||
+        (event->transaction_id != pending)) {
+
+        return;
+    }
+
+    atomic_store(
+        &s_confirmation_result,
+        result
     );
     atomic_store(
         &s_pending_transaction,
@@ -782,6 +806,14 @@ static void can_replay_task(
             }
 
             uint32_t transaction = CAN_TRANSACTION_ID_NONE;
+            atomic_store(
+                &s_early_transaction,
+                CAN_TRANSACTION_ID_NONE
+            );
+            atomic_store(
+                &s_submission_active,
+                true
+            );
             result = can_router_transmit(
                 &record.frame,
                 CAN_REPLAY_TX_TIMEOUT_MS,
@@ -789,6 +821,10 @@ static void can_replay_task(
             );
 
             if (result != ESP_OK) {
+                atomic_store(
+                    &s_submission_active,
+                    false
+                );
                 xSemaphoreTake(s_lock, portMAX_DELAY);
                 s_info.frames_failed++;
                 xSemaphoreGive(s_lock);
@@ -801,6 +837,26 @@ static void can_replay_task(
             }
 
             atomic_store(&s_pending_transaction, transaction);
+            atomic_store(
+                &s_submission_active,
+                false
+            );
+
+            if ((uint32_t)atomic_exchange(
+                    &s_early_transaction,
+                    CAN_TRANSACTION_ID_NONE
+                ) == transaction) {
+
+                atomic_store(
+                    &s_confirmation_result,
+                    atomic_load(&s_early_confirmation_result)
+                );
+                atomic_store(
+                    &s_pending_transaction,
+                    CAN_TRANSACTION_ID_NONE
+                );
+            }
+
             xSemaphoreTake(s_lock, portMAX_DELAY);
             s_info.frames_submitted++;
             s_info.pending_transaction = transaction;
@@ -979,8 +1035,13 @@ esp_err_t can_replay_service_start(
     s_info.state = CAN_REPLAY_RUNNING;
     atomic_store(&s_stop_requested, false);
     atomic_store(&s_pause_requested, false);
+    atomic_store(&s_submission_active, false);
     atomic_store(
         &s_pending_transaction,
+        CAN_TRANSACTION_ID_NONE
+    );
+    atomic_store(
+        &s_early_transaction,
         CAN_TRANSACTION_ID_NONE
     );
 
