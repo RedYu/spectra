@@ -109,6 +109,33 @@ TEST_CASE(
         )
     );
     TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_download_resume(
+            NULL,
+            0U,
+            0U,
+            0U
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_download_resume(
+            &download,
+            1U,
+            0U,
+            0U
+        )
+    );
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_STATE,
+        uds_download_resume(
+            &download,
+            0U,
+            0U,
+            0U
+        )
+    );
+    TEST_ASSERT_EQUAL(
         ESP_ERR_INVALID_STATE,
         uds_download_poll(
             &download,

@@ -48,6 +48,10 @@
 #define WEB_UDS_JOURNAL_DIRECTORY        "/logs/firmware"
 #define WEB_UDS_JOURNAL_PATH_MAX_SIZE    (128U)
 #define WEB_UDS_JOURNAL_LINE_MAX_SIZE    (384U)
+#define WEB_UDS_RESUME_PATH              "/logs/firmware/uds-resume.json"
+#define WEB_UDS_RESUME_TEMP_PATH         "/logs/firmware/uds-resume.tmp"
+#define WEB_UDS_RESUME_BUFFER_SIZE       (512U)
+#define WEB_UDS_FIRMWARE_PATH_MAX_SIZE   (128U)
 #define WEB_UDS_PROFILE_LIST_CAPACITY      (8U)
 #define WEB_UDS_DID_CATALOG_LIST_CAPACITY  (8U)
 #define WEB_UDS_QUERY_MAX_SIZE            (192U)
@@ -78,6 +82,17 @@ typedef struct
     uint64_t size;
 
 } web_uds_firmware_segment_t;
+
+typedef struct
+{
+    bool available;
+    char firmware_path[WEB_UDS_FIRMWARE_PATH_MAX_SIZE];
+    uint64_t firmware_size;
+    uint32_t completed_segments;
+    uint32_t segment_count;
+    uint32_t acknowledged_blocks;
+
+} web_uds_resume_checkpoint_t;
 
 static const char *TAG = "web_uds_api";
 
@@ -124,6 +139,11 @@ static bool s_download_journal_finalized = false;
 static char s_download_journal_path[
     WEB_UDS_JOURNAL_PATH_MAX_SIZE
 ] = {0};
+static web_uds_resume_checkpoint_t s_resume_checkpoint;
+static char s_download_firmware_path[
+    WEB_UDS_FIRMWARE_PATH_MAX_SIZE
+] = {0};
+static uint64_t s_download_firmware_size = 0U;
 static uint8_t *s_download_transfer_buffer = NULL;
 static uint8_t s_download_security_seed[
     UDS_SECURITY_PROVIDER_MANUAL_KEY_SIZE
@@ -303,7 +323,21 @@ static void web_uds_download_finalize_journal(
 );
 
 static esp_err_t web_uds_download_start(
-    const cJSON *root
+    const cJSON *root,
+    bool resume
+);
+
+static esp_err_t web_uds_resume_checkpoint_load(void);
+
+static esp_err_t web_uds_resume_checkpoint_save(
+    uint32_t completed_segments,
+    uint32_t acknowledged_blocks
+);
+
+static void web_uds_resume_checkpoint_remove(void);
+
+static esp_err_t web_uds_download_seek(
+    uint64_t offset
 );
 
 static bool web_uds_firmware_path_valid(
@@ -2303,6 +2337,309 @@ web_uds_download_evaluate_routine_result(
         : UDS_DOWNLOAD_ROUTINE_RESULT_ERROR;
 }
 
+static esp_err_t web_uds_resume_checkpoint_load(void)
+{
+    memset(
+        &s_resume_checkpoint,
+        0,
+        sizeof(s_resume_checkpoint)
+    );
+
+    FILE *file = NULL;
+    esp_err_t result =
+        storage_sd_service_open(
+            WEB_UDS_RESUME_PATH,
+            "rb",
+            &file
+        );
+
+    if (result == ESP_ERR_NOT_FOUND) {
+        return ESP_OK;
+    }
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    char buffer[WEB_UDS_RESUME_BUFFER_SIZE];
+    size_t read_size = 0U;
+    result = storage_sd_service_read(
+        file,
+        buffer,
+        sizeof(buffer) - 1U,
+        &read_size
+    );
+    (void)storage_sd_service_close(&file);
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    buffer[read_size] = '\0';
+    cJSON *root = cJSON_Parse(buffer);
+    const cJSON *path = (root != NULL)
+        ? cJSON_GetObjectItemCaseSensitive(root, "path")
+        : NULL;
+    const cJSON *file_size = (root != NULL)
+        ? cJSON_GetObjectItemCaseSensitive(root, "file_size")
+        : NULL;
+    const cJSON *completed = (root != NULL)
+        ? cJSON_GetObjectItemCaseSensitive(root, "completed_segments")
+        : NULL;
+    const cJSON *segment_count = (root != NULL)
+        ? cJSON_GetObjectItemCaseSensitive(root, "segment_count")
+        : NULL;
+    const cJSON *blocks = (root != NULL)
+        ? cJSON_GetObjectItemCaseSensitive(root, "acknowledged_blocks")
+        : NULL;
+
+    const bool valid =
+        cJSON_IsString(path) &&
+        web_uds_firmware_path_valid(path->valuestring) &&
+        cJSON_IsNumber(file_size) &&
+        (file_size->valuedouble > 0.0) &&
+        cJSON_IsNumber(completed) &&
+        (completed->valuedouble >= 0.0) &&
+        cJSON_IsNumber(segment_count) &&
+        (segment_count->valuedouble > 0.0) &&
+        (completed->valuedouble <= segment_count->valuedouble) &&
+        cJSON_IsNumber(blocks) &&
+        (blocks->valuedouble >= 0.0) &&
+        (strlen(path->valuestring) <
+         sizeof(s_resume_checkpoint.firmware_path));
+
+    if (valid) {
+        strcpy(
+            s_resume_checkpoint.firmware_path,
+            path->valuestring
+        );
+        s_resume_checkpoint.firmware_size =
+            (uint64_t)file_size->valuedouble;
+        s_resume_checkpoint.completed_segments =
+            (uint32_t)completed->valuedouble;
+        s_resume_checkpoint.segment_count =
+            (uint32_t)segment_count->valuedouble;
+        s_resume_checkpoint.acknowledged_blocks =
+            (uint32_t)blocks->valuedouble;
+        s_resume_checkpoint.available = true;
+    }
+
+    cJSON_Delete(root);
+    return valid ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+}
+
+static esp_err_t web_uds_resume_checkpoint_save(
+    uint32_t completed_segments,
+    uint32_t acknowledged_blocks
+)
+{
+    if ((s_download_firmware_path[0] == '\0') ||
+        (s_download_firmware_size == 0U) ||
+        (s_download_segment_count == 0U) ||
+        (completed_segments > s_download_segment_count)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    const bool valid =
+        (root != NULL) &&
+        (cJSON_AddNumberToObject(root, "version", 1) != NULL) &&
+        (cJSON_AddStringToObject(
+            root,
+            "path",
+            s_download_firmware_path
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            root,
+            "file_size",
+            (double)s_download_firmware_size
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            root,
+            "completed_segments",
+            completed_segments
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            root,
+            "segment_count",
+            s_download_segment_count
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            root,
+            "acknowledged_blocks",
+            acknowledged_blocks
+        ) != NULL);
+
+    char *json = valid
+        ? cJSON_PrintUnformatted(root)
+        : NULL;
+    cJSON_Delete(root);
+
+    if (json == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t result =
+        storage_sd_service_ensure_directory(
+            WEB_UDS_JOURNAL_DIRECTORY
+        );
+    FILE *file = NULL;
+
+    if (result == ESP_OK) {
+        result = storage_sd_service_open(
+            WEB_UDS_RESUME_TEMP_PATH,
+            "wb",
+            &file
+        );
+    }
+
+    size_t written = 0U;
+    const size_t json_size = strlen(json);
+
+    if (result == ESP_OK) {
+        result = storage_sd_service_write(
+            file,
+            json,
+            json_size,
+            &written
+        );
+    }
+
+    if ((result == ESP_OK) && (written != json_size)) {
+        result = ESP_ERR_INVALID_SIZE;
+    }
+
+    if (result == ESP_OK) {
+        result = storage_sd_service_flush(file);
+    }
+
+    if (result == ESP_OK) {
+        result = storage_sd_service_sync(file);
+    }
+
+    if (file != NULL) {
+        const esp_err_t close_result =
+            storage_sd_service_close(&file);
+
+        if (result == ESP_OK) {
+            result = close_result;
+        }
+    }
+
+    free(json);
+
+    if (result == ESP_OK) {
+        struct stat information = {0};
+        const esp_err_t stat_result =
+            storage_sd_service_stat(
+                WEB_UDS_RESUME_PATH,
+                &information
+            );
+
+        if (stat_result == ESP_OK) {
+            result = storage_sd_service_remove(
+                WEB_UDS_RESUME_PATH
+            );
+        } else if (stat_result != ESP_ERR_NOT_FOUND) {
+
+            result = stat_result;
+        }
+    }
+
+    if (result == ESP_OK) {
+        result = storage_sd_service_rename(
+            WEB_UDS_RESUME_TEMP_PATH,
+            WEB_UDS_RESUME_PATH
+        );
+    }
+
+    if (result == ESP_OK) {
+        strcpy(
+            s_resume_checkpoint.firmware_path,
+            s_download_firmware_path
+        );
+        s_resume_checkpoint.firmware_size =
+            s_download_firmware_size;
+        s_resume_checkpoint.completed_segments =
+            completed_segments;
+        s_resume_checkpoint.segment_count =
+            s_download_segment_count;
+        s_resume_checkpoint.acknowledged_blocks =
+            acknowledged_blocks;
+        s_resume_checkpoint.available = true;
+    } else {
+        (void)storage_sd_service_remove(
+            WEB_UDS_RESUME_TEMP_PATH
+        );
+    }
+
+    return result;
+}
+
+static void web_uds_resume_checkpoint_remove(void)
+{
+    struct stat information = {0};
+    esp_err_t result =
+        storage_sd_service_stat(
+            WEB_UDS_RESUME_PATH,
+            &information
+        );
+
+    if (result == ESP_OK) {
+        result = storage_sd_service_remove(
+            WEB_UDS_RESUME_PATH
+        );
+    }
+
+    if ((result == ESP_OK) ||
+        (result == ESP_ERR_NOT_FOUND)) {
+
+        memset(
+            &s_resume_checkpoint,
+            0,
+            sizeof(s_resume_checkpoint)
+        );
+    }
+}
+
+static esp_err_t web_uds_download_seek(
+    uint64_t offset
+)
+{
+    if ((offset == 0U) ||
+        (s_download_image_reader == NULL)) {
+
+        return ESP_OK;
+    }
+
+    while (s_download_image_offset < offset) {
+        const uint64_t remaining =
+            offset - s_download_image_offset;
+        const size_t capacity =
+            (remaining < UDS_CLIENT_TRANSFER_DATA_MAX_LENGTH)
+                ? (size_t)remaining
+                : UDS_CLIENT_TRANSFER_DATA_MAX_LENGTH;
+        size_t read_size = 0U;
+        const esp_err_t result =
+            web_uds_download_read(
+                s_download_image_offset,
+                s_download_transfer_buffer,
+                capacity,
+                &read_size,
+                NULL
+            );
+
+        if ((result != ESP_OK) || (read_size == 0U)) {
+            return (result != ESP_OK)
+                ? result
+                : ESP_ERR_INVALID_SIZE;
+        }
+    }
+
+    return ESP_OK;
+}
+
 static void web_uds_download_close_file(void)
 {
     if (s_download_file != NULL) {
@@ -2588,6 +2925,37 @@ static void web_uds_worker_task(
             );
             web_uds_download_log_progress(&progress);
 
+            uint32_t completed_segments =
+                progress.segment_index;
+
+            if ((progress.state >=
+                 UDS_DOWNLOAD_VERIFYING_MEMORY) &&
+                (progress.transferred_size ==
+                 progress.total_size) &&
+                (progress.total_size != 0U)) {
+
+                completed_segments = progress.segment_count;
+            }
+
+            if (s_resume_checkpoint.available &&
+                (completed_segments >
+                 s_resume_checkpoint.completed_segments)) {
+
+                const esp_err_t checkpoint_result =
+                    web_uds_resume_checkpoint_save(
+                        completed_segments,
+                        progress.acknowledged_blocks
+                    );
+
+                if (checkpoint_result != ESP_OK) {
+                    ESP_LOGW(
+                        TAG,
+                        "Failed to save UDS resume checkpoint: %s",
+                        esp_err_to_name(checkpoint_result)
+                    );
+                }
+            }
+
             if ((progress.state == UDS_DOWNLOAD_COMPLETE) ||
                 (progress.state == UDS_DOWNLOAD_CANCELLED) ||
                 (progress.state == UDS_DOWNLOAD_ERROR)) {
@@ -2603,6 +2971,13 @@ static void web_uds_worker_task(
                     &progress,
                     outcome
                 );
+
+                if ((progress.state == UDS_DOWNLOAD_COMPLETE) ||
+                    (progress.state == UDS_DOWNLOAD_CANCELLED)) {
+
+                    web_uds_resume_checkpoint_remove();
+                }
+
                 web_uds_download_close_file();
                 uds_security_provider_clear_manual_key(
                     &s_security_provider
@@ -2636,7 +3011,8 @@ static void web_uds_worker_task(
 }
 
 static esp_err_t web_uds_download_start(
-    const cJSON *root
+    const cJSON *root,
+    bool resume
 )
 {
     const cJSON *path =
@@ -2675,6 +3051,7 @@ static esp_err_t web_uds_download_start(
 
     if (!s_client_config_valid ||
         s_download_active ||
+        (!resume && s_resume_checkpoint.available) ||
         !cJSON_IsString(path) ||
         !web_uds_firmware_path_valid(path->valuestring) ||
         !web_uds_number(root, "data_format", UINT8_MAX, &data_format) ||
@@ -2956,6 +3333,34 @@ static esp_err_t web_uds_download_start(
             : ESP_ERR_INVALID_ARG;
     }
 
+    if (strlen(path->valuestring) >=
+        sizeof(s_download_firmware_path)) {
+
+        uds_security_provider_clear_manual_key(
+            &s_security_provider
+        );
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if (resume &&
+        (!s_resume_checkpoint.available ||
+         (strcmp(
+             s_resume_checkpoint.firmware_path,
+             path->valuestring
+          ) != 0) ||
+         (s_resume_checkpoint.firmware_size !=
+          (uint64_t)information.st_size))) {
+
+        uds_security_provider_clear_manual_key(
+            &s_security_provider
+        );
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    strcpy(s_download_firmware_path, path->valuestring);
+    s_download_firmware_size =
+        (uint64_t)information.st_size;
+
     result =
         storage_sd_service_open(
             path->valuestring,
@@ -3000,6 +3405,30 @@ static esp_err_t web_uds_download_start(
 
             result = ESP_ERR_INVALID_SIZE;
         }
+    }
+
+    if (resume &&
+        ((s_resume_checkpoint.segment_count !=
+          s_download_segment_count) ||
+         (s_resume_checkpoint.completed_segments >
+          s_download_segment_count))) {
+
+        result = ESP_ERR_INVALID_STATE;
+    }
+
+    uint64_t resume_offset = 0U;
+
+    for (uint32_t index = 0U;
+         resume &&
+         (result == ESP_OK) &&
+         (index < s_resume_checkpoint.completed_segments);
+         ++index) {
+
+        resume_offset += s_download_segments[index].size;
+    }
+
+    if (resume && (result == ESP_OK)) {
+        result = web_uds_download_seek(resume_offset);
     }
 
     if (result == ESP_OK) {
@@ -3095,8 +3524,20 @@ static esp_err_t web_uds_download_start(
     }
 
     if (result == ESP_OK) {
-        result =
-            uds_download_start(
+        if (!resume) {
+            result = web_uds_resume_checkpoint_save(0U, 0U);
+        }
+    }
+
+    if (result == ESP_OK) {
+        result = resume
+            ? uds_download_resume(
+                &s_download,
+                s_resume_checkpoint.completed_segments,
+                s_resume_checkpoint.acknowledged_blocks,
+                esp_timer_get_time()
+            )
+            : uds_download_start(
                 &s_download,
                 esp_timer_get_time()
             );
@@ -4155,6 +4596,28 @@ static esp_err_t web_uds_get_handler(
             response,
             "download_journal",
             s_download_journal_path
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "resume_available",
+            s_resume_checkpoint.available
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            response,
+            "resume_path",
+            s_resume_checkpoint.available
+                ? s_resume_checkpoint.firmware_path
+                : ""
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "resume_completed_segments",
+            s_resume_checkpoint.completed_segments
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "resume_segment_count",
+            s_resume_checkpoint.segment_count
         ) != NULL);
 
     free(payload);
@@ -4262,13 +4725,25 @@ static esp_err_t web_uds_post_handler(
             ? ESP_ERR_INVALID_STATE
             : web_uds_request(root);
     } else if (strcmp(action->valuestring, "download_start") == 0) {
-        result = web_uds_download_start(root);
+        result = web_uds_download_start(root, false);
+    } else if (strcmp(action->valuestring, "download_resume") == 0) {
+        result = web_uds_download_start(root, true);
+    } else if (strcmp(action->valuestring, "download_discard") == 0) {
+        if (s_download_active) {
+            result = ESP_ERR_INVALID_STATE;
+        } else {
+            web_uds_resume_checkpoint_remove();
+            result = s_resume_checkpoint.available
+                ? ESP_FAIL
+                : ESP_OK;
+        }
     } else if (strcmp(action->valuestring, "download_cancel") == 0) {
         result = s_download_active
             ? uds_download_cancel(&s_download)
             : ESP_ERR_INVALID_STATE;
 
         if (result == ESP_OK) {
+            web_uds_resume_checkpoint_remove();
             web_uds_download_close_file();
         }
     } else if (strcmp(
@@ -4293,6 +4768,11 @@ static esp_err_t web_uds_post_handler(
                 &progress,
                 "cancelled"
             );
+
+            if (progress.state != UDS_DOWNLOAD_ERROR) {
+                web_uds_resume_checkpoint_remove();
+            }
+
             web_uds_download_close_file();
             result = uds_download_close(&s_download);
             s_download_active = false;
@@ -4399,6 +4879,19 @@ esp_err_t web_uds_api_register(
         }
 
         s_security_provider_initialized = true;
+
+        const esp_err_t checkpoint_result =
+            web_uds_resume_checkpoint_load();
+
+        if ((checkpoint_result != ESP_OK) &&
+            (checkpoint_result != ESP_ERR_NOT_FOUND)) {
+
+            ESP_LOGW(
+                TAG,
+                "Failed to load UDS resume checkpoint: %s",
+                esp_err_to_name(checkpoint_result)
+            );
+        }
 
         const BaseType_t task_result =
             xTaskCreateWithCaps(

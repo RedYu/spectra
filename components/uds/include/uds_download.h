@@ -202,6 +202,8 @@ typedef struct
     bool default_session_restored;
     bool restoring_after_error;
     bool routine_result_polling;
+    bool skip_erase;
+    bool resume_after_transfer;
     size_t security_seed_length;
     size_t security_key_length;
     uint64_t action_due_us;
@@ -232,6 +234,27 @@ esp_err_t uds_download_close(
 
 esp_err_t uds_download_start(
     uds_download_t *download,
+    uint64_t now_us
+);
+
+/**
+ * @brief Resume programming from a confirmed segment boundary.
+ *
+ * Completed segments are not erased or transferred again. The service
+ * re-enters the configured programming session and performs SecurityAccess
+ * before requesting download for the first incomplete segment.
+ *
+ * @param[in,out] download Open download instance.
+ * @param[in] completed_segment_count Number of fully acknowledged segments.
+ * @param[in] acknowledged_blocks Previously acknowledged TransferData blocks.
+ * @param[in] now_us Current monotonic time.
+ *
+ * @return ESP_OK on success, otherwise an ESP-IDF error code.
+ */
+esp_err_t uds_download_resume(
+    uds_download_t *download,
+    uint32_t completed_segment_count,
+    uint32_t acknowledged_blocks,
     uint64_t now_us
 );
 

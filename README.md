@@ -130,6 +130,8 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Typed DID decoding with byte order, scale, offset, units, ASCII, UTF-8,
   floating-point, signed, unsigned, and raw-byte values
 - Timestamped ECU programming journals under `/sdcard/logs/firmware`
+- Persistent ECU programming checkpoints with validated segment-boundary
+  resume after reset, power loss, or transport failure
 - Raw UDS service requests through the Web interface
 - Dedicated ISO-TP/UDS diagnostics and UDS Programming pages
 - Live decoded raw CAN trace for ISO-TP, UDS, and XCP diagnostics
@@ -559,6 +561,7 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] ISO-TP transport over Classical CAN and CAN FD
 - [x] UDS client, browser diagnostics, DID catalogs, and ECU profiles
 - [x] Automatic UDS ECU programming with routine polling and journals
+- [x] Persistent UDS programming resume from confirmed image-segment boundaries
 - [x] Streaming BIN, Intel HEX, Motorola S-record, and BHX readers and validators
 - [x] Stateful XCP master, block transfer, DAQ/STIM, CAL/PAG, seed/key access,
   and programming controls
@@ -580,7 +583,6 @@ To exit the serial monitor, press `Ctrl+]`.
 - [ ] Multi-responder functional UDS discovery and remaining service-specific
   response decoders
 - [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
-- [ ] Persistent resume after interrupted ECU programming
 - [ ] A2L-aware XCP DAQ decoding, ECU profiles, and persistent programming
   resume
 - [ ] CAN traffic replay

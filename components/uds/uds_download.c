@@ -190,7 +190,16 @@ static void uds_download_schedule_after_session(
     uds_download_t *download
 )
 {
-    uds_download_schedule_after_security(download);
+    if (download->skip_erase &&
+        (download->config.security_level != 0U) &&
+        !download->security_unlocked) {
+
+        download->state =
+            UDS_DOWNLOAD_REQUESTING_SECURITY_SEED;
+        download->action_pending = true;
+    } else {
+        uds_download_schedule_after_security(download);
+    }
 }
 
 static void uds_download_schedule_after_security(
@@ -200,9 +209,14 @@ static void uds_download_schedule_after_security(
     if (download->security_resume_state != UDS_DOWNLOAD_CLOSED) {
         download->state = download->security_resume_state;
         download->security_resume_state = UDS_DOWNLOAD_CLOSED;
+    } else if (download->resume_after_transfer) {
+        download->resume_after_transfer = false;
+        uds_download_schedule_after_transfer(download);
+        return;
     } else {
         download->state =
-            (download->config.erase_routine_identifier != 0U)
+            (!download->skip_erase &&
+             (download->config.erase_routine_identifier != 0U))
                 ? UDS_DOWNLOAD_ERASING_MEMORY
                 : UDS_DOWNLOAD_REQUESTING_DOWNLOAD;
     }
@@ -479,6 +493,8 @@ esp_err_t uds_download_start(
     download->security_seed_length = 0U;
     download->security_resume_state = UDS_DOWNLOAD_CLOSED;
     download->routine_result_polling = false;
+    download->skip_erase = false;
+    download->resume_after_transfer = false;
     download->routine_poll_count = 0U;
     download->action_due_us = 0U;
     download->operation_result = ESP_OK;
@@ -509,6 +525,134 @@ esp_err_t uds_download_start(
         download->last_negative_response_code = 0U;
         download->last_nrc_action = UDS_DOWNLOAD_NRC_FAIL;
         download->acknowledged_blocks = 0U;
+        download->retry_count = 0U;
+        download->started_at_us = now_us;
+        download->retry_pending = false;
+    } else {
+        uds_download_fail(download, result);
+    }
+
+    download->last_result = result;
+    return result;
+}
+
+esp_err_t uds_download_resume(
+    uds_download_t *download,
+    uint32_t completed_segment_count,
+    uint32_t acknowledged_blocks,
+    uint64_t now_us
+)
+{
+    if ((download == NULL) ||
+        (completed_segment_count > download->segment_count)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((download->state != UDS_DOWNLOAD_IDLE) &&
+        (download->state != UDS_DOWNLOAD_COMPLETE) &&
+        (download->state != UDS_DOWNLOAD_CANCELLED) &&
+        (download->state != UDS_DOWNLOAD_ERROR)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (uds_client_busy(&download->client)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint64_t transferred_size = 0U;
+
+    for (uint32_t index = 0U;
+         index < completed_segment_count;
+         ++index) {
+
+        uint64_t address = download->config.memory_address;
+        uint64_t size = download->config.memory_size;
+        esp_err_t result = ESP_OK;
+
+        if (download->config.segment_count != 0U) {
+            result = download->config.segment(
+                index,
+                &address,
+                &size,
+                download->config.segment_context
+            );
+        }
+
+        if ((result != ESP_OK) ||
+            (size == 0U) ||
+            (transferred_size > (UINT64_MAX - size))) {
+
+            return (result != ESP_OK)
+                ? result
+                : ESP_ERR_INVALID_SIZE;
+        }
+
+        transferred_size += size;
+    }
+
+    download->state =
+        (download->config.programming_session_type != 0U)
+            ? UDS_DOWNLOAD_ENTERING_SESSION
+            : (download->config.security_level != 0U)
+                ? UDS_DOWNLOAD_REQUESTING_SECURITY_SEED
+                : (completed_segment_count < download->segment_count)
+                    ? UDS_DOWNLOAD_REQUESTING_DOWNLOAD
+                    : UDS_DOWNLOAD_VERIFYING_MEMORY;
+    download->action_pending = true;
+    download->security_unlocked = false;
+    download->default_session_restored = false;
+    download->restoring_after_error = false;
+    download->security_seed_length = 0U;
+    download->security_resume_state = UDS_DOWNLOAD_CLOSED;
+    download->routine_result_polling = false;
+    download->routine_poll_count = 0U;
+    download->action_due_us = 0U;
+    download->operation_result = ESP_OK;
+    download->operation_negative_response_code = 0U;
+    download->skip_erase = true;
+    download->resume_after_transfer =
+        completed_segment_count == download->segment_count;
+
+    if (download->resume_after_transfer &&
+        (download->config.programming_session_type == 0U) &&
+        (download->config.security_level == 0U)) {
+
+        uds_download_schedule_after_transfer(download);
+    }
+
+    esp_err_t result = ESP_OK;
+
+    if (completed_segment_count < download->segment_count) {
+        result = uds_download_select_segment(
+            download,
+            completed_segment_count
+        );
+    } else if (download->segment_count != 0U) {
+        result = uds_download_select_segment(
+            download,
+            download->segment_count - 1U
+        );
+        download->segment_transferred_size =
+            download->segment_memory_size;
+    }
+
+    if (result == ESP_OK) {
+        result = uds_download_submit_action(download, now_us);
+    }
+
+    if (result == ESP_OK) {
+        download->transferred_size = transferred_size;
+        download->maximum_block_length = 0U;
+        download->block_data_capacity = 0U;
+        download->current_block_size = 0U;
+        download->block_sequence_counter = 1U;
+        download->current_block_retry = 0U;
+        download->current_action_retry = 0U;
+        download->last_negative_response_code = 0U;
+        download->last_nrc_action = UDS_DOWNLOAD_NRC_FAIL;
+        download->acknowledged_blocks = acknowledged_blocks;
         download->retry_count = 0U;
         download->started_at_us = now_us;
         download->retry_pending = false;

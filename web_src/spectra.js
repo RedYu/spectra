@@ -10915,6 +10915,9 @@
         const applyButton = element('program-apply');
         const closeButton = element('program-close');
         const startButton = element('program-start');
+        const resumeButton = element('program-resume');
+        const discardButton = element('program-discard');
+        const resumeMessage = element('program-resume-message');
         const cancelButton = element('program-cancel');
         const transportFields = element('program-transport-fields');
         const imageFields = element('program-image-fields');
@@ -10931,6 +10934,8 @@
         let measuredSpeed = 0;
         let channelOpen = false;
         let downloadReserved = false;
+        let resumePath = '';
+        let requestedDownloadAction = 'download_start';
         const lastProfileKey = 'spectra.uds.last-profile';
 
         const clientStateNames = [
@@ -11623,7 +11628,26 @@
                 imageFields.disabled = data.download_active;
                 applyButton.disabled = data.download_active;
                 startButton.disabled =
-                    data.download_active || !data.open || !fileSelector.value;
+                    data.download_active ||
+                    Boolean(data.resume_available) ||
+                    !data.open ||
+                    !fileSelector.value;
+                resumePath = data.resume_path || '';
+                const resumeAvailable =
+                    Boolean(data.resume_available) && !data.download_active;
+                resumeButton.hidden = !resumeAvailable;
+                discardButton.hidden = !resumeAvailable;
+                resumeMessage.hidden = !resumeAvailable;
+                resumeButton.disabled = !data.open;
+                discardButton.disabled = data.download_active;
+
+                if (resumeAvailable) {
+                    resumeMessage.textContent =
+                        `Interrupted programming: ${resumePath} · ` +
+                        `${data.resume_completed_segments} / ` +
+                        `${data.resume_segment_count} confirmed segments. ` +
+                        'Resume skips erase and restarts at the first incomplete segment.';
+                }
                 cancelButton.disabled = !active;
                 closeButton.disabled = active || !data.open;
                 element('program-refresh-files').disabled = data.download_active;
@@ -11770,7 +11794,9 @@
 
         startButton.addEventListener('click', async () => {
             try {
-                const path = fileSelector.value;
+                const resume =
+                    requestedDownloadAction === 'download_resume';
+                const path = resume ? resumePath : fileSelector.value;
                 const addressLength =
                     Number(element('program-address-length').value);
                 const sizeLength =
@@ -11780,7 +11806,8 @@
                     throw new Error('Select a firmware image first.');
 
                 if (!window.confirm(
-                        `Program ${path} into the selected ECU? ` +
+                        `${resume ? 'Resume programming' : 'Program'} ` +
+                        `${path} into the selected ECU? ` +
                         'Do not disconnect power or CAN during this operation.'
                     )) {
 
@@ -11788,7 +11815,7 @@
                 }
 
                 await command({
-                    action : 'download_start',
+                    action : requestedDownloadAction,
                     path,
                     data_format : parseHex(
                         element('program-data-format'),
@@ -11886,7 +11913,30 @@
                     restore_default_session :
                         element('program-restore-session').checked
                 });
-                message.textContent = 'Programming started.';
+                message.textContent = resume
+                    ? 'Programming resumed from the saved segment boundary.'
+                    : 'Programming started.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            } finally {
+                requestedDownloadAction = 'download_start';
+            }
+        });
+
+        resumeButton.addEventListener('click', () => {
+            requestedDownloadAction = 'download_resume';
+            startButton.disabled = false;
+            startButton.click();
+        });
+
+        discardButton.addEventListener('click', async () => {
+            if (!window.confirm('Discard the saved programming progress?'))
+                return;
+
+            try {
+                await command({action : 'download_discard'});
+                message.textContent = 'Saved programming progress discarded.';
                 await refresh();
             } catch (error) {
                 message.textContent = error.message;

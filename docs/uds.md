@@ -153,6 +153,20 @@ size, target address, data format, retry events, transferred bytes, block and
 retry counters, final NRC, result, duration, and the final outcome. The journal
 is flushed when opened and synchronized to the SD card before it is closed.
 
+Automatic programming also maintains an atomic resume checkpoint at
+`/logs/firmware/uds-resume.json`. Only a segment that has received a positive
+RequestTransferExit response is recorded as complete. After a reset or power
+loss, the Programming page offers Resume and Discard actions. Resume validates
+the original firmware path, file size, and parsed segment count, then uses the
+currently applied ECU configuration to re-enter the programming session and
+SecurityAccess. It
+skips the erase routine and starts at the first incomplete segment. The current
+segment is retransmitted from its beginning when interruption occurred before
+RequestTransferExit; partial in-segment resume is intentionally not assumed.
+The checkpoint is removed after successful completion or explicit
+cancellation, and retained after an error or unexpected reset. Security keys
+are never written to the checkpoint.
+
 The dedicated `/uds_programming` page separates automatic ECU programming
 from manual ISO-TP and UDS diagnostics. It lists supported images directly
 from `/firmwares`, configures the diagnostic CAN channel, locks mutable fields
@@ -260,5 +274,6 @@ collector concern and does not replace the active physical programming client.
 - one configured ECU response identifier per functional UDS channel;
 - no built-in OEM security-access algorithms;
 - one ReadDataByIdentifier response is decoded at a time;
-- no persistent resume after reset or interrupted ECU programming;
+- resume is limited to confirmed image-segment boundaries because generic UDS
+  does not guarantee partial RequestDownload support inside one segment;
 - no authentication or role-based protection for destructive UDS requests.
