@@ -80,6 +80,7 @@ typedef struct
     can_bus_id_t bus;
     uint32_t command_identifier;
     uint32_t response_identifier;
+    uint32_t stim_identifier;
     bool extended_identifier;
     bool can_fd;
     bool bit_rate_switch;
@@ -235,6 +236,32 @@ esp_err_t xcp_service_execute_cto(
     uint8_t *response,
     size_t response_capacity,
     size_t *response_size
+);
+
+/**
+ * @brief Transmit one DTO packet for STIM without waiting for a CTO response.
+ *
+ * The packet must fit the configured CAN payload and negotiated MAX_DTO.
+ */
+esp_err_t xcp_service_transmit_dto(
+    uint32_t session_id,
+    const uint8_t *data,
+    size_t data_size,
+    uint32_t *transaction_id
+);
+
+/**
+ * @brief Queue one CTO packet without waiting for a response.
+ *
+ * Used for intermediate DOWNLOAD_NEXT and PROGRAM_NEXT packets in XCP
+ * slave block mode. The final packet must be executed with
+ * xcp_service_execute_cto() so that the block response is collected.
+ */
+esp_err_t xcp_service_transmit_cto(
+    uint32_t session_id,
+    const uint8_t *data,
+    size_t data_size,
+    uint32_t *transaction_id
 );
 
 /**

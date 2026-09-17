@@ -714,6 +714,186 @@ esp_err_t xcp_service_cancel(
     return ESP_OK;
 }
 
+esp_err_t xcp_service_transmit_dto(
+    uint32_t session_id,
+    const uint8_t *data,
+    size_t data_size,
+    uint32_t *transaction_id
+)
+{
+    if ((session_id == XCP_SERVICE_SESSION_ID_NONE) ||
+        (data == NULL) ||
+        (data_size == 0U) ||
+        (data_size > CAN_FRAME_FD_DATA_MAX_LENGTH) ||
+        (transaction_id == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (xSemaphoreTake(
+            s_lock,
+            pdMS_TO_TICKS(XCP_SERVICE_LOCK_TIMEOUT_MS)
+        ) != pdTRUE) {
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+    xcp_service_session_t *session =
+        xcp_service_find_session(session_id);
+
+    if ((session == NULL) ||
+        !session->connected ||
+        (data_size > session->config.transmit_data_length) ||
+        ((session->slave.maximum_dto != 0U) &&
+         (data_size > session->slave.maximum_dto))) {
+
+        xSemaphoreGive(s_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    can_frame_t frame = {
+        .bus = session->config.bus,
+        .identifier = session->config.stim_identifier != 0U
+            ? session->config.stim_identifier
+            : session->config.command_identifier,
+        .flags =
+            (session->config.extended_identifier
+                ? CAN_FRAME_FLAG_EXTENDED_ID
+                : 0U) |
+            (session->config.can_fd
+                ? CAN_FRAME_FLAG_FD
+                : 0U) |
+            (session->config.bit_rate_switch
+                ? CAN_FRAME_FLAG_BRS
+                : 0U),
+        .data_length = session->config.transmit_data_length,
+        .timestamp_source = CAN_TIMESTAMP_SOURCE_NONE,
+    };
+
+    memset(
+        frame.data,
+        session->config.padding_byte,
+        frame.data_length
+    );
+    memcpy(frame.data, data, data_size);
+
+    uint8_t encoded_length = 0U;
+    esp_err_t result =
+        can_frame_length_to_dlc(
+            frame.data_length,
+            session->config.can_fd,
+            &frame.dlc,
+            &encoded_length
+        );
+
+    if ((result == ESP_OK) &&
+        (encoded_length == frame.data_length)) {
+
+        result = can_router_transmit(
+            &frame,
+            s_transmit_timeout_ms,
+            transaction_id
+        );
+
+        if (result == ESP_OK) {
+            session->transmitted_commands++;
+        }
+    }
+
+    xSemaphoreGive(s_lock);
+    return result;
+}
+
+esp_err_t xcp_service_transmit_cto(
+    uint32_t session_id,
+    const uint8_t *data,
+    size_t data_size,
+    uint32_t *transaction_id
+)
+{
+    if ((session_id == XCP_SERVICE_SESSION_ID_NONE) ||
+        (data == NULL) ||
+        (data_size == 0U) ||
+        (data_size > XCP_CAN_FD_CTO_MAX_SIZE) ||
+        (data[0] < 0xC0U) ||
+        (transaction_id == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (xSemaphoreTake(
+            s_lock,
+            pdMS_TO_TICKS(XCP_SERVICE_LOCK_TIMEOUT_MS)
+        ) != pdTRUE) {
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+    xcp_service_session_t *session =
+        xcp_service_find_session(session_id);
+
+    if ((session == NULL) ||
+        !session->connected ||
+        session->operation_reserved ||
+        (data_size > session->config.transmit_data_length) ||
+        ((session->slave.maximum_cto != 0U) &&
+         (data_size > session->slave.maximum_cto))) {
+
+        xSemaphoreGive(s_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    can_frame_t frame = {
+        .bus = session->config.bus,
+        .identifier = session->config.command_identifier,
+        .flags =
+            (session->config.extended_identifier
+                ? CAN_FRAME_FLAG_EXTENDED_ID
+                : 0U) |
+            (session->config.can_fd
+                ? CAN_FRAME_FLAG_FD
+                : 0U) |
+            (session->config.bit_rate_switch
+                ? CAN_FRAME_FLAG_BRS
+                : 0U),
+        .data_length = session->config.transmit_data_length,
+        .timestamp_source = CAN_TIMESTAMP_SOURCE_NONE,
+    };
+
+    memset(
+        frame.data,
+        session->config.padding_byte,
+        frame.data_length
+    );
+    memcpy(frame.data, data, data_size);
+
+    uint8_t encoded_length = 0U;
+    esp_err_t result =
+        can_frame_length_to_dlc(
+            frame.data_length,
+            session->config.can_fd,
+            &frame.dlc,
+            &encoded_length
+        );
+
+    if ((result == ESP_OK) &&
+        (encoded_length == frame.data_length)) {
+
+        result = can_router_transmit(
+            &frame,
+            s_transmit_timeout_ms,
+            transaction_id
+        );
+
+        if (result == ESP_OK) {
+            session->transmitted_commands++;
+        }
+    }
+
+    xSemaphoreGive(s_lock);
+    return result;
+}
+
 esp_err_t xcp_service_get_session_info(
     uint32_t session_id,
     xcp_service_session_info_t *info
@@ -818,7 +998,11 @@ static bool xcp_service_session_config_valid(
             : CAN_FRAME_STANDARD_ID_MAX;
 
     if ((config->command_identifier > maximum_identifier) ||
-        (config->response_identifier > maximum_identifier)) {
+        (config->response_identifier > maximum_identifier) ||
+        ((config->stim_identifier != 0U) &&
+         ((config->stim_identifier > maximum_identifier) ||
+          (config->stim_identifier ==
+           config->response_identifier)))) {
 
         return false;
     }
@@ -858,6 +1042,11 @@ static bool xcp_service_identifiers_available(
     const xcp_service_session_config_t *config
 )
 {
+    const uint32_t requested_stim =
+        config->stim_identifier != 0U
+            ? config->stim_identifier
+            : config->command_identifier;
+
     for (size_t index = 0U;
          index < XCP_SERVICE_SESSION_COUNT;
          ++index) {
@@ -881,6 +1070,20 @@ static bool xcp_service_identifiers_available(
              config->command_identifier) ||
             (session->config.response_identifier ==
              config->response_identifier)) {
+
+            return false;
+        }
+
+        const uint32_t existing_stim =
+            session->config.stim_identifier != 0U
+                ? session->config.stim_identifier
+                : session->config.command_identifier;
+
+        if ((requested_stim == session->config.command_identifier) ||
+            (requested_stim == session->config.response_identifier) ||
+            (requested_stim == existing_stim) ||
+            (existing_stim == config->command_identifier) ||
+            (existing_stim == config->response_identifier)) {
 
             return false;
         }

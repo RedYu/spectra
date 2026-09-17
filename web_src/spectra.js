@@ -12346,6 +12346,22 @@
             return compact.match(/../g).join(' ').toUpperCase();
         }
 
+        function normalizeTransferHex(text) {
+            const compact = text.replace(/[\s,:-]+/g, '');
+
+            if (!compact.length ||
+                !/^[0-9a-f]+$/i.test(compact) ||
+                (compact.length % 2) !== 0) {
+
+                throw new Error('Enter complete hexadecimal data bytes.');
+            }
+
+            if ((compact.length / 2) > 2048)
+                throw new Error('A Web XCP block is limited to 2048 bytes.');
+
+            return compact.match(/../g).join(' ').toUpperCase();
+        }
+
         function parseHexNumber(input, maximum, name) {
             const text = input.value.trim();
 
@@ -12422,8 +12438,37 @@
                     !data.connected ||
                     data.state === 4 ||
                     !element('xcp-write-confirm').checked;
+                element('xcp-write-block').disabled =
+                    !data.connected ||
+                    data.state === 4 ||
+                    !element('xcp-write-confirm').checked;
+                for (const button of document.querySelectorAll(
+                        '#xcp-get-seed, #xcp-unlock, #xcp-get-cal-page, '
+                        + '#xcp-set-cal-page, #xcp-daq-allocate, '
+                        + '#xcp-daq-pointer, #xcp-daq-write, '
+                        + '#xcp-daq-start, #xcp-daq-stop, #xcp-stim-send')) {
+
+                    button.disabled = !data.connected || data.state === 4;
+                }
+                const programmingEnabled =
+                    data.connected &&
+                    data.state !== 4 &&
+                    element('xcp-program-confirm').checked;
+                element('xcp-program-start').disabled = !programmingEnabled;
+                element('xcp-program-prepare').disabled = !programmingEnabled;
+                element('xcp-program-clear').disabled = !programmingEnabled;
+                element('xcp-program-send').disabled = !programmingEnabled;
+                element('xcp-program-block').disabled = !programmingEnabled;
+                element('xcp-program-verify').disabled = !programmingEnabled;
+                element('xcp-program-reset').disabled = !programmingEnabled;
                 capabilities.textContent =
                     `MAX_CTO ${data.maximum_cto || '—'} · MAX_DTO ${data.maximum_dto || '—'}`;
+                element('xcp-daq-packets').textContent =
+                    Number(data.daq_packets || 0).toLocaleString();
+                element('xcp-stim-packets').textContent =
+                    Number(data.stim_packets || 0).toLocaleString();
+                element('xcp-latest-daq').textContent =
+                    data.latest_daq || 'No DAQ DTO received.';
 
                 if (data.operation === 'get_status') {
                     decoded.textContent =
@@ -12487,6 +12532,8 @@
                         element('xcp-command-id'), maximumId, 'CRO identifier'),
                     response_identifier : parseHexNumber(
                         element('xcp-response-id'), maximumId, 'DTO identifier'),
+                    stim_identifier : parseHexNumber(
+                        element('xcp-stim-id'), maximumId, 'STIM identifier'),
                     extended,
                     can_fd : fd,
                     brs : fd && brs.checked,
@@ -12630,6 +12677,210 @@
                 message.textContent = error.message;
             }
         });
+
+        element('xcp-write-block').addEventListener('click', async () => {
+            try {
+                const address = parseHexNumber(
+                    element('xcp-address'), 0xffffffff, 'MTA address');
+                const rangeStart = parseHexNumber(
+                    element('xcp-write-range-start'), 0xffffffff, 'Range start');
+                const rangeEnd = parseHexNumber(
+                    element('xcp-write-range-end'), 0xffffffff, 'Range end');
+                const data = normalizeTransferHex(
+                    element('xcp-write-data').value
+                );
+
+                if (!window.confirm(
+                        `Block-write ${data.split(' ').length} byte(s) to the ECU?`
+                    )) {
+
+                    return;
+                }
+
+                await request({
+                    action : 'download_block',
+                    confirmed : true,
+                    address_extension : parseHexNumber(
+                        element('xcp-address-extension'), 0xff, 'Address extension'),
+                    address,
+                    range_start : rangeStart,
+                    range_end : rangeEnd,
+                    data
+                });
+                element('xcp-write-confirm').checked = false;
+                message.textContent = 'XCP block DOWNLOAD completed.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-get-seed').addEventListener('click', () =>
+            discovery({
+                action : 'get_seed',
+                resource : Number(element('xcp-resource').value),
+                mode : 0
+            }, 'GET_SEED completed.'));
+
+        element('xcp-unlock').addEventListener('click', () =>
+            discovery({
+                action : 'unlock',
+                key : normalizeDataHex(element('xcp-unlock-key').value)
+            }, 'UNLOCK completed.'));
+
+        element('xcp-get-cal-page').addEventListener('click', () =>
+            discovery({
+                action : 'get_cal_page',
+                mode : parseHexNumber(
+                    element('xcp-cal-mode'), 0xff, 'Page mode'),
+                segment : Number(element('xcp-cal-segment').value)
+            }, 'GET_CAL_PAGE completed.'));
+
+        element('xcp-set-cal-page').addEventListener('click', async () => {
+            if (!window.confirm('Activate the selected ECU calibration page?'))
+                return;
+
+            await discovery({
+                action : 'set_cal_page',
+                mode : parseHexNumber(
+                    element('xcp-cal-mode'), 0xff, 'Page mode'),
+                segment : Number(element('xcp-cal-segment').value),
+                page : Number(element('xcp-cal-page').value)
+            }, 'SET_CAL_PAGE completed.');
+        });
+
+        element('xcp-daq-allocate').addEventListener('click', async () => {
+            try {
+                const daq = Number(element('xcp-daq-list').value);
+                const odt = Number(element('xcp-daq-odt').value);
+
+                await request({action : 'daq_free'});
+                await request({action : 'daq_allocate', count : daq + 1});
+                await request({
+                    action : 'daq_allocate_odt',
+                    daq,
+                    count : odt + 1
+                });
+                await request({
+                    action : 'daq_allocate_entry',
+                    daq,
+                    odt,
+                    count : Number(element('xcp-daq-entry').value) + 1
+                });
+                message.textContent = 'Dynamic DAQ memory allocated.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-daq-pointer').addEventListener('click', () =>
+            discovery({
+                action : 'daq_set_pointer',
+                daq : Number(element('xcp-daq-list').value),
+                odt : Number(element('xcp-daq-odt').value),
+                entry : Number(element('xcp-daq-entry').value)
+            }, 'SET_DAQ_PTR completed.'));
+
+        element('xcp-daq-write').addEventListener('click', () =>
+            discovery({
+                action : 'daq_write',
+                bit_offset : 0,
+                size : Number(element('xcp-daq-size').value),
+                address_extension : parseHexNumber(
+                    element('xcp-address-extension'), 0xff, 'Address extension'),
+                address : parseHexNumber(
+                    element('xcp-daq-address'), 0xffffffff, 'DAQ address')
+            }, 'WRITE_DAQ completed.'));
+
+        async function startStopDaq(start) {
+            try {
+                const daq = Number(element('xcp-daq-list').value);
+
+                if (start) {
+                    await request({
+                        action : 'daq_set_mode',
+                        mode : 0,
+                        daq,
+                        event : Number(element('xcp-daq-event').value),
+                        prescaler : 1,
+                        priority : 0
+                    });
+                }
+
+                await request({
+                    action : 'daq_start_stop',
+                    mode : start ? 2 : 0,
+                    daq
+                });
+                await request({
+                    action : 'daq_synchronize',
+                    mode : start ? 1 : 0
+                });
+                message.textContent = start
+                    ? 'DAQ started.'
+                    : 'DAQ stopped.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        }
+
+        element('xcp-daq-start').addEventListener(
+            'click',
+            () => startStopDaq(true)
+        );
+        element('xcp-daq-stop').addEventListener(
+            'click',
+            () => startStopDaq(false)
+        );
+        element('xcp-stim-send').addEventListener('click', () =>
+            discovery({
+                action : 'stim',
+                data : normalizeDataHex(element('xcp-stim-data').value)
+            }, 'STIM DTO queued.'));
+
+        element('xcp-program-confirm').addEventListener('change', refresh);
+        element('xcp-program-start').addEventListener('click', () =>
+            discovery({action : 'program_start'}, 'PROGRAM_START completed.'));
+        element('xcp-program-prepare').addEventListener('click', () =>
+            discovery({
+                action : 'program_prepare',
+                code_size : Number(element('xcp-program-code-size').value)
+            }, 'PROGRAM_PREPARE completed.'));
+        element('xcp-program-clear').addEventListener('click', () =>
+            discovery({
+                action : 'program_clear',
+                mode : parseHexNumber(
+                    element('xcp-program-clear-mode'), 0xff, 'Clear mode'),
+                range : parseHexNumber(
+                    element('xcp-program-clear-range'), 0xffffffff, 'Clear range')
+            }, 'PROGRAM_CLEAR completed.'));
+        element('xcp-program-send').addEventListener('click', () =>
+            discovery({
+                action : 'program',
+                command : 0xd0,
+                count : Number(element('xcp-program-count').value),
+                data : normalizeDataHex(element('xcp-program-data').value)
+            }, 'PROGRAM packet completed.'));
+        element('xcp-program-block').addEventListener('click', () =>
+            discovery({
+                action : 'program_block',
+                confirmed : true,
+                data : normalizeTransferHex(element('xcp-program-data').value)
+            }, 'PROGRAM block completed.'));
+        element('xcp-program-verify').addEventListener('click', () =>
+            discovery({
+                action : 'program_verify',
+                mode : parseHexNumber(
+                    element('xcp-program-verify-mode'), 0xff, 'Verify mode'),
+                type : parseHexNumber(
+                    element('xcp-program-verify-type'), 0xff, 'Verify type'),
+                value : parseHexNumber(
+                    element('xcp-program-verify-value'), 0xffffffff, 'Verify value')
+            }, 'PROGRAM_VERIFY completed.'));
+        element('xcp-program-reset').addEventListener('click', () =>
+            discovery({action : 'program_reset'}, 'PROGRAM_RESET completed.'));
 
         element('xcp-copy').addEventListener('click', async () => {
             if (!latestResponse)

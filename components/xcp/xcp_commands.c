@@ -44,6 +44,16 @@ static void xcp_command_write_u32(
         data[destination] = (uint8_t)(value >> ((3U - index) * 8U));
     }
 }
+
+static void xcp_command_write_u16(
+    uint8_t *data,
+    uint16_t value,
+    bool big_endian
+)
+{
+    data[big_endian ? 0U : 1U] = (uint8_t)(value >> 8U);
+    data[big_endian ? 1U : 0U] = (uint8_t)value;
+}
 static esp_err_t xcp_command_encode_empty(
     uint8_t command,
     uint8_t *buffer,
@@ -278,6 +288,482 @@ esp_err_t xcp_command_encode_download_next(
         remaining_element_count,
         data,
         data_size,
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_get_seed(
+    uint8_t mode,
+    uint8_t resource,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    const uint8_t parameters[] = {mode, resource};
+
+    if ((mode > 1U) ||
+        ((resource != XCP_RESOURCE_CAL_PAG) &&
+         (resource != XCP_RESOURCE_DAQ) &&
+         (resource != XCP_RESOURCE_STIM) &&
+         (resource != XCP_RESOURCE_PGM))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_GET_SEED,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_unlock(
+    const uint8_t *key,
+    size_t key_size,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((key == NULL) ||
+        (key_size == 0U) ||
+        (key_size > UINT8_MAX) ||
+        (key_size > (XCP_CAN_FD_CTO_MAX_SIZE - 2U))) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t parameters[XCP_CAN_FD_CTO_MAX_SIZE - 1U] = {0};
+    parameters[0] = (uint8_t)key_size;
+    memcpy(&parameters[1], key, key_size);
+
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_UNLOCK,
+        parameters,
+        key_size + 1U,
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_set_calibration_page(
+    uint8_t mode,
+    uint8_t segment,
+    uint8_t page,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    const uint8_t parameters[] = {mode, 0U, segment, page};
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_SET_CAL_PAGE,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_get_calibration_page(
+    uint8_t mode,
+    uint8_t segment,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    const uint8_t parameters[] = {mode, 0U, segment};
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_GET_CAL_PAGE,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_daq_list(
+    uint8_t command,
+    uint16_t daq_list,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((command != XCP_COMMAND_CLEAR_DAQ_LIST) &&
+        (command != XCP_COMMAND_GET_DAQ_LIST_MODE)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t parameters[3] = {0};
+    xcp_command_write_u16(&parameters[1], daq_list, byte_order_big_endian);
+    return xcp_protocol_encode_command(
+        command, parameters, sizeof(parameters), buffer, capacity, encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_set_daq_pointer(
+    uint16_t daq_list,
+    uint8_t odt,
+    uint8_t entry,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    uint8_t parameters[5] = {0};
+    xcp_command_write_u16(&parameters[1], daq_list, byte_order_big_endian);
+    parameters[3] = odt;
+    parameters[4] = entry;
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_SET_DAQ_PTR,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_write_daq(
+    uint8_t bit_offset,
+    uint8_t element_size,
+    uint8_t address_extension,
+    uint32_t address,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (element_size == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t parameters[7] = {bit_offset, element_size, address_extension};
+    xcp_command_write_u32(&parameters[3], address, byte_order_big_endian);
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_WRITE_DAQ,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_set_daq_list_mode(
+    uint8_t mode,
+    uint16_t daq_list,
+    uint16_t event_channel,
+    uint8_t prescaler,
+    uint8_t priority,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    uint8_t parameters[7] = {mode};
+    xcp_command_write_u16(&parameters[1], daq_list, byte_order_big_endian);
+    xcp_command_write_u16(&parameters[3], event_channel, byte_order_big_endian);
+    parameters[5] = prescaler;
+    parameters[6] = priority;
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_SET_DAQ_LIST_MODE,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_start_stop_daq_list(
+    uint8_t mode,
+    uint16_t daq_list,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (mode > 2U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t parameters[3] = {mode};
+    xcp_command_write_u16(&parameters[1], daq_list, byte_order_big_endian);
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_START_STOP_DAQ_LIST,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_start_stop_synchronization(
+    uint8_t mode,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (mode > 3U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_START_STOP_SYNCH,
+        &mode,
+        sizeof(mode),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_allocate_daq(
+    uint16_t count,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (count == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t parameters[3] = {0};
+    xcp_command_write_u16(&parameters[1], count, byte_order_big_endian);
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_ALLOC_DAQ,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_free_daq(
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    return xcp_command_encode_empty(
+        XCP_COMMAND_FREE_DAQ, buffer, capacity, encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_allocate_odt(
+    uint16_t daq_list,
+    uint8_t count,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (count == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t parameters[4] = {0};
+    xcp_command_write_u16(&parameters[1], daq_list, byte_order_big_endian);
+    parameters[3] = count;
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_ALLOC_ODT,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_allocate_odt_entry(
+    uint16_t daq_list,
+    uint8_t odt,
+    uint8_t count,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (count == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t parameters[5] = {0};
+    xcp_command_write_u16(&parameters[1], daq_list, byte_order_big_endian);
+    parameters[3] = odt;
+    parameters[4] = count;
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_ALLOC_ODT_ENTRY,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_program_start(
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    return xcp_command_encode_empty(
+        XCP_COMMAND_PROGRAM_START, buffer, capacity, encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_program_clear(
+    uint8_t mode,
+    uint32_t range,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    uint8_t parameters[7] = {mode, 0U, 0U};
+    xcp_command_write_u32(&parameters[3], range, byte_order_big_endian);
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_PROGRAM_CLEAR,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_program_packet(
+    uint8_t command,
+    uint8_t element_count,
+    const uint8_t *data,
+    size_t data_size,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if ((command != XCP_COMMAND_PROGRAM) &&
+        (command != XCP_COMMAND_PROGRAM_NEXT) &&
+        (command != XCP_COMMAND_PROGRAM_MAX)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return xcp_command_encode_download_packet(
+        command,
+        element_count,
+        data,
+        data_size,
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_program_reset(
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    return xcp_command_encode_empty(
+        XCP_COMMAND_PROGRAM_RESET, buffer, capacity, encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_program_prepare(
+    uint16_t code_size,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    if (code_size == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t parameters[3] = {0};
+    xcp_command_write_u16(&parameters[1], code_size, byte_order_big_endian);
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_PROGRAM_PREPARE,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_program_format(
+    uint8_t compression,
+    uint8_t encryption,
+    uint8_t programming,
+    uint8_t access,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    const uint8_t parameters[] = {
+        compression,
+        encryption,
+        programming,
+        access,
+    };
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_PROGRAM_FORMAT,
+        parameters,
+        sizeof(parameters),
+        buffer,
+        capacity,
+        encoded_size
+    );
+}
+
+esp_err_t xcp_command_encode_program_verify(
+    uint8_t mode,
+    uint8_t type,
+    uint32_t value,
+    bool byte_order_big_endian,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+)
+{
+    uint8_t parameters[7] = {mode, type, 0U};
+    xcp_command_write_u32(&parameters[3], value, byte_order_big_endian);
+    return xcp_protocol_encode_command(
+        XCP_COMMAND_PROGRAM_VERIFY,
+        parameters,
+        sizeof(parameters),
         buffer,
         capacity,
         encoded_size

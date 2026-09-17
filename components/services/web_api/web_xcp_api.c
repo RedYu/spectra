@@ -6,12 +6,14 @@
 #include "web_xcp_api.h"
 
 #include <ctype.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "web_api_common.h"
 #include "xcp_commands.h"
@@ -36,6 +38,46 @@ static xcp_get_id_response_t s_identification;
 static char s_identification_text[
     WEB_XCP_RESPONSE_MAX_SIZE + 1U
 ] = {0};
+static uint8_t s_daq_packet[XCP_CAN_FD_CTO_MAX_SIZE];
+static size_t s_daq_packet_size = 0U;
+static atomic_uint_fast64_t s_daq_packets = ATOMIC_VAR_INIT(0U);
+static atomic_uint_fast64_t s_stim_packets = ATOMIC_VAR_INIT(0U);
+
+static void web_xcp_event_callback(
+    const xcp_service_event_t *event,
+    void *context
+);
+
+static void web_xcp_event_callback(
+    const xcp_service_event_t *event,
+    void *context
+)
+{
+    (void)context;
+
+    if ((event == NULL) ||
+        (event->type != XCP_PACKET_DAQ)) {
+
+        return;
+    }
+
+    atomic_fetch_add(&s_daq_packets, 1U);
+
+    if ((s_lock != NULL) &&
+        (xSemaphoreTake(s_lock, 0U) == pdTRUE)) {
+
+        size_t payload_size = event->payload_length;
+
+        if (payload_size > (sizeof(s_daq_packet) - 1U)) {
+            payload_size = sizeof(s_daq_packet) - 1U;
+        }
+
+        s_daq_packet[0] = event->packet_identifier;
+        memcpy(&s_daq_packet[1], event->payload, payload_size);
+        s_daq_packet_size = payload_size + 1U;
+        xSemaphoreGive(s_lock);
+    }
+}
 
 static bool web_xcp_number(
     const cJSON *root,
@@ -98,6 +140,602 @@ static esp_err_t web_xcp_discovery(
 static esp_err_t web_xcp_write_memory(
     const cJSON *root
 );
+
+static esp_err_t web_xcp_advanced(
+    const cJSON *root,
+    const char *action
+);
+
+static esp_err_t web_xcp_block_transfer(
+    const cJSON *root,
+    bool programming
+);
+
+static esp_err_t web_xcp_block_transfer(
+    const cJSON *root,
+    bool programming
+)
+{
+    const cJSON *data_item =
+        cJSON_GetObjectItemCaseSensitive(root, "data");
+    bool confirmed = false;
+
+    if (!cJSON_IsString(data_item) ||
+        !web_xcp_boolean(root, "confirmed", false, &confirmed) ||
+        !confirmed) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xcp_service_session_info_t info = {0};
+    esp_err_t result =
+        xcp_service_get_session_info(s_session_id, &info);
+
+    if ((result != ESP_OK) ||
+        !info.connected ||
+        ((info.slave.communication_mode_basic & 0x40U) == 0U) ||
+        (info.slave.address_granularity > 2U) ||
+        (info.slave.maximum_cto < 3U)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const size_t text_length = strlen(data_item->valuestring);
+    uint8_t *data = malloc((text_length / 2U) + 1U);
+
+    if (data == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t data_size = 0U;
+    result = web_xcp_parse_hex(
+        data_item->valuestring,
+        data,
+        (text_length / 2U) + 1U,
+        &data_size
+    );
+
+    const size_t granularity =
+        (size_t)1U << info.slave.address_granularity;
+    const size_t maximum_payload = info.slave.maximum_cto - 2U;
+    const size_t payload_size =
+        maximum_payload - (maximum_payload % granularity);
+    const size_t element_count = data_size / granularity;
+    if ((result != ESP_OK) ||
+        (payload_size == 0U) ||
+        ((data_size % granularity) != 0U) ||
+        (element_count == 0U) ||
+        (element_count > UINT8_MAX)) {
+
+        free(data);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    const size_t packet_count =
+        (data_size + payload_size - 1U) / payload_size;
+
+    if ((s_communication.maximum_block_size != 0U) &&
+        (packet_count > s_communication.maximum_block_size)) {
+
+        free(data);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if (!programming) {
+        uint32_t extension = 0U;
+        uint32_t address = 0U;
+        uint32_t range_start = 0U;
+        uint32_t range_end = 0U;
+
+        if (!web_xcp_optional_number(
+                root,
+                "address_extension",
+                UINT8_MAX,
+                0U,
+                &extension
+            ) ||
+            !web_xcp_number(root, "address", UINT32_MAX, &address) ||
+            !web_xcp_number(root, "range_start", UINT32_MAX, &range_start) ||
+            !web_xcp_number(root, "range_end", UINT32_MAX, &range_end) ||
+            (range_start > range_end) ||
+            (address < range_start) ||
+            (((uint64_t)address + data_size - 1U) > range_end)) {
+
+            free(data);
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        uint8_t command[XCP_CAN_CLASSIC_CTO_MAX_SIZE] = {0};
+        size_t command_size = 0U;
+        result = xcp_command_encode_set_mta(
+            (uint8_t)extension,
+            address,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+
+        if (result == ESP_OK) {
+            result = web_xcp_execute_command(
+                "set_mta",
+                command,
+                command_size
+            );
+        }
+
+        if (result != ESP_OK) {
+            free(data);
+            return result;
+        }
+    }
+
+    size_t offset = 0U;
+    size_t remaining_elements = element_count;
+
+    while ((result == ESP_OK) &&
+           (offset < data_size)) {
+
+        size_t chunk_size = data_size - offset;
+
+        if (chunk_size > payload_size) {
+            chunk_size = payload_size;
+        }
+
+        const size_t packet_elements = chunk_size / granularity;
+        const uint8_t count = (uint8_t)(
+            (offset == 0U)
+                ? element_count
+                : remaining_elements
+        );
+        remaining_elements -= packet_elements;
+        const bool final_packet = remaining_elements == 0U;
+        const uint8_t command_id = programming
+            ? ((offset == 0U)
+                ? XCP_COMMAND_PROGRAM
+                : XCP_COMMAND_PROGRAM_NEXT)
+            : ((offset == 0U)
+                ? XCP_COMMAND_DOWNLOAD
+                : XCP_COMMAND_DOWNLOAD_NEXT);
+        uint8_t command[XCP_CAN_FD_CTO_MAX_SIZE] = {0};
+        size_t command_size = 0U;
+
+        result = programming
+            ? xcp_command_encode_program_packet(
+                command_id,
+                count,
+                &data[offset],
+                chunk_size,
+                command,
+                sizeof(command),
+                &command_size
+            )
+            : ((offset == 0U)
+                ? xcp_command_encode_download(
+                    count,
+                    &data[offset],
+                    chunk_size,
+                    command,
+                    sizeof(command),
+                    &command_size
+                )
+                : xcp_command_encode_download_next(
+                    count,
+                    &data[offset],
+                    chunk_size,
+                    command,
+                    sizeof(command),
+                    &command_size
+                ));
+
+        if ((result == ESP_OK) && final_packet) {
+            result = web_xcp_execute_command(
+                programming ? "program_block" : "download_block",
+                command,
+                command_size
+            );
+        } else if (result == ESP_OK) {
+            uint32_t transaction_id = 0U;
+            result = xcp_service_transmit_cto(
+                s_session_id,
+                command,
+                command_size,
+                &transaction_id
+            );
+
+            if ((result == ESP_OK) &&
+                (s_communication.minimum_separation_time != 0U)) {
+
+                vTaskDelay(1U);
+            }
+        }
+
+        offset += chunk_size;
+    }
+
+    free(data);
+    s_last_result = result;
+    return result;
+}
+
+static esp_err_t web_xcp_advanced(
+    const cJSON *root,
+    const char *action
+)
+{
+    xcp_service_session_info_t info = {0};
+    esp_err_t result =
+        xcp_service_get_session_info(s_session_id, &info);
+
+    if ((result != ESP_OK) || !info.connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint8_t command[XCP_CAN_FD_CTO_MAX_SIZE] = {0};
+    size_t command_size = 0U;
+    uint32_t value = 0U;
+    uint32_t second = 0U;
+    uint32_t third = 0U;
+    uint32_t fourth = 0U;
+
+    if (strcmp(action, "get_seed") == 0) {
+        if (!web_xcp_optional_number(root, "mode", 1U, 0U, &value) ||
+            !web_xcp_number(root, "resource", UINT8_MAX, &second)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_get_seed(
+            (uint8_t)value,
+            (uint8_t)second,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "unlock") == 0) {
+        const cJSON *key =
+            cJSON_GetObjectItemCaseSensitive(root, "key");
+        uint8_t bytes[XCP_CAN_FD_CTO_MAX_SIZE - 2U] = {0};
+        size_t size = 0U;
+
+        if (!cJSON_IsString(key)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = web_xcp_parse_hex(
+            key->valuestring,
+            bytes,
+            sizeof(bytes),
+            &size
+        );
+
+        if (result == ESP_OK) {
+            result = xcp_command_encode_unlock(
+                bytes,
+                size,
+                command,
+                sizeof(command),
+                &command_size
+            );
+        }
+    } else if ((strcmp(action, "set_cal_page") == 0) ||
+               (strcmp(action, "get_cal_page") == 0)) {
+
+        if (!web_xcp_optional_number(root, "mode", UINT8_MAX, 0U, &value) ||
+            !web_xcp_number(root, "segment", UINT8_MAX, &second) ||
+            ((strcmp(action, "set_cal_page") == 0) &&
+             !web_xcp_number(root, "page", UINT8_MAX, &third))) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = strcmp(action, "set_cal_page") == 0
+            ? xcp_command_encode_set_calibration_page(
+                (uint8_t)value,
+                (uint8_t)second,
+                (uint8_t)third,
+                command,
+                sizeof(command),
+                &command_size
+            )
+            : xcp_command_encode_get_calibration_page(
+                (uint8_t)value,
+                (uint8_t)second,
+                command,
+                sizeof(command),
+                &command_size
+            );
+    } else if (strcmp(action, "daq_free") == 0) {
+        result = xcp_command_encode_free_daq(
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "daq_allocate") == 0) {
+        if (!web_xcp_number(root, "count", UINT16_MAX, &value)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_allocate_daq(
+            (uint16_t)value,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "daq_allocate_odt") == 0) {
+        if (!web_xcp_number(root, "daq", UINT16_MAX, &value) ||
+            !web_xcp_number(root, "count", UINT8_MAX, &second)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_allocate_odt(
+            (uint16_t)value,
+            (uint8_t)second,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "daq_allocate_entry") == 0) {
+        if (!web_xcp_number(root, "daq", UINT16_MAX, &value) ||
+            !web_xcp_number(root, "odt", UINT8_MAX, &second) ||
+            !web_xcp_number(root, "count", UINT8_MAX, &third)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_allocate_odt_entry(
+            (uint16_t)value,
+            (uint8_t)second,
+            (uint8_t)third,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "daq_set_pointer") == 0) {
+        if (!web_xcp_number(root, "daq", UINT16_MAX, &value) ||
+            !web_xcp_number(root, "odt", UINT8_MAX, &second) ||
+            !web_xcp_number(root, "entry", UINT8_MAX, &third)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_set_daq_pointer(
+            (uint16_t)value,
+            (uint8_t)second,
+            (uint8_t)third,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "daq_write") == 0) {
+        uint32_t extension = 0U;
+
+        if (!web_xcp_optional_number(root, "bit_offset", UINT8_MAX, 0U, &value) ||
+            !web_xcp_number(root, "size", UINT8_MAX, &second) ||
+            !web_xcp_optional_number(root, "address_extension", UINT8_MAX, 0U, &extension) ||
+            !web_xcp_number(root, "address", UINT32_MAX, &third)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_write_daq(
+            (uint8_t)value,
+            (uint8_t)second,
+            (uint8_t)extension,
+            third,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "daq_set_mode") == 0) {
+        uint32_t prescaler = 1U;
+        uint32_t priority = 0U;
+
+        if (!web_xcp_number(root, "mode", UINT8_MAX, &value) ||
+            !web_xcp_number(root, "daq", UINT16_MAX, &second) ||
+            !web_xcp_number(root, "event", UINT16_MAX, &third) ||
+            !web_xcp_optional_number(root, "prescaler", UINT8_MAX, 1U, &prescaler) ||
+            !web_xcp_optional_number(root, "priority", UINT8_MAX, 0U, &priority)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_set_daq_list_mode(
+            (uint8_t)value,
+            (uint16_t)second,
+            (uint16_t)third,
+            (uint8_t)prescaler,
+            (uint8_t)priority,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "daq_start_stop") == 0) {
+        if (!web_xcp_number(root, "mode", 2U, &value) ||
+            !web_xcp_number(root, "daq", UINT16_MAX, &second)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_start_stop_daq_list(
+            (uint8_t)value,
+            (uint16_t)second,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "daq_synchronize") == 0) {
+        if (!web_xcp_number(root, "mode", 3U, &value)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_start_stop_synchronization(
+            (uint8_t)value,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "stim") == 0) {
+        const cJSON *data =
+            cJSON_GetObjectItemCaseSensitive(root, "data");
+
+        if (!cJSON_IsString(data)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = web_xcp_parse_hex(
+            data->valuestring,
+            command,
+            sizeof(command),
+            &command_size
+        );
+
+        if (result == ESP_OK) {
+            uint32_t transaction_id = 0U;
+            result = xcp_service_transmit_dto(
+                s_session_id,
+                command,
+                command_size,
+                &transaction_id
+            );
+            s_response_size = 0U;
+            atomic_fetch_add(&s_stim_packets, 1U);
+        }
+
+        s_last_result = result;
+        strncpy(s_operation, action, sizeof(s_operation) - 1U);
+        s_operation[sizeof(s_operation) - 1U] = '\0';
+        s_sequence++;
+        return result;
+    } else if (strcmp(action, "program_start") == 0) {
+        result = xcp_command_encode_program_start(
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "program_clear") == 0) {
+        if (!web_xcp_optional_number(root, "mode", UINT8_MAX, 0U, &value) ||
+            !web_xcp_number(root, "range", UINT32_MAX, &second)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_program_clear(
+            (uint8_t)value,
+            second,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "program") == 0) {
+        const cJSON *data =
+            cJSON_GetObjectItemCaseSensitive(root, "data");
+
+        if (!web_xcp_number(root, "count", UINT8_MAX, &value) ||
+            !web_xcp_optional_number(
+                root,
+                "command",
+                UINT8_MAX,
+                XCP_COMMAND_PROGRAM,
+                &fourth
+            ) ||
+            !cJSON_IsString(data)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        uint8_t bytes[XCP_CAN_FD_CTO_MAX_SIZE - 2U] = {0};
+        size_t size = 0U;
+        result = web_xcp_parse_hex(
+            data->valuestring,
+            bytes,
+            sizeof(bytes),
+            &size
+        );
+
+        if (result == ESP_OK) {
+            result = xcp_command_encode_program_packet(
+                (uint8_t)fourth,
+                (uint8_t)value,
+                bytes,
+                size,
+                command,
+                sizeof(command),
+                &command_size
+            );
+        }
+    } else if (strcmp(action, "program_reset") == 0) {
+        result = xcp_command_encode_program_reset(
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "program_prepare") == 0) {
+        if (!web_xcp_number(root, "code_size", UINT16_MAX, &value)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_program_prepare(
+            (uint16_t)value,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "program_format") == 0) {
+        if (!web_xcp_optional_number(root, "compression", UINT8_MAX, 0U, &value) ||
+            !web_xcp_optional_number(root, "encryption", UINT8_MAX, 0U, &second) ||
+            !web_xcp_optional_number(root, "programming", UINT8_MAX, 0U, &third) ||
+            !web_xcp_optional_number(root, "access", UINT8_MAX, 0U, &fourth)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_program_format(
+            (uint8_t)value,
+            (uint8_t)second,
+            (uint8_t)third,
+            (uint8_t)fourth,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else if (strcmp(action, "program_verify") == 0) {
+        if (!web_xcp_optional_number(root, "mode", UINT8_MAX, 0U, &value) ||
+            !web_xcp_optional_number(root, "type", UINT8_MAX, 0U, &second) ||
+            !web_xcp_number(root, "value", UINT32_MAX, &third)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        result = xcp_command_encode_program_verify(
+            (uint8_t)value,
+            (uint8_t)second,
+            third,
+            info.slave.byte_order_big_endian,
+            command,
+            sizeof(command),
+            &command_size
+        );
+    } else {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return web_xcp_execute_command(action, command, command_size);
+}
 
 static esp_err_t web_xcp_write_memory(
     const cJSON *root
@@ -428,6 +1066,7 @@ static esp_err_t web_xcp_configure(
     uint32_t bus = 0U;
     uint32_t command_identifier = 0U;
     uint32_t response_identifier = 0U;
+    uint32_t stim_identifier = 0U;
     uint32_t transmit_data_length = 8U;
     uint32_t padding_byte = 0U;
     uint32_t timeout_ms = WEB_XCP_DEFAULT_TIMEOUT_MS;
@@ -447,6 +1086,13 @@ static esp_err_t web_xcp_configure(
             "response_identifier",
             CAN_FRAME_EXTENDED_ID_MAX,
             &response_identifier
+        ) ||
+        !web_xcp_optional_number(
+            root,
+            "stim_identifier",
+            CAN_FRAME_EXTENDED_ID_MAX,
+            0U,
+            &stim_identifier
         ) ||
         !web_xcp_optional_number(
             root,
@@ -493,13 +1139,14 @@ static esp_err_t web_xcp_configure(
         .bus = (can_bus_id_t)bus,
         .command_identifier = command_identifier,
         .response_identifier = response_identifier,
+        .stim_identifier = stim_identifier,
         .extended_identifier = extended,
         .can_fd = can_fd,
         .bit_rate_switch = brs,
         .transmit_data_length = (uint8_t)transmit_data_length,
         .padding_byte = (uint8_t)padding_byte,
         .response_timeout_ms = timeout_ms,
-        .callback = NULL,
+        .callback = web_xcp_event_callback,
         .callback_context = NULL,
     };
 
@@ -511,6 +1158,9 @@ static esp_err_t web_xcp_configure(
 
     if (result == ESP_OK) {
         s_response_size = 0U;
+        s_daq_packet_size = 0U;
+        atomic_store(&s_daq_packets, 0U);
+        atomic_store(&s_stim_packets, 0U);
         s_last_result = ESP_OK;
         s_sequence++;
     }
@@ -874,11 +1524,14 @@ static esp_err_t web_xcp_get_handler(
         : ESP_OK;
     char *response_text =
         web_xcp_format_hex(s_response, s_response_size);
+    char *daq_text =
+        web_xcp_format_hex(s_daq_packet, s_daq_packet_size);
     cJSON *response = cJSON_CreateObject();
 
     const bool valid =
         (info_result == ESP_OK) &&
         (response_text != NULL) &&
+        (daq_text != NULL) &&
         (response != NULL) &&
         (cJSON_AddBoolToObject(response, "open", open) != NULL) &&
         (cJSON_AddBoolToObject(
@@ -978,9 +1631,25 @@ static esp_err_t web_xcp_get_handler(
             response,
             "identification_text",
             s_identification_text
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "daq_packets",
+            (double)atomic_load(&s_daq_packets)
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "stim_packets",
+            (double)atomic_load(&s_stim_packets)
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            response,
+            "latest_daq",
+            daq_text
         ) != NULL);
 
     free(response_text);
+    free(daq_text);
     xSemaphoreGive(s_lock);
 
     if (!valid) {
@@ -1067,6 +1736,33 @@ static esp_err_t web_xcp_post_handler(
         result = web_xcp_discovery(root, action->valuestring);
     } else if (strcmp(action->valuestring, "write_memory") == 0) {
         result = web_xcp_write_memory(root);
+    } else if (strcmp(action->valuestring, "download_block") == 0) {
+        result = web_xcp_block_transfer(root, false);
+    } else if (strcmp(action->valuestring, "program_block") == 0) {
+        result = web_xcp_block_transfer(root, true);
+    } else if ((strcmp(action->valuestring, "get_seed") == 0) ||
+               (strcmp(action->valuestring, "unlock") == 0) ||
+               (strcmp(action->valuestring, "set_cal_page") == 0) ||
+               (strcmp(action->valuestring, "get_cal_page") == 0) ||
+               (strcmp(action->valuestring, "daq_free") == 0) ||
+               (strcmp(action->valuestring, "daq_allocate") == 0) ||
+               (strcmp(action->valuestring, "daq_allocate_odt") == 0) ||
+               (strcmp(action->valuestring, "daq_allocate_entry") == 0) ||
+               (strcmp(action->valuestring, "daq_set_pointer") == 0) ||
+               (strcmp(action->valuestring, "daq_write") == 0) ||
+               (strcmp(action->valuestring, "daq_set_mode") == 0) ||
+               (strcmp(action->valuestring, "daq_start_stop") == 0) ||
+               (strcmp(action->valuestring, "daq_synchronize") == 0) ||
+               (strcmp(action->valuestring, "stim") == 0) ||
+               (strcmp(action->valuestring, "program_start") == 0) ||
+               (strcmp(action->valuestring, "program_clear") == 0) ||
+               (strcmp(action->valuestring, "program") == 0) ||
+               (strcmp(action->valuestring, "program_reset") == 0) ||
+               (strcmp(action->valuestring, "program_prepare") == 0) ||
+               (strcmp(action->valuestring, "program_format") == 0) ||
+               (strcmp(action->valuestring, "program_verify") == 0)) {
+
+        result = web_xcp_advanced(root, action->valuestring);
     } else if (strcmp(action->valuestring, "disconnect") == 0) {
         result = (s_session_id != XCP_SERVICE_SESSION_ID_NONE)
             ? xcp_service_disconnect(s_session_id)

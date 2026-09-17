@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.ico">
     <title>XCP Diagnostics · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=40">
-    <script src="spectra.js?v=40" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=41">
+    <script src="spectra.js?v=41" defer></script>
 </head>
 
 <body class="page-xcp page-isotp">
@@ -71,6 +71,11 @@
                     <label>
                         Response ID · DTO
                         <input id="xcp-response-id" value="668" spellcheck="false">
+                    </label>
+
+                    <label>
+                        STIM DTO ID
+                        <input id="xcp-stim-id" value="667" spellcheck="false">
                     </label>
 
                     <label>
@@ -216,6 +221,9 @@
                     <button id="xcp-write-memory" class="button-danger" disabled>
                         Write memory
                     </button>
+                    <button id="xcp-write-block" class="button-danger" disabled>
+                        Block write
+                    </button>
                 </div>
             </section>
 
@@ -230,6 +238,96 @@
                 <div class="isotp-actions">
                     <button id="xcp-copy">Copy HEX</button>
                     <button id="xcp-clear">Clear view</button>
+                </div>
+            </section>
+
+            <section class="card isotp-transfer isotp-card">
+                <h2>Resource access and calibration page</h2>
+                <div class="isotp-form-grid">
+                    <label>
+                        Protected resource
+                        <select id="xcp-resource">
+                            <option value="1">CAL/PAG</option>
+                            <option value="4">DAQ</option>
+                            <option value="8">STIM</option>
+                            <option value="16">PGM</option>
+                        </select>
+                    </label>
+                    <label>
+                        Calibration segment
+                        <input id="xcp-cal-segment" type="number" min="0" max="255" value="0">
+                    </label>
+                    <label>
+                        Calibration page
+                        <input id="xcp-cal-page" type="number" min="0" max="255" value="0">
+                    </label>
+                    <label>
+                        Page mode
+                        <input id="xcp-cal-mode" value="00" spellcheck="false">
+                    </label>
+                </div>
+                <label for="xcp-unlock-key">Seed/key result · key bytes</label>
+                <textarea id="xcp-unlock-key" rows="3" spellcheck="false"></textarea>
+                <div class="isotp-actions">
+                    <button id="xcp-get-seed" disabled>Get seed</button>
+                    <button id="xcp-unlock" disabled>Unlock</button>
+                    <button id="xcp-get-cal-page" disabled>Get page</button>
+                    <button id="xcp-set-cal-page" class="button-danger" disabled>Set page</button>
+                </div>
+            </section>
+
+            <section class="card isotp-transfer isotp-card">
+                <h2>DAQ / STIM</h2>
+                <div class="isotp-form-grid">
+                    <label>DAQ list<input id="xcp-daq-list" type="number" min="0" max="65535" value="0"></label>
+                    <label>ODT<input id="xcp-daq-odt" type="number" min="0" max="255" value="0"></label>
+                    <label>Entry<input id="xcp-daq-entry" type="number" min="0" max="255" value="0"></label>
+                    <label>Event channel<input id="xcp-daq-event" type="number" min="0" max="65535" value="0"></label>
+                    <label>Element size<input id="xcp-daq-size" type="number" min="1" max="255" value="1"></label>
+                    <label>DAQ address<input id="xcp-daq-address" value="00000000" spellcheck="false"></label>
+                </div>
+                <label for="xcp-stim-data">STIM DTO bytes · PID first</label>
+                <textarea id="xcp-stim-data" rows="3" spellcheck="false" placeholder="00 00"></textarea>
+                <div class="metric">DAQ packets <b id="xcp-daq-packets">0</b></div>
+                <div class="metric">STIM packets <b id="xcp-stim-packets">0</b></div>
+                <pre id="xcp-latest-daq">No DAQ DTO received.</pre>
+                <div class="isotp-actions">
+                    <button id="xcp-daq-allocate" disabled>Allocate list</button>
+                    <button id="xcp-daq-pointer" disabled>Set pointer</button>
+                    <button id="xcp-daq-write" disabled>Write entry</button>
+                    <button id="xcp-daq-start" disabled>Start DAQ</button>
+                    <button id="xcp-daq-stop" disabled>Stop DAQ</button>
+                    <button id="xcp-stim-send" disabled>Send STIM</button>
+                </div>
+            </section>
+
+            <section class="card isotp-transfer isotp-card">
+                <h2>Programming commands</h2>
+                <p class="note">
+                    Programming commands are intentionally explicit. Unlock
+                    PGM, set the MTA and verify the ECU-specific erase range
+                    before transmitting data.
+                </p>
+                <div class="isotp-form-grid">
+                    <label>Clear mode<input id="xcp-program-clear-mode" value="00" spellcheck="false"></label>
+                    <label>Clear range<input id="xcp-program-clear-range" value="00000000" spellcheck="false"></label>
+                    <label>Element count<input id="xcp-program-count" type="number" min="1" max="255" value="1"></label>
+                    <label>Prepare code size<input id="xcp-program-code-size" type="number" min="1" max="65535" value="1"></label>
+                    <label>Verify mode<input id="xcp-program-verify-mode" value="00" spellcheck="false"></label>
+                    <label>Verify type<input id="xcp-program-verify-type" value="00" spellcheck="false"></label>
+                    <label>Verify value<input id="xcp-program-verify-value" value="00000000" spellcheck="false"></label>
+                </div>
+                <label for="xcp-program-data">PROGRAM data bytes</label>
+                <textarea id="xcp-program-data" rows="4" spellcheck="false"></textarea>
+                <label><input id="xcp-program-confirm" type="checkbox">I verified the target, MTA, range and payload</label>
+                <div class="isotp-actions">
+                    <button id="xcp-program-start" class="button-danger" disabled>Program start</button>
+                    <button id="xcp-program-prepare" class="button-danger" disabled>Prepare</button>
+                    <button id="xcp-program-clear" class="button-danger" disabled>Clear range</button>
+                    <button id="xcp-program-send" class="button-danger" disabled>Program packet</button>
+                    <button id="xcp-program-block" class="button-danger" disabled>Program block</button>
+                    <button id="xcp-program-verify" class="button-danger" disabled>Verify</button>
+                    <button id="xcp-program-reset" class="button-danger" disabled>Program reset</button>
                 </div>
             </section>
 

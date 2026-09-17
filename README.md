@@ -140,6 +140,10 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - CONNECT, DISCONNECT, GET_STATUS, GET_COMM_MODE_INFO, GET_ID, SET_MTA,
   UPLOAD, SHORT_UPLOAD, DOWNLOAD, DOWNLOAD_NEXT, and raw CTO execution
 - Controlled XCP memory reads and bounded writes with explicit address policy
+- XCP slave block-mode DOWNLOAD/PROGRAM transfers with MAX_CTO/MAX_BS checks
+- XCP seed/key resource access and calibration-page control
+- Dynamic DAQ configuration, raw DTO monitoring, and STIM transmission
+- Explicit XCP programming start, clear, transfer, verify, and reset commands
 - Dedicated browser XCP console
 
 ### Storage and configuration
@@ -556,7 +560,8 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] UDS client, browser diagnostics, DID catalogs, and ECU profiles
 - [x] Automatic UDS ECU programming with routine polling and journals
 - [x] Streaming BIN, Intel HEX, Motorola S-record, and BHX readers and validators
-- [x] Stateful XCP master, browser console, discovery, upload, and bounded writes
+- [x] Stateful XCP master, block transfer, DAQ/STIM, CAL/PAG, seed/key access,
+  and programming controls
 - [x] Embedded Web UI and REST API
 - [x] Device diagnostics with health analysis, task/queue telemetry, reports,
   history reset, and SD benchmark control
@@ -576,8 +581,8 @@ To exit the serial monitor, press `Ctrl+]`.
   response decoders
 - [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
 - [ ] Persistent resume after interrupted ECU programming
-- [ ] XCP multi-packet block transfer, DAQ/STIM, calibration-page control,
-  seed/key access, and programming
+- [ ] A2L-aware XCP DAQ decoding, ECU profiles, and persistent programming
+  resume
 - [ ] CAN traffic replay
 - [ ] Device registration and authentication
 - [ ] Remote backend integration

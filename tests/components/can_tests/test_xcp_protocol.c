@@ -164,3 +164,128 @@ TEST_CASE("XCP decodes CONNECT capabilities", "[xcp]")
     TEST_ASSERT_EQUAL(1024U, response.maximum_dto);
     TEST_ASSERT_TRUE(response.byte_order_big_endian);
 }
+
+TEST_CASE("XCP encodes seed key and calibration page commands", "[xcp]")
+{
+    uint8_t data[16] = {0};
+    size_t size = 0U;
+    const uint8_t key[] = {0x12U, 0x34U, 0x56U};
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        xcp_command_encode_get_seed(
+            0U,
+            XCP_RESOURCE_CAL_PAG,
+            data,
+            sizeof(data),
+            &size
+        )
+    );
+    const uint8_t seed[] = {0xF8U, 0x00U, 0x01U};
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(seed, data, sizeof(seed));
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        xcp_command_encode_unlock(
+            key,
+            sizeof(key),
+            data,
+            sizeof(data),
+            &size
+        )
+    );
+    const uint8_t unlock[] = {
+        0xF7U, 0x03U, 0x12U, 0x34U, 0x56U
+    };
+    TEST_ASSERT_EQUAL(sizeof(unlock), size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(unlock, data, sizeof(unlock));
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        xcp_command_encode_set_calibration_page(
+            0x83U,
+            2U,
+            1U,
+            data,
+            sizeof(data),
+            &size
+        )
+    );
+    const uint8_t page[] = {0xEBU, 0x83U, 0x00U, 0x02U, 0x01U};
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(page, data, sizeof(page));
+}
+
+TEST_CASE("XCP encodes dynamic DAQ configuration", "[xcp]")
+{
+    uint8_t data[16] = {0};
+    size_t size = 0U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        xcp_command_encode_set_daq_pointer(
+            0x1234U,
+            2U,
+            3U,
+            false,
+            data,
+            sizeof(data),
+            &size
+        )
+    );
+    const uint8_t pointer[] = {
+        0xE2U, 0x00U, 0x34U, 0x12U, 0x02U, 0x03U
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(pointer, data, sizeof(pointer));
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        xcp_command_encode_write_daq(
+            0U,
+            4U,
+            1U,
+            0x12345678U,
+            false,
+            data,
+            sizeof(data),
+            &size
+        )
+    );
+    const uint8_t entry[] = {
+        0xE1U, 0x00U, 0x04U, 0x01U,
+        0x78U, 0x56U, 0x34U, 0x12U
+    };
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(entry, data, sizeof(entry));
+}
+
+TEST_CASE("XCP encodes programming commands", "[xcp]")
+{
+    uint8_t data[16] = {0};
+    size_t size = 0U;
+    const uint8_t source[] = {0xAAU, 0x55U};
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        xcp_command_encode_program_start(
+            data,
+            sizeof(data),
+            &size
+        )
+    );
+    TEST_ASSERT_EQUAL(1U, size);
+    TEST_ASSERT_EQUAL_HEX8(XCP_COMMAND_PROGRAM_START, data[0]);
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        xcp_command_encode_program_packet(
+            XCP_COMMAND_PROGRAM,
+            2U,
+            source,
+            sizeof(source),
+            data,
+            sizeof(data),
+            &size
+        )
+    );
+    const uint8_t program[] = {0xD0U, 0x02U, 0xAAU, 0x55U};
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(program, data, sizeof(program));
+}
