@@ -7455,7 +7455,8 @@
         const eventNames = ["RX", "TX queued", "TX done", "TX failed", "TX aborted"];
         const channels = [0, 1].map(() => ({
             identifiers: new Map(), history: [], historyOffset: 0, rx: 0, tx: 0,
-            previousRx: 0, previousTx: 0, dirty: true
+            previousRx: 0, previousTx: 0, dirty: true,
+            pendingTransactions: new Map()
         }));
         let socket = null;
         let paused = false;
@@ -7552,10 +7553,36 @@
         function acceptEvent(event) {
             const channel = channels[event.bus];
             received++;
-            channel.history.push(event);
 
-            if ((channel.history.length - channel.historyOffset) > historyLimit)
+            const transactionKey = event.transaction !== 0
+                ? `${event.bus}:${event.transaction}`
+                : null;
+            if ((event.type >= 2) && transactionKey &&
+                channel.pendingTransactions.has(transactionKey)) {
+
+                Object.assign(
+                    channel.pendingTransactions.get(transactionKey),
+                    event
+                );
+                channel.pendingTransactions.delete(transactionKey);
+            } else {
+                channel.history.push(event);
+
+                if ((event.type === 1) && transactionKey)
+                    channel.pendingTransactions.set(transactionKey, event);
+            }
+
+            if ((channel.history.length - channel.historyOffset) > historyLimit) {
+                const removed = channel.history[channel.historyOffset];
+
+                if (removed.type === 1 && removed.transaction !== 0) {
+                    channel.pendingTransactions.delete(
+                        `${removed.bus}:${removed.transaction}`
+                    );
+                }
+
                 channel.historyOffset++;
+            }
 
             if (channel.historyOffset >= 1024) {
                 channel.history.splice(0, channel.historyOffset);
@@ -7582,6 +7609,25 @@
                 });
             }
             channel.dirty = true;
+        }
+
+        function eventCell(event) {
+            if (event.type === 0)
+                return "RX";
+
+            const states = [
+                null,
+                ["queued", "◷", "Queued for transmission"],
+                ["complete", "✓", "Transmission completed"],
+                ["failed", "×", "Transmission failed"],
+                ["aborted", "×", "Transmission aborted"]
+            ];
+            const state = states[event.type];
+
+            return '<span class="tx-event">TX<span class="tx-lifecycle ' +
+                state[0] + '" title="' + state[2] +
+                '" aria-label="' + state[2] + '">' + state[1] +
+                '</span></span>';
         }
 
         function payload(event, row) {
@@ -7628,7 +7674,7 @@
                 element("history" + bus).innerHTML = history.slice(-500).reverse().map(event =>
                     "<tr><td>" + event.sequence + "</td><td>" + timeText(event) +
                     (event.source === 1 ? " SW" : event.source === 2 ? " HW" : "") +
-                    "</td><td>" + eventNames[event.type] + "</td><td>" + identifier(event) +
+                    "</td><td>" + eventCell(event) + "</td><td>" + identifier(event) +
                     "</td><td class=\"data-cell\">" + payload(event) + "</td><td class=\"text-cell\">" +
                     payloadText(event) + "</td></tr>"
                 ).join("") || '<tr><td class="empty" colspan="6">Connect to start receiving CAN events</td></tr>';
@@ -7765,6 +7811,7 @@
             channels.forEach(channel => {
                 channel.identifiers.clear(); channel.history.length = 0;
                 channel.historyOffset = 0;
+                channel.pendingTransactions.clear();
                 channel.rx = channel.tx = channel.previousRx = channel.previousTx = 0;
                 channel.dirty = true;
             });
@@ -7992,10 +8039,11 @@
             limit = 100000;
 
         $("analyzer-buffer-limit").value = String(limit);
-        const names = ["RX", "TX queued", "TX done", "TX failed", "TX aborted"];
+        const names = ["RX", "TX queued", "TX completed", "TX failed", "TX aborted"];
         let records = [], selected = new Set(), groups = [], filtered = [];
         let socket = null, paused = false, pending = false, ackTimer = null;
         let page = 0, dirty = true, busy = false, source = "No source";
+        let pendingTransactions = new Map();
         const hex = (n, width = 2) => n.toString(16).toUpperCase().padStart(width, "0");
         const key = e => e.bus + ":" + e.id + ":" + (e.flags & 7);
         const idText = e => hex(e.id, e.flags & 1 ? 8 : 3);
@@ -8017,6 +8065,47 @@
                 throw new Error("Invalid CAN event fields");
             return e;
         }
+        function transactionKey(e) {
+            return e.transaction
+                ? `${e.bus}:${e.transaction}`
+                : null;
+        }
+        function retainEvent(target, transactions, event) {
+            const transaction = transactionKey(event);
+
+            if ((event.type >= 2) && transaction &&
+                transactions.has(transaction)) {
+
+                Object.assign(transactions.get(transaction), event);
+                transactions.delete(transaction);
+                return false;
+            }
+
+            target.push(event);
+
+            if ((event.type === 1) && transaction)
+                transactions.set(transaction, event);
+
+            return true;
+        }
+        function eventCell(event) {
+            if (event.type === 0)
+                return "RX";
+
+            const states = [
+                null,
+                ["queued", "◷", "Queued for transmission"],
+                ["complete", "✓", "Transmission completed"],
+                ["failed", "×", "Transmission failed"],
+                ["aborted", "×", "Transmission aborted"]
+            ];
+            const state = states[event.type];
+
+            return '<span class="tx-event">TX<span class="tx-lifecycle ' +
+                state[0] + '" title="' + state[2] +
+                '" aria-label="' + state[2] + '">' + state[1] +
+                '</span></span>';
+        }
         function parseLive(buffer) {
             const v = new DataView(buffer), result = [];
             if (v.byteLength < 8 || v.getUint8(0) !== 1 || v.getUint8(1) !== 1 ||
@@ -8033,6 +8122,8 @@
                     type: v.getUint8(o), bus: v.getUint8(o + 1), flags: v.getUint8(o + 3),
                     source: v.getUint8(o + 6), id: v.getUint32(o + 20, true),
                     sequence: v.getUint32(o + 8, true), timestamp: v.getBigUint64(o + 28, true),
+                    transaction: v.getUint32(o + 12, true),
+                    result: v.getUint32(o + 24, true),
                     capture: null, data: Array.from(new Uint8Array(buffer, o + 40, n))
                 }));
                 o += 40 + n;
@@ -8048,20 +8139,32 @@
                 v.getUint32(8, true) !== 0x12345678 || v.getUint32(12, true) !== 0)
                 throw new Error("Unsupported SCL header");
             let o = 32;
-            while (o < v.byteLength && result.length < limit) {
+            const transactions = new Map();
+            while (o < v.byteLength) {
                 if (o + 56 > v.byteLength)
                     throw new Error("Truncated SCL record at byte " + o);
                 const size = v.getUint16(o, true), n = v.getUint8(o + 8);
                 if (v.getUint8(o + 2) !== 1 || n > 64 || size !== 56 + n ||
                     o + size > v.byteLength)
                     throw new Error("Invalid SCL record at byte " + o);
-                result.push(validate({
+                const decoded = validate({
                     type: v.getUint8(o + 3), bus: v.getUint8(o + 4), source: v.getUint8(o + 6),
                     flags: v.getUint32(o + 12, true), id: v.getUint32(o + 16, true),
                     sequence: v.getUint32(o + 20, true), timestamp: v.getBigUint64(o + 40, true),
+                    transaction: v.getUint32(o + 24, true),
+                    result: v.getUint32(o + 32, true),
                     capture: v.getBigUint64(o + 48, true),
                     data: Array.from(new Uint8Array(buffer, o + 56, n))
-                }));
+                });
+                const transaction = transactionKey(decoded);
+                const completesPending =
+                    decoded.type >= 2 && transaction &&
+                    transactions.has(transaction);
+
+                if ((result.length >= limit) && !completesPending)
+                    break;
+
+                retainEvent(result, transactions, decoded);
                 o += size;
                 if (result.length % 2000 === 0)
                     await new Promise(resolve => setTimeout(resolve, 0));
@@ -8098,7 +8201,8 @@
         }
         $("connect").onclick = () => {
             if (socket) { closeLive(); return; }
-            records = []; selected.clear(); page = 0; dirty = true; source = "Live stream";
+            records = []; pendingTransactions.clear(); selected.clear();
+            page = 0; dirty = true; source = "Live stream";
             $("frame").textContent = "Select an event row to inspect its bytes.";
             $("detail").textContent = "";
             $("message").textContent = "";
@@ -8121,7 +8225,17 @@
                         return;
                     }
                     const incoming = parseLive(event.data);
-                    for (const e of incoming) { if (records.length >= limit) break; records.push(e); }
+                    for (const e of incoming) {
+                        const transaction = transactionKey(e);
+                        const completesPending =
+                            e.type >= 2 && transaction &&
+                            pendingTransactions.has(transaction);
+
+                        if ((records.length >= limit) && !completesPending)
+                            break;
+
+                        retainEvent(records, pendingTransactions, e);
+                    }
                     dirty = true;
                     if (records.length >= limit) {
                         subscribe(true);
@@ -8141,7 +8255,9 @@
             busy = true; controls();
             try {
                 const parsed = await parseScl(await file.arrayBuffer());
-                records = parsed.records; selected.clear(); page = 0; source = file.name; dirty = true;
+                records = parsed.records;
+                pendingTransactions = new Map();
+                selected.clear(); page = 0; source = file.name; dirty = true;
                 $("frame").textContent = "Select an event row to inspect its bytes.";
                 $("detail").textContent = "";
                 $("message").textContent = parsed.truncated
@@ -8229,7 +8345,7 @@
             $("events").innerHTML = filtered.slice(page * PAGE, (page + 1) * PAGE).map(index => {
                 const e = records[index], time = e.capture !== null ? timeText(e.capture) : e.source ? timeText(e.timestamp) : "—";
                 return '<tr data-index="' + index + '" tabindex="0"><td>' + (index + 1) + '</td><td>' + (e.bus ? "S" : "P") +
-                    '</td><td>' + time + '</td><td>' + names[e.type] + '</td><td>' + idText(e) +
+                    '</td><td>' + time + '</td><td>' + eventCell(e) + '</td><td>' + idText(e) +
                     '</td><td class="data-cell">' + dataText(e) + '</td><td class="text-cell">' +
                     payloadText(e) + '</td></tr>';
             }).join("");
@@ -8289,6 +8405,17 @@
 
             if (records.length > limit) {
                 records = records.slice(records.length - limit);
+                pendingTransactions = new Map();
+
+                for (const retained of records) {
+                    if ((retained.type === 1) && retained.transaction) {
+                        pendingTransactions.set(
+                            transactionKey(retained),
+                            retained
+                        );
+                    }
+                }
+
                 selected.clear();
                 page = 0;
                 $("message").textContent =

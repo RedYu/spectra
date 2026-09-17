@@ -3260,6 +3260,35 @@ body:where(.page-logger) {
 :where(body.page-logger) .text-cell {
     color: #b8c4d1;
 }
+:where(body.page-logger, body.page-analyzer) .tx-event {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+}
+:where(body.page-logger, body.page-analyzer) .tx-lifecycle {
+    display: inline-grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+}
+:where(body.page-logger, body.page-analyzer) .tx-lifecycle.queued {
+    color: var(--warning);
+}
+:where(body.page-logger, body.page-analyzer) .tx-lifecycle.complete {
+    color: var(--success);
+}
+:where(body.page-logger, body.page-analyzer) .tx-lifecycle.failed,
+:where(body.page-logger, body.page-analyzer) .tx-lifecycle.aborted {
+    color: var(--danger);
+}
 :where(body.page-logger) tr:hover td {
     background: #19232e;
 }
