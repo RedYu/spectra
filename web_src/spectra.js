@@ -9157,7 +9157,8 @@
         const panels = [
             [ 'settings', document.querySelector('.can-settings-panel') ],
             [ 'transmit', document.querySelector('#can-transmit > details') ],
-            [ 'filters', document.querySelector('.hardware-filters-panel') ]
+            [ 'filters', document.querySelector('.hardware-filters-panel') ],
+            [ 'replay', document.getElementById('can-replay') ]
         ];
         for (const [name, panel] of panels) {
             if (!panel)
@@ -9392,6 +9393,224 @@
         updateByteCount();
         refresh();
         setInterval(refresh, 300);
+    }
+
+    function init_can_replay() {
+        const element = id => document.getElementById(id);
+
+        if (!element('can-replay'))
+            return;
+
+        const stateNames = [
+            'Idle', 'Running', 'Paused', 'Complete', 'Cancelled', 'Error'
+        ];
+        const start = element('replay-start');
+        const pause = element('replay-pause');
+        const stop = element('replay-stop');
+        const message = element('replay-message');
+        const file = element('replay-file');
+        const refreshFiles = element('replay-refresh');
+
+        async function listFiles() {
+            refreshFiles.disabled = true;
+            file.innerHTML = '<option value="">Loading /logs/can…</option>';
+
+            try {
+                const files = [];
+                let offset = 0;
+                let hasMore = false;
+
+                do {
+                    const query = new URLSearchParams({
+                        volume : 'sd',
+                        path : '/logs/can',
+                        offset : String(offset),
+                        limit : '32'
+                    });
+                    const response = await fetch(
+                        `/api/files?${query}`,
+                        {cache : 'no-store'}
+                    );
+                    const result = await response.json();
+
+                    if (!response.ok)
+                        throw new Error(result.message || `HTTP ${response.status}`);
+                    if (!Array.isArray(result.entries))
+                        throw new Error('Invalid recording list response.');
+
+                    files.push(...result.entries.filter(entry =>
+                        entry.type === 'file' && /\.(scl|asc)$/i.test(entry.name)));
+                    offset += result.entries.length;
+                    hasMore = result.has_more === true;
+                } while (hasMore && (offset <= 4096));
+
+                files.sort((left, right) =>
+                    right.name.localeCompare(left.name));
+                file.innerHTML = '<option value="">Choose a recording</option>';
+
+                for (const entry of files) {
+                    const option = document.createElement('option');
+                    option.value = `/logs/can/${entry.name}`;
+                    option.textContent = entry.name;
+                    file.append(option);
+                }
+
+                if (files.length === 0)
+                    message.textContent = 'No SCL or ASC recordings found.';
+            } catch (error) {
+                file.innerHTML = '<option value="">SD recordings unavailable</option>';
+                message.textContent = error.message;
+            } finally {
+                refreshFiles.disabled = false;
+            }
+        }
+
+        function hexValue(id) {
+            const text = element(id).value.trim();
+
+            if (!/^[0-9a-f]+$/i.test(text) ||
+                parseInt(text, 16) > 0x1fffffff) {
+
+                throw new Error('Replay CAN ID range is invalid.');
+            }
+
+            return parseInt(text, 16);
+        }
+
+        async function command(body) {
+            const response = await fetch('/api/can/replay', {
+                method : 'POST',
+                headers : {'Content-Type' : 'application/json'},
+                body : JSON.stringify(body)
+            });
+            const result = await response.json();
+
+            if (!response.ok || !result.success)
+                throw new Error(result.message || `HTTP ${response.status}`);
+        }
+
+        async function refresh() {
+            try {
+                const response = await fetch('/api/can/replay', {cache : 'no-store'});
+                const data = await response.json();
+
+                if (!response.ok)
+                    throw new Error(`HTTP ${response.status}`);
+
+                const running = data.state === 1;
+                const paused = data.state === 2;
+                const active = running || paused;
+                element('replay-state').textContent =
+                    stateNames[data.state] || 'Unknown';
+                element('replay-position').textContent =
+                    `${Number(data.file_position).toLocaleString()} B / ` +
+                    `${Number(data.file_size).toLocaleString()} B`;
+                element('replay-counts').textContent =
+                    `${data.submitted} / ${data.completed}`;
+                element('replay-errors').textContent =
+                    `${data.failed} / ${data.dropped} / ${data.skipped}`;
+                element('replay-lag').textContent =
+                    `${(Number(data.current_lag_us) / 1000).toFixed(1)} / ` +
+                    `${(Number(data.maximum_lag_us) / 1000).toFixed(1)} ms`;
+                element('replay-progress').value = data.file_size
+                    ? data.file_position / data.file_size
+                    : 0;
+                start.disabled = active;
+                pause.disabled = !active;
+                pause.textContent = paused ? 'Resume' : 'Pause';
+                stop.disabled = !active;
+
+                if (data.state === 5)
+                    message.textContent = `Replay failed: ${data.result}`;
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        }
+
+        start.addEventListener('click', async () => {
+            try {
+                const speedValue = element('replay-speed').value;
+                const maximumSpeed = speedValue === 'maximum';
+                const speed = maximumSpeed
+                    ? [1, 1]
+                    : speedValue.split('/').map(Number);
+                const bus = element('replay-bus').value;
+                const path = element('replay-path').value.trim();
+
+                if (!/\.(scl|asc)$/i.test(path))
+                    throw new Error('Select an SCL or ASC recording.');
+
+                if (!window.confirm(
+                        `Replay ${path} onto the active CAN bus? ` +
+                        'Recorded frames may operate vehicle systems.'
+                    )) {
+
+                    return;
+                }
+
+                await command({
+                    action : 'start',
+                    path,
+                    primary : element('replay-primary').checked,
+                    secondary : element('replay-secondary').checked,
+                    rx : element('replay-rx').checked,
+                    tx : element('replay-tx').checked,
+                    preserve_bus : bus === 'preserve',
+                    target_bus : bus === 'preserve' ? 0 : Number(bus),
+                    identifier_filter : element('replay-id-filter').checked,
+                    identifier_min : hexValue('replay-id-min'),
+                    identifier_max : hexValue('replay-id-max'),
+                    time_range : element('replay-time-filter').checked,
+                    time_start_ms : Number(element('replay-time-start').value),
+                    time_end_ms : Number(element('replay-time-end').value),
+                    maximum_speed : maximumSpeed,
+                    speed_numerator : speed[0],
+                    speed_denominator : speed[1],
+                    repeat_count : Number(element('replay-repeat').value),
+                    start_delay_ms : Number(element('replay-delay').value),
+                    maximum_lag_ms : Number(element('replay-lag-limit').value),
+                    late_policy : Number(element('replay-late').value),
+                    skip_remote : element('replay-skip-remote').checked,
+                    stop_on_error : element('replay-stop-error').checked
+                });
+                message.textContent = 'Replay started.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        pause.addEventListener('click', async () => {
+            try {
+                await command({
+                    action : pause.textContent === 'Resume'
+                        ? 'resume'
+                        : 'pause'
+                });
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        stop.addEventListener('click', async () => {
+            try {
+                await command({action : 'stop'});
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        file.addEventListener('change', () => {
+            if (file.value)
+                element('replay-path').value = file.value;
+        });
+        refreshFiles.addEventListener('click', listFiles);
+
+        refresh();
+        listFiles();
+        setInterval(refresh, 500);
     }
 
     function init_uds() {
@@ -14213,6 +14432,9 @@
                 init_transmit();
                 init_hardware_filters();
                 init_panel_layout();
+
+                if (page === 'page-logger')
+                    init_can_replay();
             }
 
             break;

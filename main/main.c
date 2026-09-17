@@ -42,6 +42,7 @@
 #include "can_fd_service.h"
 #include "can_router.h"
 #include "can_transmit_service.h"
+#include "can_replay_service.h"
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
 #include "io_expander_service.h"
@@ -697,6 +698,17 @@ static void startup_task(
             TAG,
             "CAN transmit service unavailable: %s",
             esp_err_to_name(transmit_result)
+        );
+    }
+
+    const esp_err_t replay_result =
+        can_replay_service_init();
+
+    if (replay_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "CAN replay service unavailable: %s",
+            esp_err_to_name(replay_result)
         );
     }
 

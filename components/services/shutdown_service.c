@@ -31,6 +31,7 @@
 #include "can_fd_service.h"
 #include "can_router.h"
 #include "can_transmit_service.h"
+#include "can_replay_service.h"
 #include "can_monitor_service.h"
 #include "can_logger_service.h"
 #include "isotp_service.h"
@@ -157,6 +158,21 @@ static void shutdown_service_task(
             "Failed to stop web service: %s",
             esp_err_to_name(web_result)
         );
+    }
+
+    const esp_err_t replay_result =
+        can_replay_service_stop();
+
+    if ((replay_result != ESP_OK) &&
+        (replay_result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGE(
+            TAG,
+            "CAN replay shutdown failed: %s",
+            esp_err_to_name(replay_result)
+        );
+
+        return;
     }
 
     const esp_err_t transmit_result =

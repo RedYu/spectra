@@ -105,6 +105,10 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Periodic buffered flush and full filesystem synchronization on stop
 - Queue, write failure, and dropped-event statistics
 - Sequential filesystem and raw SD-card read benchmarks
+- Timed SCL and Spectra ASC traffic replay with pause, repetition, speed
+  scaling, bus remapping, ID filtering, and selectable late-frame policy
+- Replay transmission-confirmation, timing-lag, skip, drop, and failure
+  statistics in the CAN Logger Web page
 
 ### Diagnostic protocols
 
@@ -527,6 +531,7 @@ Detailed request and response documentation is available in
 | `GET` | `/api/files/download` | Download a file |
 | `GET`, `POST` | `/api/can/transmit` | Read, start, and stop CAN transmission jobs |
 | `GET`, `POST` | `/api/can/filters` | Read and apply hardware CAN receive filters |
+| `GET`, `POST` | `/api/can/replay` | Control timed SCL/ASC traffic replay and read progress/statistics |
 | `GET`, `POST` | `/api/isotp` | Configure an ISO-TP channel and exchange payloads |
 | `GET`, `POST` | `/api/uds` | Configure UDS, execute requests, program firmware, and resume or discard interrupted programming |
 | `GET`, `POST` | `/api/xcp` | Configure XCP sessions, memory/block transfers, DAQ/STIM, CAL/PAG, seed/key, and programming |
@@ -635,6 +640,8 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] High-throughput ASC and SCL CAN logger
 - [x] Browser CAN Logger and CAN Analyzer
 - [x] Configurable browser buffers and CSV, SCL, and ASC export
+- [x] SCL/ASC CAN traffic replay with time ranges, maximum-speed mode,
+  filtering, remapping, and timing policies
 - [x] DBC Explorer with live signal decoding, graphs, and bit inspection
 - [x] Persistent customizable device and DBC-signal dashboards
 - [x] Resumable SD-card downloads using HTTP Range
@@ -667,7 +674,6 @@ To exit the serial monitor, press `Ctrl+]`.
 - [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
 - [ ] A2L-aware XCP DAQ decoding, ECU profiles, and persistent programming
   resume
-- [ ] CAN traffic replay
 - [ ] Device registration and authentication
 - [ ] Remote backend integration
 
