@@ -374,6 +374,35 @@ Every decoded segment is programmed independently with `RequestDownload`,
 SecurityAccess, erase and verification routines, ECU reset, cancellation, and
 journal creation remain coordinated for the complete image.
 
+### Interrupted ECU programming resume
+
+Automatic UDS programming stores a small atomic checkpoint at:
+
+```text
+/sdcard/logs/firmware/uds-resume.json
+```
+
+The checkpoint is updated only after the ECU positively acknowledges
+`RequestTransferExit` for a complete image segment. It records the firmware
+path and size, parsed segment count, number of confirmed segments, and the
+acknowledged-block counter. SecurityAccess keys and seed/key algorithm data are
+never written to it.
+
+After an unexpected reset, power interruption, transport failure, or other
+programming error, the UDS Programming page presents two explicit actions:
+
+- **Resume interrupted programming** validates the original file and parsed
+  image layout, re-enters the programming session, repeats SecurityAccess when
+  configured, skips erase, and continues at the first incomplete segment;
+- **Discard saved progress** removes the checkpoint and allows a new full
+  programming attempt.
+
+An interrupted segment is transferred again from its beginning. Consequently,
+a raw BIN image, which is represented by one segment, restarts its transfer
+from offset zero. This conservative behavior avoids assuming that an arbitrary
+ECU supports partial-range `RequestDownload`. Successful programming and an
+explicit cancellation remove the checkpoint; failures retain it for recovery.
+
 ## Network and Web Interface
 
 Spectra exposes USB RNDIS and Wi-Fi interfaces. Through USB RNDIS or the device SoftAP, the local DNS server resolves:
@@ -459,7 +488,7 @@ Detailed request and response documentation is available in
 | `GET`, `POST` | `/api/can/transmit` | Read, start, and stop CAN transmission jobs |
 | `GET`, `POST` | `/api/can/filters` | Read and apply hardware CAN receive filters |
 | `GET`, `POST` | `/api/isotp` | Configure an ISO-TP channel and exchange payloads |
-| `GET`, `POST` | `/api/uds` | Configure the UDS client and execute diagnostic requests |
+| `GET`, `POST` | `/api/uds` | Configure UDS, execute requests, program firmware, and resume or discard interrupted programming |
 | `GET`, `POST` | `/api/xcp` | Configure XCP sessions and execute XCP commands |
 | `GET`, `POST` | `/api/ota` | Read OTA state, check the backend, stage images, cancel, or restart |
 
@@ -469,6 +498,17 @@ Detailed request and response documentation is available in
 | --- | --- | --- |
 | SPIFFS | `/storage` | Web resources, settings, and internal application data |
 | SD card | `/sdcard` | Logs, recordings, core dumps, and user files |
+
+Important SD-card paths include:
+
+| Path | Purpose |
+| --- | --- |
+| `/sdcard/firmwares` | BIN, Intel HEX, S-record, and BHX ECU images |
+| `/sdcard/logs/firmware` | Programming journals and the persistent resume checkpoint |
+| `/sdcard/logs/can` | ASC and SCL CAN recordings |
+| `/sdcard/config/uds/profiles` | Persistent ECU programming profiles |
+| `/sdcard/config/uds/dids` | Persistent DID catalogs |
+| `/sdcard/updates` | Local Spectra OTA images |
 
 The device configuration is stored at:
 
