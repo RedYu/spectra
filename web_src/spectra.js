@@ -9536,21 +9536,59 @@
         const stop = element('replay-stop');
         const message = element('replay-message');
         const file = element('replay-file');
+        const directory = element('replay-directory');
         const refreshFiles = element('replay-refresh');
+
+        function formatFileSize(value) {
+            const units = ['B', 'KiB', 'MiB', 'GiB'];
+            let size = Number(value);
+            let unit = 0;
+
+            if (!Number.isFinite(size) || (size < 0))
+                return 'unknown size';
+
+            while ((size >= 1024) && (unit < (units.length - 1))) {
+                size /= 1024;
+                unit++;
+            }
+
+            return `${unit === 0 ? size.toFixed(0) : size.toFixed(1)} ` +
+                units[unit];
+        }
+
+        function recordingDirectory() {
+            const path = directory.value.trim().replace(/\/+$/, '') ||
+                '/logs/can';
+
+            if (((path !== '/logs/can') &&
+                 !path.startsWith('/logs/can/')) ||
+                path.includes('..') ||
+                path.includes('\\')) {
+
+                throw new Error(
+                    'Recording directory must be inside /logs/can.'
+                );
+            }
+
+            directory.value = path;
+            return path;
+        }
 
         async function listFiles() {
             refreshFiles.disabled = true;
-            file.innerHTML = '<option value="">Loading /logs/can…</option>';
 
             try {
+                const path = recordingDirectory();
                 const files = [];
                 let offset = 0;
                 let hasMore = false;
 
+                file.innerHTML = `<option value="">Loading ${path}…</option>`;
+
                 do {
                     const query = new URLSearchParams({
                         volume : 'sd',
-                        path : '/logs/can',
+                        path,
                         offset : String(offset),
                         limit : '32'
                     });
@@ -9577,13 +9615,19 @@
 
                 for (const entry of files) {
                     const option = document.createElement('option');
-                    option.value = `/logs/can/${entry.name}`;
-                    option.textContent = entry.name;
+                    option.value = `${path}/${entry.name}`;
+                    option.textContent =
+                        `${entry.name} (${formatFileSize(entry.size)})`;
+                    option.title = option.value;
                     file.append(option);
                 }
 
                 if (files.length === 0)
-                    message.textContent = 'No SCL or ASC recordings found.';
+                    message.textContent =
+                        `No SCL or ASC recordings found in ${path}.`;
+                else
+                    message.textContent =
+                        `${files.length} recording(s) found in ${path}.`;
             } catch (error) {
                 file.innerHTML = '<option value="">SD recordings unavailable</option>';
                 message.textContent = error.message;
@@ -9662,7 +9706,7 @@
                     ? [1, 1]
                     : speedValue.split('/').map(Number);
                 const bus = element('replay-bus').value;
-                const path = element('replay-path').value.trim();
+                const path = file.value;
 
                 if (!/\.(scl|asc)$/i.test(path))
                     throw new Error('Select an SCL or ASC recording.');
@@ -9729,9 +9773,9 @@
             }
         });
 
-        file.addEventListener('change', () => {
-            if (file.value)
-                element('replay-path').value = file.value;
+        directory.addEventListener('input', () => {
+            file.innerHTML =
+                '<option value="">Refresh to load recordings</option>';
         });
         refreshFiles.addEventListener('click', listFiles);
 

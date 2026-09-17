@@ -15,8 +15,8 @@
 
     <title>CAN Logger · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=28">
-    <script src="spectra.js?v=28" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=29">
+    <script src="spectra.js?v=29" defer></script>
 </head>
 
 <body class="page-logger">
@@ -233,14 +233,13 @@
 
                             <div class="replay-grid">
                                 <label class="replay-field-wide">
-                                    <span>SD recording</span>
-                                    <div class="replay-file-control">
-                                        <select id="replay-file">
-                                            <option value="">
-                                                Choose a recording
-                                            </option>
-                                        </select>
-
+                                    <span>Recording directory</span>
+                                    <div class="replay-directory-control">
+                                        <input
+                                            id="replay-directory"
+                                            value="/logs/can"
+                                            spellcheck="false"
+                                        >
                                         <button
                                             id="replay-refresh"
                                             type="button"
@@ -251,12 +250,12 @@
                                 </label>
 
                                 <label class="replay-field-wide">
-                                    <span>SD log path</span>
-                                    <input
-                                        id="replay-path"
-                                        value="/logs/can/"
-                                        spellcheck="false"
-                                    >
+                                    <span>SD recording</span>
+                                    <select id="replay-file">
+                                        <option value="">
+                                            Choose a recording
+                                        </option>
+                                    </select>
                                 </label>
 
                                 <label>

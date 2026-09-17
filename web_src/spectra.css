@@ -5707,12 +5707,12 @@ select:focus-visible {
     color: var(--muted);
     font-size: 10px;
 }
-.page-logger .replay-file-control {
+.page-logger .replay-directory-control {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
 }
-.page-logger .replay-file-control button {
+.page-logger .replay-directory-control button {
     min-height: 38px;
 }
 .page-logger .replay-input-unit {
@@ -5845,7 +5845,7 @@ select:focus-visible {
     .page-logger .replay-grid > .replay-field-wide {
         grid-column: auto;
     }
-    .page-logger .replay-file-control {
+    .page-logger .replay-directory-control {
         grid-template-columns: minmax(0, 1fr);
     }
     .page-logger .replay-panel > summary span {
