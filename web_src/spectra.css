@@ -908,6 +908,13 @@ body:where(.page-settings) {
 :where(body.page-settings) .password-control .text-input {
     min-width: 0;
 }
+:where(body.page-settings) .time-server-control {
+    display: grid;
+    gap: 10px;
+}
+:where(body.page-settings) .time-server-control .secondary-button {
+    justify-self: end;
+}
 :where(body.page-settings) .secondary-button {
     flex: 0 0 auto;
     padding: 9px 13px;
@@ -1225,6 +1232,7 @@ body:where(.page-settings) {
 
 :where(body.page-settings) .ota-sd-row .select-control {
     width: 100%;
+    margin-left: 0;
 }
 
 :where(body.page-settings) .ota-progress-block {

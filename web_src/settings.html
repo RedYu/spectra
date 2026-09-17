@@ -22,7 +22,7 @@
 
     <title>Spectra Settings</title>
 
-    <link rel="stylesheet" href="spectra.css?v=33">
+    <link rel="stylesheet" href="spectra.css?v=34">
     <script src="spectra.js?v=33" defer></script>
 </head>
 
@@ -281,6 +281,61 @@
                                     </select>
 
                                     <span class="select-arrow">&#9662;</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Audible feedback
+                                </div>
+
+                                <div class="setting-description">
+                                    Enable buzzer sounds for interface actions
+                                    and device notifications
+                                </div>
+                            </div>
+
+                            <div class="switch-control">
+                                <label class="switch">
+                                    <input
+                                        id="sound-enabled"
+                                        type="checkbox"
+                                    >
+
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">
+                                    Sound volume
+                                </div>
+
+                                <div class="setting-description">
+                                    Buzzer duty level from 0 to 100 percent
+                                </div>
+                            </div>
+
+                            <div class="setting-control">
+                                <div class="range-control">
+                                    <input
+                                        id="sound-volume"
+                                        type="range"
+                                        min="0"
+                                        max="100"
+                                        value="70"
+                                    >
+
+                                    <span
+                                        id="sound-volume-value"
+                                        class="range-value"
+                                    >
+                                        70%
+                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -1013,61 +1068,6 @@
 
                         <div class="setting-row">
                             <div>
-                                <div class="setting-label">
-                                    Audible feedback
-                                </div>
-
-                                <div class="setting-description">
-                                    Enable buzzer sounds for interface actions
-                                    and device notifications
-                                </div>
-                            </div>
-
-                            <div class="switch-control">
-                                <label class="switch">
-                                    <input
-                                        id="sound-enabled"
-                                        type="checkbox"
-                                    >
-
-                                    <span class="switch-slider"></span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <div class="setting-row">
-                            <div>
-                                <div class="setting-label">
-                                    Sound volume
-                                </div>
-
-                                <div class="setting-description">
-                                    Buzzer duty level from 0 to 100 percent
-                                </div>
-                            </div>
-
-                            <div class="setting-control">
-                                <div class="range-control">
-                                    <input
-                                        id="sound-volume"
-                                        type="range"
-                                        min="0"
-                                        max="100"
-                                        value="70"
-                                    >
-
-                                    <span
-                                        id="sound-volume-value"
-                                        class="range-value"
-                                    >
-                                        70%
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="setting-row">
-                            <div>
                                 <div class="setting-label">POSIX timezone</div>
                                 <div class="setting-description">
                                     For example CET-1CEST,M3.5.0,M10.5.0/3
@@ -1099,7 +1099,7 @@
                                     Optional fallback server
                                 </div>
                             </div>
-                            <div class="setting-control">
+                            <div class="setting-control time-server-control">
                                 <input id="time-secondary-server" class="text-input"
                                     type="text" maxlength="63">
                                 <button id="time-sync-now" class="secondary-button"
@@ -1268,14 +1268,18 @@
                                     Image from SD · /updates
                                 </label>
 
-                                <select
-                                    id="ota-sd-file"
-                                    class="select-control"
-                                >
-                                    <option value="">
-                                        Loading SD images...
-                                    </option>
-                                </select>
+                                <div class="select-control">
+                                    <select
+                                        id="ota-sd-file"
+                                        class="theme-select"
+                                    >
+                                        <option value="">
+                                            Loading SD images...
+                                        </option>
+                                    </select>
+
+                                    <span class="select-arrow">&#9662;</span>
+                                </div>
                             </div>
 
                             <button
