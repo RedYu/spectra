@@ -604,13 +604,27 @@ esp_err_t storage_sd_service_open(
     storage_sd_service_mutex_unlock();
 
     if (file == NULL) {
-        ESP_LOGE(
-            TAG,
-            "Failed to open '%s': errno=%d (%s)",
-            full_path,
-            saved_errno,
-            strerror(saved_errno)
-        );
+        const bool missing_read_only_file =
+            (saved_errno == ENOENT) &&
+            (strchr(mode, 'w') == NULL) &&
+            (strchr(mode, 'a') == NULL) &&
+            (strchr(mode, '+') == NULL);
+
+        if (missing_read_only_file) {
+            ESP_LOGD(
+                TAG,
+                "File does not exist: %s",
+                full_path
+            );
+        } else {
+            ESP_LOGE(
+                TAG,
+                "Failed to open '%s': errno=%d (%s)",
+                full_path,
+                saved_errno,
+                strerror(saved_errno)
+            );
+        }
 
         return storage_sd_service_errno_to_error(
             saved_errno
