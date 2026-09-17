@@ -40,6 +40,21 @@ and ControlDTCSetting (`0x85`) with an optional option record. They are exposed
 by the manual Web diagnostics page and remain subject to the active ECU session
 and SecurityAccess permissions.
 
+ReadScalingDataByIdentifier (`0x24`) uses the same 16-bit DID selection as
+ReadDataByIdentifier. RequestUpload (`0x35`) uses the standard data-format and
+address-and-length format fields. WriteMemoryByAddress (`0x3D`) validates that
+the declared memory size exactly matches the supplied data and limits one
+manual request to 512 bytes. All three have typed allocation-free request
+builders, UDS client entry points, and manual Web controls.
+
+The service-ID model also names Authentication (`0x29`),
+ReadDataByPeriodicIdentifier (`0x2A`), DynamicallyDefineDataIdentifier (`0x2C`),
+RequestFileTransfer (`0x38`), AccessTimingParameter (`0x83`),
+SecuredDataTransmission (`0x84`), ResponseOnEvent (`0x86`), and LinkControl
+(`0x87`). Their OEM- and subfunction-specific parameter records can be tested
+through the bounded raw UDS request control while dedicated semantic editors
+are added incrementally.
+
 RoutineControl (`0x31`) supports StartRoutine (`0x01`), StopRoutine (`0x02`),
 and RequestRoutineResults (`0x03`). Requests contain a 16-bit routine identifier
 and an optional routine-control option record of up to 256 bytes. The web page
@@ -232,10 +247,17 @@ owns client polling, so keep-alive and timeout handling do not depend on an
 open browser page. Normal requests take priority; a due keep-alive is deferred
 while the client has an outstanding request.
 
+The manual UDS channel can transmit through a functional CAN identifier. ISO-TP
+enforces the functional-addressing Single Frame restriction. The configured RX
+identifier selects one physical ECU response for the stateful client, and
+automatic Tester Present is disabled on a functional channel to avoid periodic
+broadcast traffic. Functional multi-responder discovery remains a separate
+collector concern and does not replace the active physical programming client.
+
 ## Current limitations
 
 - one outstanding request per client;
-- physical addressing only through the selected ISO-TP channel;
+- one configured ECU response identifier per functional UDS channel;
 - no built-in OEM security-access algorithms;
 - one ReadDataByIdentifier response is decoded at a time;
 - no persistent resume after reset or interrupted ECU programming;

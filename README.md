@@ -572,7 +572,8 @@ To exit the serial monitor, press `Ctrl+]`.
 ### Planned
 
 - [ ] BLF import and export
-- [ ] Functional addressing and remaining UDS services
+- [ ] Multi-responder functional UDS discovery and remaining service-specific
+  response decoders
 - [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
 - [ ] Persistent resume after interrupted ECU programming
 - [ ] XCP multi-packet block transfer, DAQ/STIM, calibration-page control,

@@ -883,3 +883,122 @@ TEST_CASE(
     TEST_ASSERT_NULL(transfer_exit.parameter_record);
     TEST_ASSERT_EQUAL(0U, transfer_exit.parameter_record_length);
 }
+
+TEST_CASE(
+    "UDS request helpers encode scaling and upload services",
+    "[uds]"
+)
+{
+    uint8_t buffer[16] = {0};
+    size_t encoded_size = 0U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_read_scaling_data_by_identifier(
+            0xF190U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    const uint8_t scaling_expected[] = {
+        0x24U,
+        0xF1U,
+        0x90U,
+    };
+    TEST_ASSERT_EQUAL(sizeof(scaling_expected), encoded_size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        scaling_expected,
+        buffer,
+        sizeof(scaling_expected)
+    );
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_request_upload(
+            0x00U,
+            0x12345678U,
+            4U,
+            0x1000U,
+            2U,
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    const uint8_t upload_expected[] = {
+        0x35U,
+        0x00U,
+        0x24U,
+        0x12U,
+        0x34U,
+        0x56U,
+        0x78U,
+        0x10U,
+        0x00U,
+    };
+    TEST_ASSERT_EQUAL(sizeof(upload_expected), encoded_size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        upload_expected,
+        buffer,
+        sizeof(upload_expected)
+    );
+}
+
+TEST_CASE(
+    "UDS Write Memory validates and encodes exact data length",
+    "[uds]"
+)
+{
+    const uint8_t data[] = {
+        0xAAU,
+        0x55U,
+    };
+    uint8_t buffer[16] = {0};
+    size_t encoded_size = 0U;
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        uds_request_encode_write_memory_by_address(
+            0x1234U,
+            2U,
+            sizeof(data),
+            1U,
+            data,
+            sizeof(data),
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+    const uint8_t expected[] = {
+        0x3DU,
+        0x12U,
+        0x12U,
+        0x34U,
+        0x02U,
+        0xAAU,
+        0x55U,
+    };
+    TEST_ASSERT_EQUAL(sizeof(expected), encoded_size);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(
+        expected,
+        buffer,
+        sizeof(expected)
+    );
+
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_INVALID_ARG,
+        uds_request_encode_write_memory_by_address(
+            0x1234U,
+            2U,
+            sizeof(data) + 1U,
+            1U,
+            data,
+            sizeof(data),
+            buffer,
+            sizeof(buffer),
+            &encoded_size
+        )
+    );
+}

@@ -6658,16 +6658,27 @@
             [0x19, 'Read DTC Information'],
             [0x22, 'Read Data By Identifier'],
             [0x23, 'Read Memory By Address'],
+            [0x24, 'Read Scaling Data By Identifier'],
             [0x27, 'Security Access'],
             [0x28, 'Communication Control'],
+            [0x29, 'Authentication'],
+            [0x2a, 'Read Data By Periodic Identifier'],
+            [0x2c, 'Dynamically Define Data Identifier'],
             [0x2e, 'Write Data By Identifier'],
             [0x2f, 'Input Output Control By Identifier'],
             [0x31, 'Routine Control'],
             [0x34, 'Request Download'],
+            [0x35, 'Request Upload'],
             [0x36, 'Transfer Data'],
             [0x37, 'Request Transfer Exit'],
+            [0x38, 'Request File Transfer'],
+            [0x3d, 'Write Memory By Address'],
             [0x3e, 'Tester Present'],
-            [0x85, 'Control DTC Setting']
+            [0x83, 'Access Timing Parameter'],
+            [0x84, 'Secured Data Transmission'],
+            [0x85, 'Control DTC Setting'],
+            [0x86, 'Response On Event'],
+            [0x87, 'Link Control']
         ]);
         const nrcNames = new Map([
             [0x10, 'General reject'],
@@ -9780,14 +9791,27 @@
             brs.disabled = !fd;
         }
 
+        function updateFunctionalAddressing() {
+            const functional = element('uds-functional').checked;
+            const testerPresent =
+                element('uds-tester-present-enabled');
+
+            testerPresent.disabled = functional;
+
+            if (functional)
+                testerPresent.checked = false;
+        }
+
         function updateService() {
             const selected = service.value;
             element('uds-did-field').hidden =
                 selected !== 'read_did' &&
+                selected !== 'read_scaling_did' &&
                 selected !== 'write_did' &&
                 selected !== 'io_control';
             element('uds-write-data-field').hidden =
-                selected !== 'write_did';
+                selected !== 'write_did' &&
+                selected !== 'write_memory';
             element('uds-dtc-subfunction-field').hidden =
                 selected !== 'read_dtc';
             element('uds-dtc-mask-field').hidden =
@@ -9816,8 +9840,12 @@
                     : 'Seed request data record (HEX bytes, optional)';
             const memory =
                 selected === 'request_download' ||
-                selected === 'read_memory';
-            const download = selected === 'request_download';
+                selected === 'request_upload' ||
+                selected === 'read_memory' ||
+                selected === 'write_memory';
+            const download =
+                selected === 'request_download' ||
+                selected === 'request_upload';
             element('uds-download-format-field').hidden = !download;
             element('uds-download-address-field').hidden = !memory;
             element('uds-download-address-length-field').hidden = !memory;
@@ -9849,6 +9877,7 @@
             element('uds-raw-data-field').hidden = selected !== 'raw';
             element('uds-suppress').disabled =
                 selected === 'read_did' ||
+                selected === 'read_scaling_did' ||
                 selected === 'write_did' ||
                 selected === 'read_dtc' ||
                 security ||
@@ -10322,6 +10351,7 @@
                     extended,
                     fd,
                     brs : fd && brs.checked,
+                    functional : element('uds-functional').checked,
                     link_data_length : fd ? 64 : 8,
                     block_size : Number(element('uds-block-size').value),
                     st_min : Number(element('uds-st-min').value),
@@ -10363,7 +10393,9 @@
                 const kind = service.value;
                 const request = {action : 'request', kind};
 
-                if (kind === 'read_did') {
+                if (kind === 'read_did' ||
+                    kind === 'read_scaling_did') {
+
                     request.did =
                         parseHexNumber(element('uds-did'), 0xffff, 'Data identifier');
                 } else if (kind === 'write_did') {
@@ -10395,7 +10427,9 @@
                         throw new Error(
                             'Write Data payload exceeds the 256-byte limit.'
                         );
-                } else if (kind === 'read_memory') {
+                } else if (kind === 'read_memory' ||
+                           kind === 'write_memory') {
+
                     const addressLength =
                         Number(element('uds-download-address-length').value);
                     const sizeLength =
@@ -10415,6 +10449,42 @@
                         'Memory size',
                         false
                     );
+
+                    if (kind === 'write_memory') {
+                        request.data =
+                            normalizeHex(
+                                element('uds-write-data').value,
+                                false
+                            );
+
+                        if (request.data === null)
+                            throw new Error(
+                                'Write Memory requires at least one data byte.'
+                            );
+
+                        if (request.data.split(' ').length > 512)
+                            throw new Error(
+                                'Write Memory payload exceeds the 512-byte limit.'
+                            );
+
+                        const requestedSize =
+                            BigInt(`0x${request.size}`);
+
+                        if (requestedSize !==
+                            BigInt(request.data.split(' ').length)) {
+
+                            throw new Error(
+                                'Memory size must equal the Write Memory payload length.'
+                            );
+                        }
+
+                        if (!window.confirm(
+                                'Write these bytes directly to the selected ECU memory?'
+                            )) {
+
+                            return;
+                        }
+                    }
                 } else if (kind === 'communication_control') {
                     request.value = parseHexNumber(
                         element('uds-subfunction'),
@@ -10586,7 +10656,8 @@
 
                         return;
                     }
-                } else if (kind === 'request_download') {
+                } else if (kind === 'request_download' ||
+                           kind === 'request_upload') {
                     const addressLength =
                         Number(element('uds-download-address-length').value);
                     const sizeLength =
@@ -10615,7 +10686,8 @@
                             false
                         );
 
-                    if (!window.confirm(
+                    if ((kind === 'request_download') &&
+                        !window.confirm(
                             'Request permission to program the selected ECU memory region?'
                         )) {
 
@@ -10809,12 +10881,17 @@
         });
 
         format.addEventListener('change', updateFormat);
+        element('uds-functional').addEventListener(
+            'change',
+            updateFunctionalAddressing
+        );
         service.addEventListener('change', updateService);
         element('uds-dtc-subfunction').addEventListener(
             'change',
             updateService
         );
         updateFormat();
+        updateFunctionalAddressing();
         updateService();
         createDidCatalogRow();
         refreshDidCatalogs();

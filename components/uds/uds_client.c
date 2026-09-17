@@ -31,6 +31,13 @@ static esp_err_t uds_client_start_request(
     uint64_t now_us
 );
 
+static esp_err_t uds_client_start_encoded_request(
+    uds_client_t *client,
+    uint8_t service_id,
+    size_t request_size,
+    bool response_expected
+);
+
 esp_err_t uds_client_open(
     uds_client_t *client,
     const uds_client_config_t *config
@@ -169,6 +176,21 @@ static esp_err_t uds_client_start_request(
         return result;
     }
 
+    return uds_client_start_encoded_request(
+        client,
+        service_id,
+        request_size,
+        response_expected
+    );
+}
+
+static esp_err_t uds_client_start_encoded_request(
+    uds_client_t *client,
+    uint8_t service_id,
+    size_t request_size,
+    bool response_expected
+)
+{
     client->request_service_id = service_id;
     client->response_expected = response_expected;
     client->state = UDS_CLIENT_TRANSMITTING;
@@ -176,7 +198,7 @@ static esp_err_t uds_client_start_request(
     client->last_result = ESP_OK;
     client->last_negative_response_code = 0U;
 
-    result =
+    const esp_err_t result =
         isotp_service_send(
             client->channel_id,
             client->config.transport.transmit_buffer,
@@ -353,6 +375,35 @@ esp_err_t uds_client_write_data_by_identifier(
         UDS_SERVICE_WRITE_DATA_BY_IDENTIFIER,
         parameters,
         2U + data_length,
+        now_us
+    );
+}
+
+esp_err_t uds_client_read_scaling_data_by_identifier(
+    uds_client_t *client,
+    uint16_t identifier,
+    uint64_t now_us
+)
+{
+    uint8_t request[3] = {0};
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_read_scaling_data_by_identifier(
+            identifier,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
         now_us
     );
 }
@@ -727,6 +778,98 @@ esp_err_t uds_client_request_download(
         &request[1],
         request_size - 1U,
         now_us
+    );
+}
+
+esp_err_t uds_client_request_upload(
+    uds_client_t *client,
+    uint8_t data_format_identifier,
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    uint64_t now_us
+)
+{
+    uint8_t request[19] = {0};
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_request_upload(
+            data_format_identifier,
+            memory_address,
+            memory_address_length,
+            memory_size,
+            memory_size_length,
+            request,
+            sizeof(request),
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_request(
+        client,
+        request[0],
+        &request[1],
+        request_size - 1U,
+        now_us
+    );
+}
+
+esp_err_t uds_client_write_memory_by_address(
+    uds_client_t *client,
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    const uint8_t *data,
+    size_t data_length,
+    uint64_t now_us
+)
+{
+    (void)now_us;
+
+    if (data_length > UDS_CLIENT_MEMORY_DATA_MAX_LENGTH) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (client == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((client->state != UDS_CLIENT_IDLE) &&
+         (client->state != UDS_CLIENT_COMPLETE) &&
+         (client->state != UDS_CLIENT_NEGATIVE_RESPONSE) &&
+         (client->state != UDS_CLIENT_ERROR)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    size_t request_size = 0U;
+    const esp_err_t result =
+        uds_request_encode_write_memory_by_address(
+            memory_address,
+            memory_address_length,
+            memory_size,
+            memory_size_length,
+            data,
+            data_length,
+            client->config.transport.transmit_buffer,
+            client->config.transport.transmit_capacity,
+            &request_size
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    return uds_client_start_encoded_request(
+        client,
+        UDS_SERVICE_WRITE_MEMORY_BY_ADDRESS,
+        request_size,
+        true
     );
 }
 

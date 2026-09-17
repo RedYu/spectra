@@ -85,6 +85,7 @@ static SemaphoreHandle_t s_lock = NULL;
 static uint8_t *s_receive_buffer = NULL;
 static uint8_t *s_transmit_buffer = NULL;
 static uint8_t *s_response_buffer = NULL;
+static uint8_t *s_manual_request_buffer = NULL;
 static size_t s_response_size = 0U;
 static uds_client_t s_client;
 static uds_client_config_t s_client_config;
@@ -1235,6 +1236,7 @@ static esp_err_t web_uds_configure(
     bool extended = false;
     bool can_fd = false;
     bool brs = false;
+    bool functional = false;
     bool tester_present_enabled = true;
 
     const cJSON *tester_present_interval =
@@ -1284,6 +1286,12 @@ static esp_err_t web_uds_configure(
         !web_uds_boolean(root, "brs", false, &brs) ||
         !web_uds_boolean(
             root,
+            "functional",
+            false,
+            &functional
+        ) ||
+        !web_uds_boolean(
+            root,
             "tester_present_enabled",
             true,
             &tester_present_enabled
@@ -1312,6 +1320,7 @@ static esp_err_t web_uds_configure(
             .bit_rate_switch = brs,
             .session = {
                 .link_data_length = (uint8_t)link_data_length,
+                .functional_transmit = functional,
                 .receive_block_size = (uint8_t)block_size,
                 .receive_st_min = (uint8_t)st_min,
                 .maximum_wait_frames = 3U,
@@ -1337,7 +1346,9 @@ static esp_err_t web_uds_configure(
     if (result == ESP_OK) {
         s_client_config = config;
         s_client_config_valid = true;
-        s_tester_present_enabled = tester_present_enabled;
+        s_tester_present_enabled =
+            tester_present_enabled &&
+            !functional;
         s_tester_present_interval_us =
             (uint64_t)tester_present_interval_ms * 1000ULL;
         web_uds_tester_present_stop();
@@ -1383,6 +1394,18 @@ static esp_err_t web_uds_request(
         }
 
         return uds_client_read_data_by_identifier(
+            &s_client,
+            (uint16_t)value,
+            now_us
+        );
+    }
+
+    if (strcmp(kind->valuestring, "read_scaling_did") == 0) {
+        if (!web_uds_number(root, "did", UINT16_MAX, &value)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        return uds_client_read_scaling_data_by_identifier(
             &s_client,
             (uint16_t)value,
             now_us
@@ -1446,6 +1469,53 @@ static esp_err_t web_uds_request(
             (uint8_t)address_length,
             memory_size,
             (uint8_t)size_length,
+            now_us
+        );
+    }
+
+    if (strcmp(kind->valuestring, "write_memory") == 0) {
+        const cJSON *data =
+            cJSON_GetObjectItemCaseSensitive(root, "data");
+        uint32_t address_length = 0U;
+        uint32_t size_length = 0U;
+        uint64_t memory_address = 0U;
+        uint64_t memory_size = 0U;
+
+        if (!web_uds_number(root, "address_length", 8U, &address_length) ||
+            !web_uds_number(root, "size_length", 8U, &size_length) ||
+            !web_uds_hex_uint64(root, "address", &memory_address) ||
+            !web_uds_hex_uint64(root, "size", &memory_size) ||
+            !cJSON_IsString(data)) {
+
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        size_t payload_size = 0U;
+        const esp_err_t parse_result =
+            web_uds_parse_hex(
+                data->valuestring,
+                s_manual_request_buffer,
+                UDS_CLIENT_MEMORY_DATA_MAX_LENGTH,
+                &payload_size
+            );
+
+        if ((parse_result != ESP_OK) ||
+            (payload_size == 0U) ||
+            (memory_size != payload_size)) {
+
+            return (parse_result != ESP_OK)
+                ? parse_result
+                : ESP_ERR_INVALID_ARG;
+        }
+
+        return uds_client_write_memory_by_address(
+            &s_client,
+            memory_address,
+            (uint8_t)address_length,
+            memory_size,
+            (uint8_t)size_length,
+            s_manual_request_buffer,
+            payload_size,
             now_us
         );
     }
@@ -1691,7 +1761,11 @@ static esp_err_t web_uds_request(
         return web_uds_security_unlock(root);
     }
 
-    if (strcmp(kind->valuestring, "request_download") == 0) {
+    if ((strcmp(kind->valuestring, "request_download") == 0) ||
+        (strcmp(kind->valuestring, "request_upload") == 0)) {
+
+        const bool upload =
+            strcmp(kind->valuestring, "request_upload") == 0;
         uint32_t data_format_identifier = 0U;
         uint32_t address_length = 0U;
         uint32_t size_length = 0U;
@@ -1712,15 +1786,25 @@ static esp_err_t web_uds_request(
             return ESP_ERR_INVALID_ARG;
         }
 
-        return uds_client_request_download(
-            &s_client,
-            (uint8_t)data_format_identifier,
-            memory_address,
-            (uint8_t)address_length,
-            memory_size,
-            (uint8_t)size_length,
-            now_us
-        );
+        return upload
+            ? uds_client_request_upload(
+                &s_client,
+                (uint8_t)data_format_identifier,
+                memory_address,
+                (uint8_t)address_length,
+                memory_size,
+                (uint8_t)size_length,
+                now_us
+            )
+            : uds_client_request_download(
+                &s_client,
+                (uint8_t)data_format_identifier,
+                memory_address,
+                (uint8_t)address_length,
+                memory_size,
+                (uint8_t)size_length,
+                now_us
+            );
     }
 
     if (strcmp(kind->valuestring, "transfer_data") == 0) {
@@ -4268,6 +4352,10 @@ esp_err_t web_uds_api_register(
             WEB_UDS_BUFFER_SIZE,
             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
         );
+        s_manual_request_buffer = heap_caps_malloc(
+            UDS_CLIENT_MEMORY_DATA_MAX_LENGTH,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+        );
         s_download_transfer_buffer = heap_caps_malloc(
             UDS_CLIENT_TRANSFER_DATA_MAX_LENGTH,
             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
@@ -4277,15 +4365,18 @@ esp_err_t web_uds_api_register(
             (s_receive_buffer == NULL) ||
             (s_transmit_buffer == NULL) ||
             (s_response_buffer == NULL) ||
+            (s_manual_request_buffer == NULL) ||
             (s_download_transfer_buffer == NULL)) {
 
             heap_caps_free(s_receive_buffer);
             heap_caps_free(s_transmit_buffer);
             heap_caps_free(s_response_buffer);
+            heap_caps_free(s_manual_request_buffer);
             heap_caps_free(s_download_transfer_buffer);
             s_receive_buffer = NULL;
             s_transmit_buffer = NULL;
             s_response_buffer = NULL;
+            s_manual_request_buffer = NULL;
             s_download_transfer_buffer = NULL;
 
             if (s_lock != NULL) {

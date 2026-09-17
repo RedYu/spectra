@@ -261,8 +261,15 @@
                 <div class="isotp-options">
                     <label><input id="uds-extended" type="checkbox">29-bit identifiers</label>
                     <label><input id="uds-brs" type="checkbox" disabled>CAN FD bit-rate switch</label>
+                    <label><input id="uds-functional" type="checkbox">Functional request channel</label>
                     <label><input id="uds-tester-present-enabled" type="checkbox" checked>Automatic Tester Present outside default session</label>
                 </div>
+
+                <p class="note">
+                    Functional requests are restricted to one ISO-TP Single
+                    Frame. The configured RX ID selects the ECU response shown
+                    by this client; automatic Tester Present is disabled.
+                </p>
 
                 <p id="uds-tester-present-status" class="note">
                     Tester Present is waiting for a non-default diagnostic session.
@@ -282,8 +289,10 @@
                         Service
                         <select id="uds-service">
                             <option value="read_did">Read Data By Identifier</option>
+                            <option value="read_scaling_did">Read Scaling Data By Identifier</option>
                             <option value="write_did">Write Data By Identifier</option>
                             <option value="read_memory">Read Memory By Address</option>
+                            <option value="write_memory">Write Memory By Address</option>
                             <option value="communication_control">Communication Control</option>
                             <option value="io_control">Input Output Control By Identifier</option>
                             <option value="control_dtc_setting">Control DTC Setting</option>
@@ -294,6 +303,7 @@
                             <option value="security_key">Security Access · Send Key</option>
                             <option value="security_unlock">Security Access · Manual unlock</option>
                             <option value="request_download">Request Download</option>
+                            <option value="request_upload">Request Upload</option>
                             <option value="transfer_data">Transfer Data</option>
                             <option value="transfer_exit">Request Transfer Exit</option>
                             <option value="session">Diagnostic Session Control</option>

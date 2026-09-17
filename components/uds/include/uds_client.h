@@ -27,6 +27,7 @@ extern "C" {
 #define UDS_CLIENT_TRANSFER_DATA_MAX_LENGTH    (512U)
 #define UDS_CLIENT_TRANSFER_EXIT_MAX_LENGTH    (256U)
 #define UDS_CLIENT_CONTROL_DATA_MAX_LENGTH     (256U)
+#define UDS_CLIENT_MEMORY_DATA_MAX_LENGTH      (512U)
 
 typedef enum
 {
@@ -141,6 +142,12 @@ esp_err_t uds_client_write_data_by_identifier(
     uint64_t now_us
 );
 
+esp_err_t uds_client_read_scaling_data_by_identifier(
+    uds_client_t *client,
+    uint16_t identifier,
+    uint64_t now_us
+);
+
 esp_err_t uds_client_read_memory_by_address(
     uds_client_t *client,
     uint64_t memory_address,
@@ -222,6 +229,27 @@ esp_err_t uds_client_request_download(
     uint8_t memory_address_length,
     uint64_t memory_size,
     uint8_t memory_size_length,
+    uint64_t now_us
+);
+
+esp_err_t uds_client_request_upload(
+    uds_client_t *client,
+    uint8_t data_format_identifier,
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    uint64_t now_us
+);
+
+esp_err_t uds_client_write_memory_by_address(
+    uds_client_t *client,
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    const uint8_t *data,
+    size_t data_length,
     uint64_t now_us
 );
 

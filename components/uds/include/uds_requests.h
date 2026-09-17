@@ -101,6 +101,13 @@ esp_err_t uds_request_encode_write_data_by_identifier(
     size_t *encoded_size
 );
 
+esp_err_t uds_request_encode_read_scaling_data_by_identifier(
+    uint16_t identifier,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
 esp_err_t uds_request_encode_read_memory_by_address(
     uint64_t memory_address,
     uint8_t memory_address_length,
@@ -190,6 +197,29 @@ esp_err_t uds_request_encode_request_download(
     uint8_t memory_address_length,
     uint64_t memory_size,
     uint8_t memory_size_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_request_upload(
+    uint8_t data_format_identifier,
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    uint8_t *buffer,
+    size_t capacity,
+    size_t *encoded_size
+);
+
+esp_err_t uds_request_encode_write_memory_by_address(
+    uint64_t memory_address,
+    uint8_t memory_address_length,
+    uint64_t memory_size,
+    uint8_t memory_size_length,
+    const uint8_t *data,
+    size_t data_length,
     uint8_t *buffer,
     size_t capacity,
     size_t *encoded_size
