@@ -155,6 +155,12 @@ starts transmitting. The complete behavior and API are documented in
   and link control through bounded raw requests
 - Physical and functional UDS addressing with ISO-TP Single Frame enforcement
   for functional requests
+- Functional multi-responder UDS discovery with a configurable response-ID
+  range, responder timing, positive/negative result, and raw payload display
+- Service-specific positive-response decoding for sessions, reset, DTC, DID,
+  memory, SecurityAccess, routines, download/upload, transfer, authentication,
+  dynamic and periodic DIDs, file transfer, timing, secured transport,
+  Response On Event, and link control
 - RequestDownload, TransferData, and RequestTransferExit primitives
 - Non-blocking ECU programming pipeline with retry, cancellation, progress,
   long-running routine polling, reset, and session restoration
@@ -455,8 +461,16 @@ explicit cancellation remove the checkpoint; failures retain it for recovery.
 The manual UDS channel supports both physical and functional request
 identifiers. Functional traffic is restricted to ISO-TP Single Frames, as a
 multi-frame functional exchange cannot safely coordinate Flow Control from
-multiple ECUs. The configured response identifier still selects one physical
-ECU response, so multi-responder discovery remains planned separately.
+multiple ECUs. The configured response identifier selects one physical ECU for
+stateful requests.
+
+The diagnostics page also provides separate multi-responder functional
+discovery. It broadcasts a positive-response Tester Present request and
+collects Single Frame responses from every ECU in a configurable CAN-ID range.
+The result table shows each responder identifier, positive or negative result,
+response time, and raw UDS payload. Multi-frame functional responses are not
+collected; a physical channel must be opened for a complete ISO-TP exchange
+with the selected ECU.
 
 Typed allocation-free builders and client operations cover session control,
 reset, Tester Present, SecurityAccess, DID reads and writes, DTC services,
@@ -697,6 +711,8 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] UDS client, browser diagnostics, DID catalogs, and ECU profiles
 - [x] Physical and functional UDS addressing with extended typed and raw
   service requests
+- [x] Multi-responder functional UDS discovery and service-specific positive
+  response decoding
 - [x] Automatic UDS ECU programming with routine polling and journals
 - [x] Persistent UDS programming resume from confirmed image-segment boundaries
 - [x] Streaming BIN, Intel HEX, Motorola S-record, and BHX readers and validators
@@ -719,8 +735,6 @@ To exit the serial monitor, press `Ctrl+]`.
 ### Planned
 
 - [ ] BLF import and export
-- [ ] Multi-responder functional UDS discovery and remaining service-specific
-  response decoders
 - [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
 - [ ] SD-backed autonomous XCP programming jobs and device-side resume
 - [ ] Device registration and authentication
