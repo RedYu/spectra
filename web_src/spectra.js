@@ -10450,11 +10450,13 @@
                 .filter(Boolean)
                 .map(value => parseInt(value, 16));
 
-            if (bytes.length < 2)
+            if (bytes.length < 1)
                 return null;
 
             const subfunction = bytes[0];
-            const availability = bytes[1];
+            const availability = bytes.length > 1
+                ? bytes[1]
+                : 0;
             const hex = (value, width) =>
                 value.toString(16).toUpperCase().padStart(width, '0');
 
@@ -10489,7 +10491,39 @@
                     `Raw: ${payloadText}`;
             }
 
-            return null;
+            const reportNames = {
+                0x03 : 'DTC snapshot identification',
+                0x04 : 'DTC snapshot record by DTC number',
+                0x05 : 'DTC snapshot record by record number',
+                0x06 : 'DTC extended data record by DTC number',
+                0x07 : 'Number of DTCs by severity mask',
+                0x08 : 'DTCs by severity mask',
+                0x09 : 'Severity information of DTC',
+                0x0b : 'First test-failed DTC',
+                0x0c : 'First confirmed DTC',
+                0x0d : 'Most recent test-failed DTC',
+                0x0e : 'Most recent confirmed DTC',
+                0x0f : 'Mirror-memory DTCs by status mask',
+                0x10 : 'Mirror-memory DTC extended data',
+                0x11 : 'Number of mirror-memory DTCs by status mask',
+                0x12 : 'Number of emission-related OBD DTCs',
+                0x13 : 'Emission-related OBD DTCs by status mask',
+                0x14 : 'DTC fault detection counter',
+                0x15 : 'DTCs with permanent status',
+                0x16 : 'DTC extended data by record number',
+                0x17 : 'User-defined memory DTCs by status mask',
+                0x18 : 'User-defined memory DTC snapshot record',
+                0x19 : 'User-defined memory DTC extended data',
+                0x1a : 'WWH-OBD DTCs with permanent status',
+                0x42 : 'WWH-OBD DTCs by readiness group',
+                0x55 : 'DTCs with readiness group identifier'
+            };
+            const name = reportNames[subfunction] ||
+                `DTC report sub-function 0x${hex(subfunction, 2)}`;
+
+            return `${name}\nResponse record: ${bytes.length > 1
+                ? bytes.slice(1).map(value => hex(value, 2)).join(' ')
+                : 'empty'}\n\nRaw: ${payloadText}`;
         }
 
         function decodeDtcStatus(status) {
@@ -10633,6 +10667,19 @@
             const hex = (value, width = 2) =>
                 value.toString(16).toUpperCase().padStart(width, '0');
             const raw = payloadText || 'empty';
+            const tail = start => bytes.slice(start)
+                .map(value => hex(value))
+                .join(' ');
+            const unsigned = (start, length) => {
+                let value = 0n;
+
+                for (let index = 0; index < length; ++index) {
+                    value = (value << 8n) |
+                        BigInt(bytes[start + index]);
+                }
+
+                return value;
+            };
 
             if (serviceId === 0x50 && bytes.length >= 1) {
                 const sessions = {
@@ -10665,8 +10712,21 @@
                     0x05 : 'Disable rapid power shutdown'
                 };
 
-                return resetNames[bytes[0] & 0x7f] ||
-                    `ECU reset type 0x${hex(bytes[0] & 0x7f)}`;
+                const type = bytes[0] & 0x7f;
+                const lines = [
+                    resetNames[type] ||
+                        `ECU reset type 0x${hex(type)}`
+                ];
+
+                if ((type === 0x04) && bytes.length >= 2) {
+                    lines.push(
+                        `Power-down time: ${bytes[1]} s`
+                    );
+                } else if (bytes.length > 1) {
+                    lines.push(`Power-down parameter: 0x${hex(bytes[1])}`);
+                }
+
+                return lines.join('\n');
             }
 
             if (serviceId === 0x59)
@@ -10687,6 +10747,24 @@
             if (serviceId === 0x76)
                 return decodeTransferDataResponse(payloadText);
 
+            if (serviceId === 0x54) {
+                return bytes.length
+                    ? `Diagnostic information cleared\nOEM record: ${raw}`
+                    : 'Diagnostic information cleared';
+            }
+
+            if (serviceId === 0x63) {
+                const printable = bytes.map(value =>
+                    value >= 0x20 && value <= 0x7e
+                        ? String.fromCharCode(value)
+                        : '.'
+                ).join('');
+
+                return `Memory data: ${bytes.length} byte(s)` +
+                    `\nHEX: ${raw}` +
+                    `\nASCII: ${printable || 'empty'}`;
+            }
+
             if ((serviceId === 0x64 ||
                  serviceId === 0x6e ||
                  serviceId === 0x6f) &&
@@ -10701,8 +10779,11 @@
 
                 return `${names[serviceId]} · DID 0x${hex(identifier, 4)}` +
                     (bytes.length > 2
-                        ? `\nParameters: ${bytes.slice(2)
-                            .map(value => hex(value)).join(' ')}`
+                        ? `\n${serviceId === 0x64
+                            ? 'Scaling record'
+                            : serviceId === 0x6f
+                                ? 'Control status record'
+                                : 'Parameters'}: ${tail(2)}`
                         : '');
             }
 
@@ -10713,12 +10794,118 @@
                         : '');
             }
 
+            if (serviceId === 0x69 && bytes.length >= 2) {
+                const operations = {
+                    0x00 : 'De-authenticate',
+                    0x01 : 'Verify certificate unidirectional',
+                    0x02 : 'Verify certificate bidirectional',
+                    0x03 : 'Proof of ownership',
+                    0x04 : 'Transmit certificate',
+                    0x05 : 'Request challenge',
+                    0x06 : 'Verify proof of ownership unidirectional',
+                    0x07 : 'Verify proof of ownership bidirectional',
+                    0x08 : 'Authentication configuration'
+                };
+                const returnValues = {
+                    0x00 : 'Request accepted',
+                    0x01 : 'General failure',
+                    0x02 : 'Authentication configuration APCE',
+                    0x03 : 'Authentication configuration ACR with asymmetric cryptography'
+                };
+                const operation = bytes[0] & 0x7f;
+
+                return `${operations[operation] ||
+                    `Authentication operation 0x${hex(operation)}`}\n` +
+                    `${returnValues[bytes[1]] ||
+                        `Return value 0x${hex(bytes[1])}`}` +
+                    (bytes.length > 2
+                        ? `\nAuthentication data: ${tail(2)}`
+                        : '');
+            }
+
+            if (serviceId === 0x6a && bytes.length >= 1) {
+                return `Periodic data identifier 0x${hex(bytes[0] & 0x7f)}` +
+                    (bytes.length > 1
+                        ? `\nPeriodic data: ${tail(1)}`
+                        : '\nNo periodic data bytes returned.');
+            }
+
+            if (serviceId === 0x6c && bytes.length >= 3) {
+                const operations = {
+                    0x01 : 'Define by identifier',
+                    0x02 : 'Define by memory address',
+                    0x03 : 'Clear dynamic identifier'
+                };
+                const operation = bytes[0] & 0x7f;
+                const identifier = (bytes[1] << 8) | bytes[2];
+
+                return `${operations[operation] ||
+                    `Dynamic DID operation 0x${hex(operation)}`} · ` +
+                    `DID 0x${hex(identifier, 4)}` +
+                    (bytes.length > 3
+                        ? `\nDefinition record: ${tail(3)}`
+                        : '');
+            }
+
+            if (serviceId === 0x77) {
+                return 'Data transfer completed' +
+                    (bytes.length
+                        ? `\nTransfer response record: ${raw}`
+                        : '\nNo transfer response record.');
+            }
+
+            if (serviceId === 0x78 && bytes.length >= 1) {
+                const operations = {
+                    0x01 : 'Add file',
+                    0x02 : 'Delete file',
+                    0x03 : 'Replace file',
+                    0x04 : 'Read file',
+                    0x05 : 'Read directory'
+                };
+                const operation = bytes[0] & 0x7f;
+
+                return `${operations[operation] ||
+                    `File transfer operation 0x${hex(operation)}`} accepted` +
+                    (bytes.length > 1
+                        ? `\nTransfer parameters: ${tail(1)}`
+                        : '');
+            }
+
+            if (serviceId === 0x7d && bytes.length >= 1) {
+                const addressLength = bytes[0] & 0x0f;
+                const sizeLength = bytes[0] >> 4;
+                const required = 1 + addressLength + sizeLength;
+
+                if (!addressLength || !sizeLength || bytes.length < required) {
+                    return `Memory write accepted\nMalformed address/length echo: ${raw}`;
+                }
+
+                const address = unsigned(1, addressLength);
+                const size = unsigned(1 + addressLength, sizeLength);
+
+                return 'Memory write accepted' +
+                    `\nAddress: 0x${address.toString(16).toUpperCase()}` +
+                    `\nSize: ${size} byte(s)` +
+                    (bytes.length > required
+                        ? `\nOEM record: ${tail(required)}`
+                        : '');
+            }
+
             if (serviceId === 0x7e && bytes.length >= 1) {
                 return `Tester Present sub-function 0x${hex(bytes[0] & 0x7f)} acknowledged`;
             }
 
             if (serviceId === 0xc5 && bytes.length >= 1) {
-                return `DTC setting type 0x${hex(bytes[0] & 0x7f)} accepted`;
+                const setting = bytes[0] & 0x7f;
+
+                return `${setting === 0x01
+                    ? 'DTC setting enabled'
+                    : setting === 0x02
+                        ? 'DTC setting disabled'
+                        : `DTC setting type 0x${hex(setting)} accepted`}` +
+                    (bytes.length > 1
+                        ? `\nOption record: ${tail(1)}`
+                        : '');
             }
 
             if (serviceId === 0xc7 && bytes.length >= 1) {
@@ -10729,18 +10916,55 @@
                         : '');
             }
 
+            if (serviceId === 0xc3 && bytes.length >= 1) {
+                const operations = {
+                    0x01 : 'Read extended timing parameter set',
+                    0x02 : 'Set timing parameters to default',
+                    0x03 : 'Read currently active timing parameters',
+                    0x04 : 'Set timing parameters to supplied values'
+                };
+                const operation = bytes[0] & 0x7f;
+
+                return (operations[operation] ||
+                    `Timing operation 0x${hex(operation)}`) +
+                    (bytes.length > 1
+                        ? `\nTiming record: ${tail(1)}`
+                        : '');
+            }
+
+            if (serviceId === 0xc4) {
+                return `Secured data response: ${bytes.length} byte(s)` +
+                    (bytes.length ? `\nSecurity data: ${raw}` : '');
+            }
+
+            if (serviceId === 0xc6 && bytes.length >= 2) {
+                const eventTypes = {
+                    0x00 : 'Stop Response On Event',
+                    0x01 : 'On DTC status change',
+                    0x02 : 'On timer interrupt',
+                    0x03 : 'On change of data identifier',
+                    0x04 : 'Report activated events',
+                    0x05 : 'Start Response On Event',
+                    0x06 : 'Clear Response On Event'
+                };
+                const eventType = bytes[0] & 0x7f;
+
+                return `${eventTypes[eventType] ||
+                    `Response On Event type 0x${hex(eventType)}`}\n` +
+                    `Event window: 0x${hex(bytes[1])}` +
+                    (bytes.length > 2
+                        ? `\nEvent record: ${tail(2)}`
+                        : '');
+            }
+
             const descriptions = {
-                0x54 : 'Diagnostic information cleared',
-                0x63 : 'Memory data returned',
-                0x69 : 'Authentication operation accepted',
-                0x6a : 'Periodic data transmission configured',
-                0x6c : 'Dynamic data identifier definition accepted',
-                0x77 : 'Data transfer completed',
-                0x78 : 'File transfer request accepted',
-                0x7d : 'Memory write accepted',
-                0xc3 : 'Access timing parameters accepted',
-                0xc4 : 'Secured data transmission accepted',
-                0xc6 : 'Response On Event accepted',
+                0x69 : 'Authentication response',
+                0x6a : 'Periodic data response',
+                0x6c : 'Dynamic data identifier response',
+                0x78 : 'File transfer response',
+                0x7d : 'Memory write response',
+                0xc3 : 'Access timing parameter response',
+                0xc6 : 'Response On Event result',
             };
             const description = descriptions[serviceId];
 
