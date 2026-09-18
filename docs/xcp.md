@@ -85,6 +85,36 @@ Block operations are intentionally bounded by one XCP command's 8-bit element
 count. Larger files must be divided into independently checked address ranges.
 The master does not contain OEM seed/key algorithms and does not guess ECU
 erase, page, event-channel, checksum, or programming-format parameters. Those
-values must come from an ECU profile or be entered explicitly. DAQ decoding is
-currently raw: the configured ODT layout must be interpreted by the browser or
-an A2L-aware layer.
+values must come from an ECU profile or be entered explicitly.
+
+## A2L-aware DAQ decoding
+
+The XCP page can load an A2L file locally. The file is never uploaded to the
+device. The browser extracts addressable `MEASUREMENT` objects, their data
+types, byte order, `ECU_ADDRESS`, linear `COMPU_METHOD` conversion and physical
+unit. A measurement can then be assigned to a DTO PID and a byte offset after
+the PID. Incoming DAQ DTOs are decoded into raw and physical values.
+
+The supported measurement types are `UBYTE`, `SBYTE`, `UWORD`, `SWORD`,
+`ULONG`, `SLONG`, `A_UINT64`, `A_INT64`, `FLOAT32_IEEE` and
+`FLOAT64_IEEE`. Non-linear conversion tables and formulas remain visible only
+as raw values until their conversion method is implemented.
+
+## ECU profiles and programming resume
+
+The Web client can save named XCP ECU profiles. A profile contains the CAN
+transport configuration, address extension, DAQ event channel and the compact
+DAQ decoding map derived from A2L. Profiles are stored in browser local
+storage; the original A2L file is not copied.
+
+After successful `PROGRAM_START`, `PROGRAM_CLEAR`, `PROGRAM_BLOCK` and
+`PROGRAM_VERIFY` operations, the browser stores a programming checkpoint with
+the profile name, stage, next MTA address and confirmed byte count. The
+checkpoint survives page reloads and browser restarts. Restoring it fills the
+next MTA and profile, but deliberately does not reconnect, unlock, erase or
+transmit anything. The operator must verify the ECU state before continuing.
+`PROGRAM_RESET` clears the checkpoint.
+
+This browser checkpoint protects against an interrupted Web session. It is not
+an unattended, device-side firmware programming job: continuing without the
+same browser storage requires a future SD-backed XCP programming orchestrator.

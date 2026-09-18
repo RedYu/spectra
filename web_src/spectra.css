@@ -3523,6 +3523,41 @@ body:where(.page-isotp) {
     line-height: 1.55;
 }
 
+:where(body.page-xcp) .xcp-file-field input[type="file"] {
+    width: 100%;
+    min-width: 0;
+}
+
+:where(body.page-xcp) .xcp-daq-values {
+    margin-top: 12px;
+    max-height: 288px;
+    overflow: auto;
+}
+
+:where(body.page-xcp) .xcp-daq-values table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+:where(body.page-xcp) .xcp-daq-values th:nth-child(1),
+:where(body.page-xcp) .xcp-daq-values td:nth-child(1),
+:where(body.page-xcp) .xcp-daq-values th:nth-child(2),
+:where(body.page-xcp) .xcp-daq-values td:nth-child(2) {
+    width: 80px;
+}
+
+:where(body.page-xcp) .xcp-daq-values td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+:where(body.page-xcp) .xcp-program-resume {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
 :where(body.page-isotp) #isotp-status.live,
 :where(body.page-isotp) #isotp-status.open {
     border-color: #276554;

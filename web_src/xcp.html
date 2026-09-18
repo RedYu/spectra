@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.ico">
     <title>XCP Diagnostics · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=41">
-    <script src="spectra.js?v=41" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=42">
+    <script src="spectra.js?v=42" defer></script>
 </head>
 
 <body class="page-xcp page-isotp">
@@ -277,6 +277,67 @@
             </section>
 
             <section class="card isotp-transfer isotp-card">
+                <h2>ECU profile and A2L</h2>
+                <div class="isotp-form-grid">
+                    <label>
+                        Profile name
+                        <input id="xcp-profile-name" value="Default ECU" spellcheck="false">
+                    </label>
+                    <label>
+                        Saved profile
+                        <select id="xcp-profile-select">
+                            <option value="">No saved profiles</option>
+                        </select>
+                    </label>
+                    <label class="xcp-file-field">
+                        A2L description
+                        <input id="xcp-a2l-file" type="file" accept=".a2l,.aml,text/plain">
+                    </label>
+                    <label>
+                        Measurement
+                        <select id="xcp-a2l-measurement">
+                            <option value="">Load an A2L file</option>
+                        </select>
+                    </label>
+                    <label>
+                        DTO PID
+                        <input id="xcp-a2l-pid" value="00" spellcheck="false">
+                    </label>
+                    <label>
+                        DTO byte offset after PID
+                        <input id="xcp-a2l-offset" type="number" min="0" max="63" value="0">
+                    </label>
+                </div>
+                <div class="isotp-actions">
+                    <button id="xcp-profile-save">Save profile</button>
+                    <button id="xcp-profile-load">Load profile</button>
+                    <button id="xcp-profile-delete" class="button-danger">Delete profile</button>
+                    <button id="xcp-a2l-map">Add DAQ mapping</button>
+                    <button id="xcp-a2l-clear">Clear mappings</button>
+                </div>
+                <p id="xcp-a2l-summary" class="note">
+                    A2L parsing and DAQ value decoding run locally in this browser.
+                </p>
+                <div class="table-wrapper xcp-daq-values">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>PID</th>
+                                <th>Offset</th>
+                                <th>Measurement</th>
+                                <th>Raw</th>
+                                <th>Physical</th>
+                                <th>Unit</th>
+                            </tr>
+                        </thead>
+                        <tbody id="xcp-a2l-values">
+                            <tr><td colspan="6">No DAQ mappings configured.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="card isotp-transfer isotp-card">
                 <h2>DAQ / STIM</h2>
                 <div class="isotp-form-grid">
                     <label>DAQ list<input id="xcp-daq-list" type="number" min="0" max="65535" value="0"></label>
@@ -328,6 +389,15 @@
                     <button id="xcp-program-block" class="button-danger" disabled>Program block</button>
                     <button id="xcp-program-verify" class="button-danger" disabled>Verify</button>
                     <button id="xcp-program-reset" class="button-danger" disabled>Program reset</button>
+                </div>
+                <div class="xcp-program-resume">
+                    <div class="metric">Resume checkpoint <b id="xcp-resume-state">None</b></div>
+                    <div class="metric">Next address <b id="xcp-resume-address">—</b></div>
+                    <div class="metric">Confirmed bytes <b id="xcp-resume-bytes">0</b></div>
+                    <div class="isotp-actions">
+                        <button id="xcp-resume-restore">Restore checkpoint</button>
+                        <button id="xcp-resume-clear">Clear checkpoint</button>
+                    </div>
                 </div>
             </section>
 

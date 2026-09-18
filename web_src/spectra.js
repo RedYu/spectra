@@ -13255,6 +13255,261 @@
         const byteCount = element('xcp-byte-count');
         let latestResponse = '';
         let lastSequence = -1;
+        let a2lMeasurements = [];
+        let daqMappings = [];
+
+        const profileStorageKey = 'spectra.xcp.ecu-profiles.v1';
+        const resumeStorageKey = 'spectra.xcp.programming-resume.v1';
+
+        function loadStoredObject(key, fallback) {
+            try {
+                return JSON.parse(localStorage.getItem(key)) || fallback;
+            } catch (_) {
+                return fallback;
+            }
+        }
+
+        function saveStoredObject(key, value) {
+            localStorage.setItem(key, JSON.stringify(value));
+        }
+
+        function parseA2l(text) {
+            const methods = new Map();
+            const methodPattern =
+                /\/begin\s+COMPU_METHOD\s+(\S+)([\s\S]*?)\/end\s+COMPU_METHOD/gi;
+            let match;
+
+            while ((match = methodPattern.exec(text)) !== null) {
+                const linear = match[2].match(
+                    /COEFFS_LINEAR\s+([-+\d.eE]+)\s+([-+\d.eE]+)/i
+                );
+                const unit = match[2].match(/PHYS_UNIT\s+"([^"]*)"/i);
+                methods.set(match[1], {
+                    factor : linear ? Number(linear[1]) : 1,
+                    offset : linear ? Number(linear[2]) : 0,
+                    unit : unit ? unit[1] : ''
+                });
+            }
+
+            const byteOrderMatch = text.match(
+                /BYTE_ORDER\s+(MSB_FIRST|MSB_LAST)/i
+            );
+            const defaultBigEndian = byteOrderMatch
+                ? byteOrderMatch[1].toUpperCase() === 'MSB_FIRST'
+                : false;
+            const measurements = [];
+            const measurementPattern =
+                /\/begin\s+MEASUREMENT\s+(\S+)\s+"[^"]*"\s+(\S+)\s+(\S+)([\s\S]*?)\/end\s+MEASUREMENT/gi;
+
+            while ((match = measurementPattern.exec(text)) !== null) {
+                const address = match[4].match(/ECU_ADDRESS\s+(0x[\da-f]+|\d+)/i);
+
+                if (!address)
+                    continue;
+
+                const method = methods.get(match[3]) || {
+                    factor : 1,
+                    offset : 0,
+                    unit : ''
+                };
+                const localOrder = match[4].match(
+                    /BYTE_ORDER\s+(MSB_FIRST|MSB_LAST)/i
+                );
+                measurements.push({
+                    name : match[1],
+                    type : match[2].toUpperCase(),
+                    address : Number(address[1]),
+                    bigEndian : localOrder
+                        ? localOrder[1].toUpperCase() === 'MSB_FIRST'
+                        : defaultBigEndian,
+                    factor : method.factor,
+                    conversionOffset : method.offset,
+                    unit : method.unit
+                });
+            }
+
+            return measurements.sort((left, right) =>
+                left.name.localeCompare(right.name));
+        }
+
+        function a2lTypeSize(type) {
+            return {
+                UBYTE : 1,
+                SBYTE : 1,
+                UWORD : 2,
+                SWORD : 2,
+                ULONG : 4,
+                SLONG : 4,
+                A_UINT64 : 8,
+                A_INT64 : 8,
+                FLOAT32_IEEE : 4,
+                FLOAT64_IEEE : 8
+            }[type] || 0;
+        }
+
+        function decodeA2lValue(bytes, mapping) {
+            const size = a2lTypeSize(mapping.type);
+            const start = 1 + mapping.dtoOffset;
+
+            if (!size || (start + size) > bytes.length)
+                return null;
+
+            const view = new DataView(
+                Uint8Array.from(bytes.slice(start, start + size)).buffer
+            );
+            const littleEndian = !mapping.bigEndian;
+            let raw;
+
+            switch (mapping.type) {
+                case 'UBYTE': raw = view.getUint8(0); break;
+                case 'SBYTE': raw = view.getInt8(0); break;
+                case 'UWORD': raw = view.getUint16(0, littleEndian); break;
+                case 'SWORD': raw = view.getInt16(0, littleEndian); break;
+                case 'ULONG': raw = view.getUint32(0, littleEndian); break;
+                case 'SLONG': raw = view.getInt32(0, littleEndian); break;
+                case 'A_UINT64': raw = Number(view.getBigUint64(0, littleEndian)); break;
+                case 'A_INT64': raw = Number(view.getBigInt64(0, littleEndian)); break;
+                case 'FLOAT32_IEEE': raw = view.getFloat32(0, littleEndian); break;
+                case 'FLOAT64_IEEE': raw = view.getFloat64(0, littleEndian); break;
+                default: return null;
+            }
+
+            return {
+                raw,
+                physical : (raw * mapping.factor) + mapping.conversionOffset
+            };
+        }
+
+        function renderDaqValues(packetText = '') {
+            const body = element('xcp-a2l-values');
+            body.replaceChildren();
+            const bytes = packetText.trim()
+                ? packetText.trim().split(/\s+/).map(value => parseInt(value, 16))
+                : [];
+            const pid = bytes.length ? bytes[0] : -1;
+
+            if (!daqMappings.length) {
+                const row = body.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 6;
+                cell.textContent = 'No DAQ mappings configured.';
+                return;
+            }
+
+            for (const mapping of daqMappings) {
+                const value = mapping.pid === pid
+                    ? decodeA2lValue(bytes, mapping)
+                    : null;
+                const row = body.insertRow();
+                const values = [
+                    mapping.pid.toString(16).padStart(2, '0').toUpperCase(),
+                    mapping.dtoOffset,
+                    mapping.name,
+                    value ? String(value.raw) : '—',
+                    value ? Number(value.physical.toPrecision(9)).toString() : '—',
+                    mapping.unit || '—'
+                ];
+
+                for (const text of values)
+                    row.insertCell().textContent = text;
+            }
+        }
+
+        function refreshProfileList(selected = '') {
+            const profiles = loadStoredObject(profileStorageKey, {});
+            const select = element('xcp-profile-select');
+            select.replaceChildren();
+
+            if (!Object.keys(profiles).length) {
+                select.add(new Option('No saved profiles', ''));
+                return;
+            }
+
+            for (const name of Object.keys(profiles).sort())
+                select.add(new Option(name, name));
+
+            if (profiles[selected])
+                select.value = selected;
+        }
+
+        function captureProfile() {
+            const fields = [
+                'xcp-bus', 'xcp-command-id', 'xcp-response-id', 'xcp-stim-id',
+                'xcp-format', 'xcp-tx-length', 'xcp-padding', 'xcp-timeout',
+                'xcp-address-extension', 'xcp-daq-event'
+            ];
+            const values = {};
+
+            for (const id of fields)
+                values[id] = element(id).value;
+
+            values['xcp-extended'] = element('xcp-extended').checked;
+            values['xcp-brs'] = element('xcp-brs').checked;
+
+            return {
+                version : 1,
+                name : element('xcp-profile-name').value.trim(),
+                values,
+                mappings : daqMappings
+            };
+        }
+
+        function applyProfile(profile) {
+            if (!profile || profile.version !== 1)
+                throw new Error('Unsupported XCP ECU profile.');
+
+            for (const [id, value] of Object.entries(profile.values || {})) {
+                if (!element(id))
+                    continue;
+
+                if (typeof value === 'boolean')
+                    element(id).checked = value;
+                else
+                    element(id).value = value;
+            }
+
+            element('xcp-profile-name').value = profile.name;
+            daqMappings = Array.isArray(profile.mappings)
+                ? profile.mappings
+                : [];
+            renderDaqValues(element('xcp-latest-daq').textContent);
+            updateFormat();
+        }
+
+        function updateResumeDisplay() {
+            const journal = loadStoredObject(resumeStorageKey, null);
+            element('xcp-resume-state').textContent = journal
+                ? journal.stage
+                : 'None';
+            element('xcp-resume-address').textContent = journal
+                ? `0x${journal.nextAddress.toString(16).padStart(8, '0').toUpperCase()}`
+                : '—';
+            element('xcp-resume-bytes').textContent = journal
+                ? Number(journal.confirmedBytes).toLocaleString()
+                : '0';
+            element('xcp-resume-restore').disabled = !journal;
+            element('xcp-resume-clear').disabled = !journal;
+        }
+
+        function saveProgrammingCheckpoint(stage, addedBytes = 0) {
+            const previous = loadStoredObject(resumeStorageKey, null);
+            const baseAddress = parseHexNumber(
+                element('xcp-address'), 0xffffffff, 'MTA address');
+            const confirmedBytes = stage === 'started'
+                ? 0
+                : Number(previous?.confirmedBytes || 0) + addedBytes;
+            const profileName = element('xcp-profile-name').value.trim();
+            saveStoredObject(resumeStorageKey, {
+                version : 1,
+                profileName,
+                stage,
+                baseAddress : previous?.baseAddress ?? baseAddress,
+                nextAddress : (previous?.nextAddress ?? baseAddress) + addedBytes,
+                confirmedBytes,
+                updatedAt : new Date().toISOString()
+            });
+            updateResumeDisplay();
+        }
 
         initProtocolCanTrace('xcp');
 
@@ -13426,8 +13681,10 @@
                     Number(data.daq_packets || 0).toLocaleString();
                 element('xcp-stim-packets').textContent =
                     Number(data.stim_packets || 0).toLocaleString();
-                element('xcp-latest-daq').textContent =
+                const latestDaq =
                     data.latest_daq || 'No DAQ DTO received.';
+                element('xcp-latest-daq').textContent = latestDaq;
+                renderDaqValues(data.latest_daq || '');
 
                 if (data.operation === 'get_status') {
                     decoded.textContent =
@@ -13553,8 +13810,10 @@
                 await request(body);
                 message.textContent = submittedMessage;
                 await refresh();
+                return true;
             } catch (error) {
                 message.textContent = error.message;
+                return false;
             }
         }
 
@@ -13741,16 +14000,32 @@
                 entry : Number(element('xcp-daq-entry').value)
             }, 'SET_DAQ_PTR completed.'));
 
-        element('xcp-daq-write').addEventListener('click', () =>
-            discovery({
-                action : 'daq_write',
-                bit_offset : 0,
-                size : Number(element('xcp-daq-size').value),
-                address_extension : parseHexNumber(
-                    element('xcp-address-extension'), 0xff, 'Address extension'),
-                address : parseHexNumber(
-                    element('xcp-daq-address'), 0xffffffff, 'DAQ address')
-            }, 'WRITE_DAQ completed.'));
+        element('xcp-daq-write').addEventListener('click', async () => {
+            try {
+                await discovery({
+                    action : 'daq_write',
+                    bit_offset : 0,
+                    size : Number(element('xcp-daq-size').value),
+                    address_extension : parseHexNumber(
+                        element('xcp-address-extension'), 0xff, 'Address extension'),
+                    address : parseHexNumber(
+                        element('xcp-daq-address'), 0xffffffff, 'DAQ address')
+                }, 'WRITE_DAQ completed.');
+
+                const selected = element('xcp-a2l-measurement').value;
+
+                if (selected && !daqMappings.some(mapping =>
+                        mapping.name === selected &&
+                        mapping.pid === parseHexNumber(
+                            element('xcp-a2l-pid'), 0xfb, 'DTO PID') &&
+                        mapping.dtoOffset === Number(element('xcp-a2l-offset').value))) {
+
+                    element('xcp-a2l-map').click();
+                }
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
 
         async function startStopDaq(start) {
             try {
@@ -13800,36 +14075,51 @@
             }, 'STIM DTO queued.'));
 
         element('xcp-program-confirm').addEventListener('change', refresh);
-        element('xcp-program-start').addEventListener('click', () =>
-            discovery({action : 'program_start'}, 'PROGRAM_START completed.'));
+        element('xcp-program-start').addEventListener('click', async () => {
+            if (!await discovery(
+                {action : 'program_start'},
+                'PROGRAM_START completed.'
+            )) return;
+            saveProgrammingCheckpoint('started');
+        });
         element('xcp-program-prepare').addEventListener('click', () =>
             discovery({
                 action : 'program_prepare',
                 code_size : Number(element('xcp-program-code-size').value)
             }, 'PROGRAM_PREPARE completed.'));
-        element('xcp-program-clear').addEventListener('click', () =>
-            discovery({
+        element('xcp-program-clear').addEventListener('click', async () => {
+            if (!await discovery({
                 action : 'program_clear',
                 mode : parseHexNumber(
                     element('xcp-program-clear-mode'), 0xff, 'Clear mode'),
                 range : parseHexNumber(
                     element('xcp-program-clear-range'), 0xffffffff, 'Clear range')
-            }, 'PROGRAM_CLEAR completed.'));
-        element('xcp-program-send').addEventListener('click', () =>
-            discovery({
+            }, 'PROGRAM_CLEAR completed.')) return;
+            saveProgrammingCheckpoint('cleared');
+        });
+        element('xcp-program-send').addEventListener('click', async () => {
+            const data = normalizeDataHex(element('xcp-program-data').value);
+
+            if (!await discovery({
                 action : 'program',
                 command : 0xd0,
                 count : Number(element('xcp-program-count').value),
-                data : normalizeDataHex(element('xcp-program-data').value)
-            }, 'PROGRAM packet completed.'));
-        element('xcp-program-block').addEventListener('click', () =>
-            discovery({
+                data
+            }, 'PROGRAM packet completed.')) return;
+
+            saveProgrammingCheckpoint('transferring', data.split(' ').length);
+        });
+        element('xcp-program-block').addEventListener('click', async () => {
+            const data = normalizeTransferHex(element('xcp-program-data').value);
+            if (!await discovery({
                 action : 'program_block',
                 confirmed : true,
-                data : normalizeTransferHex(element('xcp-program-data').value)
-            }, 'PROGRAM block completed.'));
-        element('xcp-program-verify').addEventListener('click', () =>
-            discovery({
+                data
+            }, 'PROGRAM block completed.')) return;
+            saveProgrammingCheckpoint('transferring', data.split(' ').length);
+        });
+        element('xcp-program-verify').addEventListener('click', async () => {
+            if (!await discovery({
                 action : 'program_verify',
                 mode : parseHexNumber(
                     element('xcp-program-verify-mode'), 0xff, 'Verify mode'),
@@ -13837,9 +14127,163 @@
                     element('xcp-program-verify-type'), 0xff, 'Verify type'),
                 value : parseHexNumber(
                     element('xcp-program-verify-value'), 0xffffffff, 'Verify value')
-            }, 'PROGRAM_VERIFY completed.'));
-        element('xcp-program-reset').addEventListener('click', () =>
-            discovery({action : 'program_reset'}, 'PROGRAM_RESET completed.'));
+            }, 'PROGRAM_VERIFY completed.')) return;
+            saveProgrammingCheckpoint('verified');
+        });
+        element('xcp-program-reset').addEventListener('click', async () => {
+            if (!await discovery(
+                {action : 'program_reset'},
+                'PROGRAM_RESET completed.'
+            )) return;
+            localStorage.removeItem(resumeStorageKey);
+            updateResumeDisplay();
+        });
+
+        element('xcp-a2l-file').addEventListener('change', async event => {
+            const file = event.target.files[0];
+
+            if (!file)
+                return;
+
+            try {
+                a2lMeasurements = parseA2l(await file.text());
+                const select = element('xcp-a2l-measurement');
+                select.replaceChildren();
+
+                for (const measurement of a2lMeasurements) {
+                    select.add(new Option(
+                        `${measurement.name} · 0x${measurement.address
+                            .toString(16).toUpperCase()} · ${measurement.type}`,
+                        measurement.name
+                    ));
+                }
+
+                if (!a2lMeasurements.length)
+                    select.add(new Option('No addressable measurements found', ''));
+
+                element('xcp-a2l-summary').textContent =
+                    `${file.name} · ${a2lMeasurements.length.toLocaleString()} `
+                    + 'addressable measurements';
+            } catch (error) {
+                message.textContent = `A2L parsing failed: ${error.message}`;
+            }
+        });
+
+        element('xcp-a2l-measurement').addEventListener('change', () => {
+            const measurement = a2lMeasurements.find(item =>
+                item.name === element('xcp-a2l-measurement').value);
+
+            if (!measurement)
+                return;
+
+            element('xcp-daq-address').value = measurement.address
+                .toString(16).padStart(8, '0').toUpperCase();
+            element('xcp-daq-size').value = a2lTypeSize(measurement.type);
+        });
+
+        element('xcp-a2l-map').addEventListener('click', () => {
+            try {
+                const measurement = a2lMeasurements.find(item =>
+                    item.name === element('xcp-a2l-measurement').value);
+
+                if (!measurement)
+                    throw new Error('Select an A2L measurement first.');
+
+                const mapping = {
+                    ...measurement,
+                    pid : parseHexNumber(
+                        element('xcp-a2l-pid'), 0xfb, 'DTO PID'),
+                    dtoOffset : Number(element('xcp-a2l-offset').value)
+                };
+                const size = a2lTypeSize(mapping.type);
+
+                if (!size || (mapping.dtoOffset + size) > 63)
+                    throw new Error('The measurement does not fit in the DTO.');
+
+                daqMappings = daqMappings.filter(item =>
+                    item.name !== mapping.name || item.pid !== mapping.pid);
+                daqMappings.push(mapping);
+                renderDaqValues(element('xcp-latest-daq').textContent);
+                message.textContent = `${mapping.name} added to DAQ decoding.`;
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-a2l-clear').addEventListener('click', () => {
+            daqMappings = [];
+            renderDaqValues();
+        });
+
+        element('xcp-profile-save').addEventListener('click', () => {
+            const profile = captureProfile();
+
+            if (!profile.name) {
+                message.textContent = 'Enter an ECU profile name.';
+                return;
+            }
+
+            const profiles = loadStoredObject(profileStorageKey, {});
+            profiles[profile.name] = profile;
+            saveStoredObject(profileStorageKey, profiles);
+            refreshProfileList(profile.name);
+            message.textContent = `ECU profile “${profile.name}” saved.`;
+        });
+
+        element('xcp-profile-load').addEventListener('click', () => {
+            try {
+                const name = element('xcp-profile-select').value;
+                const profile = loadStoredObject(profileStorageKey, {})[name];
+
+                if (!profile)
+                    throw new Error('Select a saved ECU profile.');
+
+                applyProfile(profile);
+                message.textContent = `ECU profile “${name}” loaded.`;
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-profile-delete').addEventListener('click', () => {
+            const name = element('xcp-profile-select').value;
+
+            if (!name || !window.confirm(`Delete ECU profile “${name}”?`))
+                return;
+
+            const profiles = loadStoredObject(profileStorageKey, {});
+            delete profiles[name];
+            saveStoredObject(profileStorageKey, profiles);
+            refreshProfileList();
+            message.textContent = `ECU profile “${name}” deleted.`;
+        });
+
+        element('xcp-resume-restore').addEventListener('click', () => {
+            const journal = loadStoredObject(resumeStorageKey, null);
+
+            if (!journal)
+                return;
+
+            const profile = loadStoredObject(
+                profileStorageKey, {})[journal.profileName];
+
+            if (profile)
+                applyProfile(profile);
+
+            element('xcp-address').value = journal.nextAddress
+                .toString(16).padStart(8, '0').toUpperCase();
+            message.textContent =
+                'Checkpoint restored. Reconnect, unlock PGM and verify the '
+                + 'ECU state before continuing. Erase is never repeated automatically.';
+        });
+
+        element('xcp-resume-clear').addEventListener('click', () => {
+            if (!window.confirm('Clear the XCP programming checkpoint?'))
+                return;
+
+            localStorage.removeItem(resumeStorageKey);
+            updateResumeDisplay();
+        });
 
         element('xcp-copy').addEventListener('click', async () => {
             if (!latestResponse)
@@ -13861,6 +14305,9 @@
 
         format.addEventListener('change', updateFormat);
         commandInput.addEventListener('input', updateByteCount);
+        refreshProfileList();
+        updateResumeDisplay();
+        renderDaqValues();
         updateFormat();
         updateByteCount();
         refresh();
