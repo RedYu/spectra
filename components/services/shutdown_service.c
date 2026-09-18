@@ -36,6 +36,7 @@
 #include "can_logger_service.h"
 #include "isotp_service.h"
 #include "xcp_service.h"
+#include "xcp_programming_service.h"
 #include "network_service.h"
 #include "time_service.h"
 
@@ -207,6 +208,19 @@ static void shutdown_service_task(
      * storage shutdown begins.
      */
     bool can_consumers_stopped = true;
+
+    const esp_err_t xcp_programming_result =
+        xcp_programming_service_stop();
+
+    if (xcp_programming_result != ESP_OK) {
+        can_consumers_stopped = false;
+
+        ESP_LOGW(
+            TAG,
+            "Failed to stop XCP programming: %s",
+            esp_err_to_name(xcp_programming_result)
+        );
+    }
 
     if (xcp_service_is_running()) {
         const esp_err_t xcp_result =

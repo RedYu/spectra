@@ -16,6 +16,7 @@
 #define APP_TASK_PRIORITY_XCP             (8U)
 #define APP_TASK_PRIORITY_CAN_LOGGER      (7U)
 #define APP_TASK_PRIORITY_CAN_TRANSMIT    (6U)
+#define APP_TASK_PRIORITY_XCP_PROGRAM     (6U)
 
 #define APP_TASK_PRIORITY_WEB_CAN         (6U)
 #define APP_TASK_PRIORITY_GUI             (5U)

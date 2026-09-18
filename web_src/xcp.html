@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="/favicon.ico">
     <title>XCP Diagnostics · Spectra</title>
-    <link rel="stylesheet" href="spectra.css?v=42">
-    <script src="spectra.js?v=42" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=43">
+    <script src="spectra.js?v=43" defer></script>
 </head>
 
 <body class="page-xcp page-isotp">
@@ -397,6 +397,48 @@
                     <div class="isotp-actions">
                         <button id="xcp-resume-restore">Restore checkpoint</button>
                         <button id="xcp-resume-clear">Clear checkpoint</button>
+                    </div>
+                </div>
+                <div class="xcp-device-programming">
+                    <h3>Autonomous SD programming</h3>
+                    <p class="note">
+                        The device reads and validates the image from SD, owns
+                        a dedicated XCP session and stores confirmed progress
+                        in /logs/firmware/xcp-resume.json.
+                    </p>
+                    <div class="isotp-form-grid">
+                        <label>
+                            Firmware path
+                            <input id="xcp-job-path" value="/firmwares/firmware.bin" spellcheck="false">
+                        </label>
+                        <label>
+                            BIN base address
+                            <input id="xcp-job-binary-address" value="00000000" spellcheck="false">
+                        </label>
+                        <label>
+                            Clear mode
+                            <input id="xcp-job-clear-mode" value="00" spellcheck="false">
+                        </label>
+                        <label>
+                            Verify value
+                            <input id="xcp-job-verify-value" value="00000000" spellcheck="false">
+                        </label>
+                    </div>
+                    <div class="xcp-job-options">
+                        <label><input id="xcp-job-clear" type="checkbox" checked>Clear image range before a new job</label>
+                        <label><input id="xcp-job-verify" type="checkbox">Run PROGRAM_VERIFY</label>
+                        <label><input id="xcp-job-reset" type="checkbox" checked>Reset ECU after success</label>
+                        <label><input id="xcp-job-confirm" type="checkbox">I verified the ECU profile, file and address range</label>
+                    </div>
+                    <progress id="xcp-job-progress" max="1" value="0"></progress>
+                    <div class="metric">Device job <b id="xcp-job-state">Idle</b></div>
+                    <div class="metric">Progress <b id="xcp-job-progress-text">0 B / 0 B</b></div>
+                    <div class="metric">Blocks <b id="xcp-job-blocks">0 / 0</b></div>
+                    <div class="isotp-actions">
+                        <button id="xcp-job-start" class="button-danger">Start SD programming</button>
+                        <button id="xcp-job-resume">Resume saved job</button>
+                        <button id="xcp-job-cancel">Cancel job</button>
+                        <button id="xcp-job-discard">Discard saved progress</button>
                     </div>
                 </div>
             </section>

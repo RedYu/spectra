@@ -9336,6 +9336,19 @@
             'Response received',
             'Error'
         ];
+        const programmingStateNames = [
+            'Idle',
+            'Validating image',
+            'Connecting',
+            'Preparing',
+            'Erasing',
+            'Transferring',
+            'Verifying',
+            'Resetting',
+            'Complete',
+            'Cancelled',
+            'Error'
+        ];
 
         function parseHex(text) {
             const compact = text.replace(/[\s,:-]+/g, '');
@@ -13675,6 +13688,27 @@
                 element('xcp-program-block').disabled = !programmingEnabled;
                 element('xcp-program-verify').disabled = !programmingEnabled;
                 element('xcp-program-reset').disabled = !programmingEnabled;
+                const jobState = Number(data.program_job_state || 0);
+                const jobBusy = jobState >= 1 && jobState <= 7;
+                const jobSize = Number(data.program_job_image_size || 0);
+                const jobConfirmed = Number(
+                    data.program_job_confirmed_bytes || 0);
+                element('xcp-job-state').textContent =
+                    programmingStateNames[jobState] || 'Unknown';
+                element('xcp-job-progress').max = Math.max(1, jobSize);
+                element('xcp-job-progress').value =
+                    Math.min(jobConfirmed, Math.max(1, jobSize));
+                element('xcp-job-progress-text').textContent =
+                    `${jobConfirmed.toLocaleString()} B / ${jobSize.toLocaleString()} B`;
+                element('xcp-job-blocks').textContent =
+                    `${Number(data.program_job_confirmed_blocks || 0).toLocaleString()} / `
+                    + Number(data.program_job_total_blocks || 0).toLocaleString();
+                element('xcp-job-start').disabled = jobBusy;
+                element('xcp-job-resume').disabled =
+                    jobBusy || !data.program_job_resume_available;
+                element('xcp-job-cancel').disabled = !jobBusy;
+                element('xcp-job-discard').disabled =
+                    jobBusy || !data.program_job_resume_available;
                 capabilities.textContent =
                     `MAX_CTO ${data.maximum_cto || '—'} · MAX_DTO ${data.maximum_dto || '—'}`;
                 element('xcp-daq-packets').textContent =
@@ -14283,6 +14317,102 @@
 
             localStorage.removeItem(resumeStorageKey);
             updateResumeDisplay();
+        });
+
+        element('xcp-job-start').addEventListener('click', async () => {
+            try {
+                if (!element('xcp-job-confirm').checked)
+                    throw new Error('Confirm the autonomous programming job first.');
+
+                if (!window.confirm(
+                        'Start autonomous XCP programming from the selected SD file?'
+                    )) return;
+
+                const fd = format.value === 'fd';
+                await request({
+                    action : 'program_job_start',
+                    confirmed : true,
+                    path : element('xcp-job-path').value.trim(),
+                    binary_address : parseHexNumber(
+                        element('xcp-job-binary-address'), 0xffffffff,
+                        'BIN base address'),
+                    bus : Number(element('xcp-bus').value),
+                    command_identifier : parseHexNumber(
+                        element('xcp-command-id'), 0x1fffffff, 'CRO identifier'),
+                    response_identifier : parseHexNumber(
+                        element('xcp-response-id'), 0x1fffffff, 'DTO identifier'),
+                    stim_identifier : parseHexNumber(
+                        element('xcp-stim-id'), 0x1fffffff, 'STIM identifier'),
+                    extended : element('xcp-extended').checked,
+                    can_fd : fd,
+                    brs : fd && brs.checked,
+                    transmit_data_length : Number(transmitLength.value),
+                    padding_byte : parseHexNumber(
+                        element('xcp-padding'), 0xff, 'Padding byte'),
+                    timeout_ms : Number(element('xcp-timeout').value),
+                    connect_mode : parseHexNumber(
+                        element('xcp-connect-mode'), 0xff, 'CONNECT mode'),
+                    address_extension : parseHexNumber(
+                        element('xcp-address-extension'), 0xff,
+                        'Address extension'),
+                    clear_enabled : element('xcp-job-clear').checked,
+                    clear_mode : parseHexNumber(
+                        element('xcp-job-clear-mode'), 0xff, 'Clear mode'),
+                    format_enabled : false,
+                    verify_enabled : element('xcp-job-verify').checked,
+                    verify_mode : parseHexNumber(
+                        element('xcp-program-verify-mode'), 0xff, 'Verify mode'),
+                    verify_type : parseHexNumber(
+                        element('xcp-program-verify-type'), 0xff, 'Verify type'),
+                    verify_value : parseHexNumber(
+                        element('xcp-job-verify-value'), 0xffffffff,
+                        'Verify value'),
+                    reset_enabled : element('xcp-job-reset').checked
+                });
+                element('xcp-job-confirm').checked = false;
+                message.textContent = 'Autonomous XCP programming job started.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-job-resume').addEventListener('click', async () => {
+            try {
+                if (!window.confirm(
+                        'Resume from the last device-confirmed XCP block? '
+                        + 'Erase will not be repeated.'
+                    )) return;
+
+                await request({action : 'program_job_resume'});
+                message.textContent = 'Saved XCP programming job resumed.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-job-cancel').addEventListener('click', async () => {
+            try {
+                await request({action : 'program_job_cancel'});
+                message.textContent = 'XCP programming cancellation requested.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
+        });
+
+        element('xcp-job-discard').addEventListener('click', async () => {
+            try {
+                if (!window.confirm('Discard device-side XCP programming progress?'))
+                    return;
+
+                await request({action : 'program_job_discard_resume'});
+                message.textContent = 'Device-side XCP programming progress discarded.';
+                await refresh();
+            } catch (error) {
+                message.textContent = error.message;
+            }
         });
 
         element('xcp-copy').addEventListener('click', async () => {

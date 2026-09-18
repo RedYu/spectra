@@ -3558,6 +3558,36 @@ body:where(.page-isotp) {
     border-top: 1px solid var(--border);
 }
 
+:where(body.page-xcp) .xcp-device-programming {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+:where(body.page-xcp) .xcp-device-programming h3 {
+    margin: 0 0 8px;
+}
+
+:where(body.page-xcp) .xcp-job-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 16px;
+    margin: 12px 0;
+}
+
+:where(body.page-xcp) #xcp-job-progress {
+    width: 100%;
+    height: 8px;
+    margin: 4px 0 10px;
+    accent-color: var(--accent);
+}
+
+@media (max-width: 760px) {
+    :where(body.page-xcp) .xcp-job-options {
+        grid-template-columns: 1fr;
+    }
+}
+
 :where(body.page-isotp) #isotp-status.live,
 :where(body.page-isotp) #isotp-status.open {
     border-color: #276554;

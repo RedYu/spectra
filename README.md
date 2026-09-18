@@ -195,6 +195,10 @@ starts transmitting. The complete behavior and API are documented in
   DAQ measurement mappings
 - Persistent browser programming checkpoints with the confirmed stage, next
   MTA address, byte count, and explicit operator-controlled restoration
+- Autonomous device-side XCP programming from SD with streaming
+  BIN/HEX/S-record/BHX parsing and progress monitoring
+- SD-backed XCP programming journal with validated whole-block resume that
+  never repeats erase automatically
 - Explicit XCP programming start, clear, transfer, verify, and reset commands
 - Dedicated browser XCP console
 - Four independent XCP service sessions with a bounded command queue, one
@@ -505,9 +509,14 @@ the ECU profile, current stage, next MTA address, and confirmed byte count.
 Restoring a checkpoint only restores state: reconnect, PGM unlock, ECU-state
 validation, and continuation remain explicit operator actions. Erase and data
 transfer are never repeated automatically. OEM seed-to-key logic and
-ECU-specific erase parameters remain external to the firmware. A future
-SD-backed programming orchestrator is required for unattended device-side XCP
-resume without the original browser profile.
+ECU-specific erase parameters remain external to the firmware.
+
+The autonomous SD workflow runs in a separate device task, owns its XCP
+session, validates the source image, and records each ECU-confirmed block in
+`/sdcard/logs/firmware/xcp-resume.json`. After interruption it validates the
+same file and image layout, skips confirmed whole blocks, and continues at the
+saved address without repeating erase. OEM seed-to-key integration is still
+required for ECUs whose PGM resource is protected.
 
 ## Network and Web Interface
 
@@ -720,6 +729,8 @@ To exit the serial monitor, press `Ctrl+]`.
   and programming controls
 - [x] Browser-side A2L-aware XCP DAQ decoding, named ECU profiles, and
   persistent operator-controlled programming checkpoints
+- [x] Autonomous SD-backed XCP programming jobs with device-side whole-block
+  resume
 - [x] Embedded Web UI and REST API
 - [x] Device diagnostics with health analysis, task/queue telemetry, reports,
   history reset, and SD benchmark control
@@ -736,7 +747,6 @@ To exit the serial monitor, press `Ctrl+]`.
 
 - [ ] BLF import and export
 - [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
-- [ ] SD-backed autonomous XCP programming jobs and device-side resume
 - [ ] Device registration and authentication
 - [ ] Remote backend integration
 

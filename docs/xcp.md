@@ -72,12 +72,19 @@ of the four service sessions. POST accepts these actions:
   `program_prepare`, `program_format`, `program_verify`, and `program_reset`
   expose the standard programming sequence. Destructive actions require an
   explicit confirmation from the Web client;
+- `program_job_start` starts an autonomous SD-backed programming task after
+  closing the interactive Web XCP session. The request contains the transport,
+  programming policy, `/firmwares` path, and an explicit confirmation;
+- `program_job_resume`, `program_job_cancel`, and
+  `program_job_discard_resume` control the device-side job and journal;
 - `execute` sends the hexadecimal CTO bytes from `command`;
 - `disconnect`, `cancel`, and `close` control the current Web session.
 
 GET returns the session state, connection state, latest ESP-IDF result and
 XCP error, the negotiated maximum CTO/DTO sizes, decoded discovery fields,
-identification text, and the most recent raw response. Identifiers and other
+identification text, the most recent raw response, and autonomous programming
+state, progress, block counters, current address, result, and resume
+availability. Identifiers and other
 numeric configuration fields are JSON numbers; CTO bytes use a space-separated
 hexadecimal string such as `F5 00 04 00`.
 
@@ -115,6 +122,33 @@ next MTA and profile, but deliberately does not reconnect, unlock, erase or
 transmit anything. The operator must verify the ECU state before continuing.
 `PROGRAM_RESET` clears the checkpoint.
 
-This browser checkpoint protects against an interrupted Web session. It is not
-an unattended, device-side firmware programming job: continuing without the
-same browser storage requires a future SD-backed XCP programming orchestrator.
+The browser checkpoint protects short interactive programming sequences. For
+complete firmware images, Spectra also provides an autonomous device-side XCP
+programming job. It streams BIN, Intel HEX, Motorola S-record, or BHX input
+from `/sdcard/firmwares`, validates the complete image before opening the XCP
+session, and never loads the complete file into RAM.
+
+The autonomous job owns a dedicated XCP session and performs PROGRAM_START,
+optional PROGRAM_FORMAT, optional range erase, per-block SET_MTA and PROGRAM,
+optional PROGRAM_VERIFY, and optional PROGRAM_RESET. The current implementation
+requires byte address granularity. OEM seed-to-key calculation remains external;
+an ECU with protected PGM resources must be unlocked by a future configured
+security provider.
+
+After every ECU-confirmed image block, the service synchronizes this journal:
+
+```text
+/sdcard/logs/firmware/xcp-resume.json
+```
+
+The journal contains the transport and programming profile, source path, file
+size and modification time, parsed image size, confirmed byte/block counts,
+and next address. Resume reopens and validates the original image, starts a new
+XCP programming session, skips already confirmed whole image blocks, and
+continues at the recorded address. It never repeats erase. A changed file,
+layout mismatch, or address mismatch rejects resume. Successful completion or
+an explicit discard removes the journal; cancellation and failures retain it.
+
+The Web client starts, monitors, cancels, resumes, or discards a device job
+through the existing `/api/xcp` endpoint. Programming continues independently
+of the HTTP request and browser connection.

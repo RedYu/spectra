@@ -18,6 +18,7 @@
 #include "web_api_common.h"
 #include "xcp_commands.h"
 #include "xcp_protocol.h"
+#include "xcp_programming_service.h"
 #include "xcp_service.h"
 
 #define WEB_XCP_BODY_MAX_SIZE      (4096U)
@@ -150,6 +151,142 @@ static esp_err_t web_xcp_block_transfer(
     const cJSON *root,
     bool programming
 );
+
+static esp_err_t web_xcp_programming_action(
+    const cJSON *root,
+    const char *action
+);
+
+static esp_err_t web_xcp_close_web_session(void)
+{
+    if (s_session_id == XCP_SERVICE_SESSION_ID_NONE) {
+        return ESP_OK;
+    }
+
+    const esp_err_t result = xcp_service_close_session(s_session_id);
+
+    if (result == ESP_OK) {
+        s_session_id = XCP_SERVICE_SESSION_ID_NONE;
+        s_response_size = 0U;
+        s_sequence++;
+    }
+
+    return result;
+}
+
+static esp_err_t web_xcp_programming_action(
+    const cJSON *root,
+    const char *action
+)
+{
+    if (strcmp(action, "program_job_cancel") == 0) {
+        return xcp_programming_service_cancel();
+    }
+
+    if (strcmp(action, "program_job_discard_resume") == 0) {
+        return xcp_programming_service_discard_resume();
+    }
+
+    esp_err_t result = web_xcp_close_web_session();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (strcmp(action, "program_job_resume") == 0) {
+        return xcp_programming_service_resume();
+    }
+
+    const cJSON *path = cJSON_GetObjectItemCaseSensitive(root, "path");
+    bool confirmed = false;
+    bool extended = false;
+    bool can_fd = false;
+    bool brs = false;
+    bool clear_enabled = true;
+    bool format_enabled = false;
+    bool verify_enabled = false;
+    bool reset_enabled = true;
+    uint32_t bus = 0U;
+    uint32_t command_identifier = 0U;
+    uint32_t response_identifier = 0U;
+    uint32_t stim_identifier = 0U;
+    uint32_t transmit_length = 8U;
+    uint32_t padding = 0U;
+    uint32_t timeout_ms = WEB_XCP_DEFAULT_TIMEOUT_MS;
+    uint32_t binary_address = 0U;
+    uint32_t connect_mode = 0U;
+    uint32_t address_extension = 0U;
+    uint32_t clear_mode = 0U;
+    uint32_t compression = 0U;
+    uint32_t encryption = 0U;
+    uint32_t programming = 0U;
+    uint32_t access = 0U;
+    uint32_t verify_mode = 0U;
+    uint32_t verify_type = 0U;
+    uint32_t verify_value = 0U;
+
+    if (!cJSON_IsString(path) ||
+        (strlen(path->valuestring) >= XCP_PROGRAMMING_PATH_MAX_LENGTH) ||
+        !web_xcp_boolean(root, "confirmed", false, &confirmed) ||
+        !confirmed ||
+        !web_xcp_number(root, "bus", CAN_BUS_COUNT - 1U, &bus) ||
+        !web_xcp_number(root, "command_identifier", 0x1FFFFFFFU, &command_identifier) ||
+        !web_xcp_number(root, "response_identifier", 0x1FFFFFFFU, &response_identifier) ||
+        !web_xcp_optional_number(root, "stim_identifier", 0x1FFFFFFFU, 0U, &stim_identifier) ||
+        !web_xcp_boolean(root, "extended", false, &extended) ||
+        !web_xcp_boolean(root, "can_fd", false, &can_fd) ||
+        !web_xcp_boolean(root, "brs", false, &brs) ||
+        !web_xcp_optional_number(root, "transmit_data_length", 64U, 8U, &transmit_length) ||
+        !web_xcp_optional_number(root, "padding_byte", UINT8_MAX, 0U, &padding) ||
+        !web_xcp_optional_number(root, "timeout_ms", UINT32_MAX, WEB_XCP_DEFAULT_TIMEOUT_MS, &timeout_ms) ||
+        !web_xcp_optional_number(root, "binary_address", UINT32_MAX, 0U, &binary_address) ||
+        !web_xcp_optional_number(root, "connect_mode", UINT8_MAX, 0U, &connect_mode) ||
+        !web_xcp_optional_number(root, "address_extension", UINT8_MAX, 0U, &address_extension) ||
+        !web_xcp_boolean(root, "clear_enabled", true, &clear_enabled) ||
+        !web_xcp_optional_number(root, "clear_mode", UINT8_MAX, 0U, &clear_mode) ||
+        !web_xcp_boolean(root, "format_enabled", false, &format_enabled) ||
+        !web_xcp_optional_number(root, "compression", UINT8_MAX, 0U, &compression) ||
+        !web_xcp_optional_number(root, "encryption", UINT8_MAX, 0U, &encryption) ||
+        !web_xcp_optional_number(root, "programming", UINT8_MAX, 0U, &programming) ||
+        !web_xcp_optional_number(root, "access", UINT8_MAX, 0U, &access) ||
+        !web_xcp_boolean(root, "verify_enabled", false, &verify_enabled) ||
+        !web_xcp_optional_number(root, "verify_mode", UINT8_MAX, 0U, &verify_mode) ||
+        !web_xcp_optional_number(root, "verify_type", UINT8_MAX, 0U, &verify_type) ||
+        !web_xcp_optional_number(root, "verify_value", UINT32_MAX, 0U, &verify_value) ||
+        !web_xcp_boolean(root, "reset_enabled", true, &reset_enabled)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xcp_programming_config_t config = {0};
+    strlcpy(config.path, path->valuestring, sizeof(config.path));
+    config.transport.bus = (can_bus_id_t)bus;
+    config.transport.command_identifier = command_identifier;
+    config.transport.response_identifier = response_identifier;
+    config.transport.stim_identifier = stim_identifier;
+    config.transport.extended_identifier = extended;
+    config.transport.can_fd = can_fd;
+    config.transport.bit_rate_switch = brs;
+    config.transport.transmit_data_length = (uint8_t)transmit_length;
+    config.transport.padding_byte = (uint8_t)padding;
+    config.transport.response_timeout_ms = timeout_ms;
+    config.binary_address = binary_address;
+    config.connect_mode = (uint8_t)connect_mode;
+    config.address_extension = (uint8_t)address_extension;
+    config.clear_enabled = clear_enabled;
+    config.clear_mode = (uint8_t)clear_mode;
+    config.program_format_enabled = format_enabled;
+    config.compression_method = (uint8_t)compression;
+    config.encryption_method = (uint8_t)encryption;
+    config.programming_method = (uint8_t)programming;
+    config.access_method = (uint8_t)access;
+    config.verify_enabled = verify_enabled;
+    config.verify_mode = (uint8_t)verify_mode;
+    config.verify_type = (uint8_t)verify_type;
+    config.verify_value = verify_value;
+    config.reset_enabled = reset_enabled;
+    return xcp_programming_service_start(&config);
+}
 
 static esp_err_t web_xcp_block_transfer(
     const cJSON *root,
@@ -1527,9 +1664,13 @@ static esp_err_t web_xcp_get_handler(
     char *daq_text =
         web_xcp_format_hex(s_daq_packet, s_daq_packet_size);
     cJSON *response = cJSON_CreateObject();
+    xcp_programming_info_t programming_info = {0};
+    const esp_err_t programming_result =
+        xcp_programming_service_get_info(&programming_info);
 
     const bool valid =
         (info_result == ESP_OK) &&
+        (programming_result == ESP_OK) &&
         (response_text != NULL) &&
         (daq_text != NULL) &&
         (response != NULL) &&
@@ -1646,6 +1787,56 @@ static esp_err_t web_xcp_get_handler(
             response,
             "latest_daq",
             daq_text
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "program_job_state",
+            programming_info.state
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "program_job_result",
+            programming_info.last_error
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "program_job_resume_available",
+            programming_info.resume_available
+        ) != NULL) &&
+        (cJSON_AddBoolToObject(
+            response,
+            "program_job_resumed",
+            programming_info.resumed
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "program_job_image_size",
+            (double)programming_info.image_size
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "program_job_confirmed_bytes",
+            (double)programming_info.confirmed_bytes
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "program_job_current_address",
+            (double)programming_info.current_address
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "program_job_confirmed_blocks",
+            programming_info.confirmed_blocks
+        ) != NULL) &&
+        (cJSON_AddNumberToObject(
+            response,
+            "program_job_total_blocks",
+            programming_info.total_blocks
+        ) != NULL) &&
+        (cJSON_AddStringToObject(
+            response,
+            "program_job_path",
+            programming_info.config.path
         ) != NULL);
 
     free(response_text);
@@ -1740,6 +1931,12 @@ static esp_err_t web_xcp_post_handler(
         result = web_xcp_block_transfer(root, false);
     } else if (strcmp(action->valuestring, "program_block") == 0) {
         result = web_xcp_block_transfer(root, true);
+    } else if ((strcmp(action->valuestring, "program_job_start") == 0) ||
+               (strcmp(action->valuestring, "program_job_resume") == 0) ||
+               (strcmp(action->valuestring, "program_job_cancel") == 0) ||
+               (strcmp(action->valuestring, "program_job_discard_resume") == 0)) {
+
+        result = web_xcp_programming_action(root, action->valuestring);
     } else if ((strcmp(action->valuestring, "get_seed") == 0) ||
                (strcmp(action->valuestring, "unlock") == 0) ||
                (strcmp(action->valuestring, "set_cal_page") == 0) ||

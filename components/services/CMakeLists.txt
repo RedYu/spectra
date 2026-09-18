@@ -35,6 +35,7 @@ idf_component_register(
         "ota_service.c"
         "uds_profile_service.c"
         "uds_did_catalog_service.c"
+        "xcp_programming_service.c"
 
         "web_api/web_api_common.c"
         "web_api/web_system_api.c"
