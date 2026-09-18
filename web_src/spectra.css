@@ -3272,10 +3272,8 @@ body:where(.page-logger) {
     place-items: center;
     width: 18px;
     height: 18px;
-    border: 1px solid currentColor;
-    border-radius: 50%;
     font-family: Arial, sans-serif;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 700;
     line-height: 1;
 }
