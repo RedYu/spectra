@@ -3980,10 +3980,51 @@ body:where(.page-isotp) {
 
 :where(body.page-isotp) .isotp-response,
 :where(body.page-isotp) .uds-configuration,
+:where(body.page-isotp) .uds-discovery,
 :where(body.page-isotp) .uds-did-catalog,
 :where(body.page-isotp) .uds-response,
 :where(body.page-isotp) .isotp-events {
     grid-column: 1 / -1;
+}
+
+:where(body.page-isotp) .uds-discovery-controls {
+    grid-template-columns: repeat(3, minmax(160px, 1fr));
+}
+
+:where(body.page-isotp) .uds-discovery-table-wrapper {
+    margin-top: 16px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+:where(body.page-isotp) .uds-discovery-table {
+    width: 100%;
+    min-width: 660px;
+    border-collapse: collapse;
+}
+
+:where(body.page-isotp) .uds-discovery-table th,
+:where(body.page-isotp) .uds-discovery-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+}
+
+:where(body.page-isotp) .uds-discovery-table th {
+    background: #18222e;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+:where(body.page-isotp) .uds-discovery-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+:where(body.page-isotp) .uds-discovery-table td:first-child,
+:where(body.page-isotp) .uds-discovery-table td:last-child {
+    font-family: "Cascadia Mono", Consolas, monospace;
 }
 
 :where(body.page-isotp) .uds-did-catalog .panel-title > div {
@@ -4144,6 +4185,7 @@ body:where(.page-isotp) {
 
     :where(body.page-isotp) .isotp-response,
     :where(body.page-isotp) .uds-configuration,
+    :where(body.page-isotp) .uds-discovery,
     :where(body.page-isotp) .uds-did-catalog,
     :where(body.page-isotp) .uds-response,
     :where(body.page-isotp) .isotp-events {

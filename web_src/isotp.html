@@ -12,8 +12,8 @@
 
     <title>ISO-TP Diagnostics · Spectra</title>
 
-    <link rel="stylesheet" href="spectra.css?v=40">
-    <script src="spectra.js?v=40" defer></script>
+    <link rel="stylesheet" href="spectra.css?v=41">
+    <script src="spectra.js?v=41" defer></script>
 </head>
 
 <body class="page-isotp">
@@ -278,6 +278,83 @@
                 <div class="isotp-actions">
                     <button id="uds-open" class="primary">Apply UDS channel</button>
                     <button id="uds-close">Close UDS channel</button>
+                </div>
+            </section>
+
+            <section class="card uds-discovery isotp-card">
+                <div class="panel-title">
+                    <div>
+                        <h2>Functional ECU discovery</h2>
+                        <p class="note">
+                            Broadcast Tester Present and collect every
+                            Single Frame UDS response in the selected range.
+                        </p>
+                    </div>
+
+                    <span id="uds-discovery-status">Ready</span>
+                </div>
+
+                <div class="isotp-form-grid uds-discovery-controls">
+                    <label>
+                        First response ID
+                        <input
+                            id="uds-discovery-id-min"
+                            value="7E8"
+                            spellcheck="false"
+                        >
+                    </label>
+
+                    <label>
+                        Last response ID
+                        <input
+                            id="uds-discovery-id-max"
+                            value="7EF"
+                            spellcheck="false"
+                        >
+                    </label>
+
+                    <label>
+                        Collection window
+                        <span class="input-with-unit">
+                            <input
+                                id="uds-discovery-timeout"
+                                type="number"
+                                min="100"
+                                max="10000"
+                                value="1000"
+                            >
+                            <span>ms</span>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="isotp-actions">
+                    <button id="uds-discovery-start" class="primary">
+                        Discover ECUs
+                    </button>
+
+                    <button id="uds-discovery-clear">
+                        Clear results
+                    </button>
+                </div>
+
+                <div class="table-wrapper uds-discovery-table-wrapper">
+                    <table class="uds-discovery-table">
+                        <thead>
+                            <tr>
+                                <th>Response ID</th>
+                                <th>Result</th>
+                                <th>Response time</th>
+                                <th>UDS data</th>
+                            </tr>
+                        </thead>
+
+                        <tbody id="uds-discovery-results">
+                            <tr>
+                                <td colspan="4">No ECUs discovered.</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </section>
 

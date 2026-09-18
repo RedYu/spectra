@@ -7228,6 +7228,13 @@
         }
 
         function addEvent(event) {
+            document.dispatchEvent(
+                new CustomEvent(
+                    'spectra:can-event',
+                    {detail : event}
+                )
+            );
+
             if (paused || ![0, 2, 3, 4].includes(event.type))
                 return;
 
@@ -9814,6 +9821,14 @@
             element('uds-did-catalog-load');
         const didCatalogRemove =
             element('uds-did-catalog-remove');
+        const discoveryStatus =
+            element('uds-discovery-status');
+        const discoveryResults =
+            element('uds-discovery-results');
+        const discoveryStart =
+            element('uds-discovery-start');
+        const discoveryResponders = new Map();
+        let discovery = null;
         let didCatalogs = [];
         let lastSequence = -1;
 
@@ -10609,6 +10624,233 @@
                 (record ? `\nResponse record: ${record}` : '');
         }
 
+        function decodeServiceResponse(serviceId, payloadText) {
+            const bytes = payloadText
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .map(value => parseInt(value, 16));
+            const hex = (value, width = 2) =>
+                value.toString(16).toUpperCase().padStart(width, '0');
+            const raw = payloadText || 'empty';
+
+            if (serviceId === 0x50 && bytes.length >= 1) {
+                const sessions = {
+                    0x01 : 'Default session',
+                    0x02 : 'Programming session',
+                    0x03 : 'Extended diagnostic session',
+                    0x04 : 'Safety system diagnostic session'
+                };
+                const lines = [
+                    sessions[bytes[0] & 0x7f] ||
+                        `Diagnostic session 0x${hex(bytes[0] & 0x7f)}`
+                ];
+
+                if (bytes.length >= 5) {
+                    lines.push(
+                        `P2 server maximum: ${(bytes[1] << 8) | bytes[2]} ms`,
+                        `P2* server maximum: ${((bytes[3] << 8) | bytes[4]) * 10} ms`
+                    );
+                }
+
+                return lines.join('\n');
+            }
+
+            if (serviceId === 0x51 && bytes.length >= 1) {
+                const resetNames = {
+                    0x01 : 'Hard reset',
+                    0x02 : 'Key off/on reset',
+                    0x03 : 'Soft reset',
+                    0x04 : 'Enable rapid power shutdown',
+                    0x05 : 'Disable rapid power shutdown'
+                };
+
+                return resetNames[bytes[0] & 0x7f] ||
+                    `ECU reset type 0x${hex(bytes[0] & 0x7f)}`;
+            }
+
+            if (serviceId === 0x59)
+                return decodeDtcResponse(payloadText);
+            if (serviceId === 0x62)
+                return decodeDidResponse(payloadText);
+            if (serviceId === 0x67)
+                return decodeSecurityAccessResponse(payloadText);
+            if (serviceId === 0x71)
+                return decodeRoutineResponse(payloadText);
+            if (serviceId === 0x74 || serviceId === 0x75)
+                return decodeDownloadResponse(payloadText)?.replace(
+                    'Download accepted',
+                    serviceId === 0x74
+                        ? 'Download accepted'
+                        : 'Upload accepted'
+                );
+            if (serviceId === 0x76)
+                return decodeTransferDataResponse(payloadText);
+
+            if ((serviceId === 0x64 ||
+                 serviceId === 0x6e ||
+                 serviceId === 0x6f) &&
+                bytes.length >= 2) {
+
+                const identifier = (bytes[0] << 8) | bytes[1];
+                const names = {
+                    0x64 : 'Scaling data',
+                    0x6e : 'Data identifier write accepted',
+                    0x6f : 'Input/output control accepted'
+                };
+
+                return `${names[serviceId]} · DID 0x${hex(identifier, 4)}` +
+                    (bytes.length > 2
+                        ? `\nParameters: ${bytes.slice(2)
+                            .map(value => hex(value)).join(' ')}`
+                        : '');
+            }
+
+            if (serviceId === 0x68 && bytes.length >= 1) {
+                return `Communication control type 0x${hex(bytes[0] & 0x7f)} accepted` +
+                    (bytes.length > 1
+                        ? `\nCommunication type: 0x${hex(bytes[1])}`
+                        : '');
+            }
+
+            if (serviceId === 0x7e && bytes.length >= 1) {
+                return `Tester Present sub-function 0x${hex(bytes[0] & 0x7f)} acknowledged`;
+            }
+
+            if (serviceId === 0xc5 && bytes.length >= 1) {
+                return `DTC setting type 0x${hex(bytes[0] & 0x7f)} accepted`;
+            }
+
+            if (serviceId === 0xc7 && bytes.length >= 1) {
+                return `Link control type 0x${hex(bytes[0] & 0x7f)} accepted` +
+                    (bytes.length > 1
+                        ? `\nParameters: ${bytes.slice(1)
+                            .map(value => hex(value)).join(' ')}`
+                        : '');
+            }
+
+            const descriptions = {
+                0x54 : 'Diagnostic information cleared',
+                0x63 : 'Memory data returned',
+                0x69 : 'Authentication operation accepted',
+                0x6a : 'Periodic data transmission configured',
+                0x6c : 'Dynamic data identifier definition accepted',
+                0x77 : 'Data transfer completed',
+                0x78 : 'File transfer request accepted',
+                0x7d : 'Memory write accepted',
+                0xc3 : 'Access timing parameters accepted',
+                0xc4 : 'Secured data transmission accepted',
+                0xc6 : 'Response On Event accepted',
+            };
+            const description = descriptions[serviceId];
+
+            return description
+                ? `${description}${bytes.length ? `\nParameters: ${raw}` : ''}`
+                : null;
+        }
+
+        function renderDiscoveryResults() {
+            discoveryResults.replaceChildren();
+
+            if (discoveryResponders.size === 0) {
+                const row = discoveryResults.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 4;
+                cell.textContent = discovery
+                    ? 'Waiting for ECU responses…'
+                    : 'No ECUs discovered.';
+                return;
+            }
+
+            const responders = [...discoveryResponders.values()]
+                .sort((left, right) => left.identifier - right.identifier);
+
+            for (const responder of responders) {
+                const row = discoveryResults.insertRow();
+                row.insertCell().textContent =
+                    `0x${responder.identifier.toString(16)
+                        .toUpperCase()
+                        .padStart(responder.extended ? 8 : 3, '0')}`;
+                row.insertCell().textContent = responder.result;
+                row.insertCell().textContent =
+                    `${responder.elapsed.toFixed(1)} ms`;
+                row.insertCell().textContent = responder.payload;
+            }
+        }
+
+        function discoveryCanEvent(event) {
+            if (!discovery ||
+                event.type !== 0 ||
+                event.bus !== discovery.bus ||
+                event.id < discovery.minimum ||
+                event.id > discovery.maximum ||
+                Boolean(event.flags & 1) !== discovery.extended ||
+                event.data.length < 2) {
+
+                return;
+            }
+
+            const pci = event.data[0];
+
+            if ((pci >> 4) !== 0)
+                return;
+
+            const escaped = (pci & 0x0f) === 0;
+            const length = escaped ? event.data[1] : (pci & 0x0f);
+            const offset = escaped ? 2 : 1;
+
+            if ((length < 1) || ((offset + length) > event.data.length))
+                return;
+
+            const payload = event.data.slice(offset, offset + length);
+            const positive = payload[0] === 0x7e && payload[1] === 0x00;
+            const negative = payload[0] === 0x7f &&
+                payload[1] === 0x3e && payload.length >= 3;
+
+            if (!positive && !negative)
+                return;
+
+            discoveryResponders.set(event.id, {
+                identifier : event.id,
+                extended : Boolean(event.flags & 1),
+                elapsed : performance.now() - discovery.startedAt,
+                result : positive
+                    ? 'Positive · Tester Present'
+                    : `Negative · NRC 0x${payload[2]
+                        .toString(16).toUpperCase().padStart(2, '0')}`,
+                payload : payload
+                    .map(value => value.toString(16)
+                        .toUpperCase().padStart(2, '0'))
+                    .join(' ')
+            });
+            renderDiscoveryResults();
+        }
+
+        function channelConfiguration() {
+            const extended = element('uds-extended').checked;
+            const fd = format.value === 'fd';
+
+            return {
+                action : 'configure',
+                bus : Number(element('uds-bus').value),
+                tx_id : parseIdentifier(element('uds-tx-id'), extended),
+                rx_id : parseIdentifier(element('uds-rx-id'), extended),
+                extended,
+                fd,
+                brs : fd && brs.checked,
+                functional : element('uds-functional').checked,
+                link_data_length : fd ? 64 : 8,
+                block_size : Number(element('uds-block-size').value),
+                st_min : Number(element('uds-st-min').value),
+                p2_ms : Number(element('uds-p2').value),
+                p2_star_ms : Number(element('uds-p2-star').value),
+                tester_present_enabled :
+                    element('uds-tester-present-enabled').checked,
+                tester_present_interval_ms :
+                    Number(element('uds-tester-present-interval').value)
+            };
+        }
+
         async function refresh() {
             try {
                 const reply = await fetch('/api/uds', {cache : 'no-store'});
@@ -10668,20 +10910,10 @@
                     summary.textContent =
                         `Positive · SID 0x${data.response_sid
                             .toString(16).padStart(2, '0').toUpperCase()}`;
-                    const decoded =
-                        data.response_sid === 0x62
-                            ? decodeDidResponse(data.payload || '')
-                            : data.response_sid === 0x59
-                                ? decodeDtcResponse(data.payload || '')
-                            : data.response_sid === 0x71
-                                ? decodeRoutineResponse(data.payload || '')
-                                : data.response_sid === 0x67
-                                    ? decodeSecurityAccessResponse(data.payload || '')
-                                    : data.response_sid === 0x74
-                                        ? decodeDownloadResponse(data.payload || '')
-                                        : data.response_sid === 0x76
-                                            ? decodeTransferDataResponse(data.payload || '')
-                                            : null;
+                    const decoded = decodeServiceResponse(
+                        data.response_sid,
+                        data.payload || ''
+                    );
 
                     response.textContent =
                         decoded ||
@@ -10730,28 +10962,7 @@
 
         element('uds-open').addEventListener('click', async () => {
             try {
-                const extended = element('uds-extended').checked;
-                const fd = format.value === 'fd';
-
-                await command({
-                    action : 'configure',
-                    bus : Number(element('uds-bus').value),
-                    tx_id : parseIdentifier(element('uds-tx-id'), extended),
-                    rx_id : parseIdentifier(element('uds-rx-id'), extended),
-                    extended,
-                    fd,
-                    brs : fd && brs.checked,
-                    functional : element('uds-functional').checked,
-                    link_data_length : fd ? 64 : 8,
-                    block_size : Number(element('uds-block-size').value),
-                    st_min : Number(element('uds-st-min').value),
-                    p2_ms : Number(element('uds-p2').value),
-                    p2_star_ms : Number(element('uds-p2-star').value),
-                    tester_present_enabled :
-                        element('uds-tester-present-enabled').checked,
-                    tester_present_interval_ms :
-                        Number(element('uds-tester-present-interval').value)
-                });
+                await command(channelConfiguration());
                 await refresh();
             } catch (error) {
                 message.textContent = error.message;
@@ -11268,6 +11479,90 @@
             } catch (error) {
                 setDidCatalogMessage(error.message, true);
             }
+        });
+
+        document.addEventListener(
+            'spectra:can-event',
+            event => discoveryCanEvent(event.detail)
+        );
+
+        discoveryStart.addEventListener('click', async () => {
+            try {
+                if (!element('uds-functional').checked) {
+                    throw new Error(
+                        'Enable Functional request channel before discovery.'
+                    );
+                }
+
+                const extended = element('uds-extended').checked;
+                const minimum = parseIdentifier(
+                    element('uds-discovery-id-min'),
+                    extended
+                );
+                const maximum = parseIdentifier(
+                    element('uds-discovery-id-max'),
+                    extended
+                );
+                const timeout = Number(
+                    element('uds-discovery-timeout').value
+                );
+
+                if (minimum > maximum)
+                    throw new Error(
+                        'First response ID must not exceed the last ID.'
+                    );
+
+                if (!Number.isInteger(timeout) ||
+                    timeout < 100 || timeout > 10000) {
+
+                    throw new Error(
+                        'Collection window must be from 100 to 10000 ms.'
+                    );
+                }
+
+                discoveryResponders.clear();
+                discovery = {
+                    bus : Number(element('uds-bus').value),
+                    minimum,
+                    maximum,
+                    extended,
+                    startedAt : performance.now()
+                };
+                discoveryStart.disabled = true;
+                discoveryStatus.textContent = 'Collecting…';
+                renderDiscoveryResults();
+
+                await command(channelConfiguration());
+                await command({
+                    action : 'request',
+                    kind : 'tester_present',
+                    suppress : false
+                });
+
+                setTimeout(() => {
+                    const count = discoveryResponders.size;
+                    discovery = null;
+                    discoveryStart.disabled = false;
+                    discoveryStatus.textContent = count
+                        ? `${count} ECU${count === 1 ? '' : 's'} found`
+                        : 'No ECU responses';
+                    renderDiscoveryResults();
+                }, timeout);
+            } catch (error) {
+                discovery = null;
+                discoveryStart.disabled = false;
+                discoveryStatus.textContent = 'Discovery failed';
+                message.textContent = error.message;
+                renderDiscoveryResults();
+            }
+        });
+
+        element('uds-discovery-clear').addEventListener('click', () => {
+            discoveryResponders.clear();
+            discoveryStatus.textContent = discovery
+                ? 'Collecting…'
+                : 'Ready';
+            renderDiscoveryResults();
         });
 
         format.addEventListener('change', updateFormat);

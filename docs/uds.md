@@ -265,13 +265,28 @@ The manual UDS channel can transmit through a functional CAN identifier. ISO-TP
 enforces the functional-addressing Single Frame restriction. The configured RX
 identifier selects one physical ECU response for the stateful client, and
 automatic Tester Present is disabled on a functional channel to avoid periodic
-broadcast traffic. Functional multi-responder discovery remains a separate
-collector concern and does not replace the active physical programming client.
+broadcast traffic.
+
+The diagnostics page also provides functional multi-responder discovery. It
+broadcasts a positive-response Tester Present request and collects Single Frame
+responses from every CAN identifier in a configurable range. Results contain
+the responder identifier, positive or negative result, response time, and raw
+UDS payload. Discovery uses the live CAN stream and is intentionally separate
+from the physical client used for stateful diagnostics and ECU programming.
+
+Positive responses shown by the manual client have service-specific summaries
+for diagnostic sessions, ECU reset, DTC services, DID reads and writes, memory
+access, communication and IO control, SecurityAccess, RoutineControl,
+download/upload, TransferData, transfer exit, Tester Present, DTC setting,
+timing, secured transmission, Response On Event, and LinkControl. The raw
+response remains visible when an OEM-specific parameter record cannot be
+decoded generically.
 
 ## Current limitations
 
 - one outstanding request per client;
-- one configured ECU response identifier per functional UDS channel;
+- multi-frame functional discovery responses are not collected; use a physical
+  channel for a complete ISO-TP exchange with the selected ECU;
 - no built-in OEM security-access algorithms;
 - one ReadDataByIdentifier response is decoded at a time;
 - resume is limited to confirmed image-segment boundaries because generic UDS
