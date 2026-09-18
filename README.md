@@ -183,6 +183,12 @@ starts transmitting. The complete behavior and API are documented in
 - XCP slave block-mode DOWNLOAD/PROGRAM transfers with MAX_CTO/MAX_BS checks
 - XCP seed/key resource access and calibration-page control
 - Dynamic DAQ configuration, raw DTO monitoring, and STIM transmission
+- Browser-side A2L parsing with addressable measurement discovery, byte-order
+  handling, linear conversions, units, and typed DAQ DTO decoding
+- Named browser-persistent XCP ECU profiles containing CAN transport and compact
+  DAQ measurement mappings
+- Persistent browser programming checkpoints with the confirmed stage, next
+  MTA address, byte count, and explicit operator-controlled restoration
 - Explicit XCP programming start, clear, transfer, verify, and reset commands
 - Dedicated browser XCP console
 - Four independent XCP service sessions with a bounded command queue, one
@@ -471,9 +477,23 @@ The browser XCP console provides connection and discovery, MTA-based upload and
 download, slave block-mode DOWNLOAD/PROGRAM, explicit address ranges for
 memory writes, CAL/PAG page control, GET_SEED/UNLOCK, dynamic DAQ allocation
 and list control, raw DTO observation, STIM transmission, and programming
-commands. OEM seed-to-key logic, A2L-based DAQ decoding, ECU-specific erase
-parameters, and persistent XCP programming resume are intentionally not
-implemented yet.
+commands.
+
+The console parses A2L files locally without uploading them to the device.
+Addressable `MEASUREMENT` objects can be mapped to a DTO PID and byte offset.
+Incoming DTO values are decoded using the A2L type, byte order, linear
+conversion, and physical unit. Named ECU profiles preserve transport settings,
+the address extension, DAQ event channel, and compact measurement mappings in
+browser local storage.
+
+Successful programming stages update a browser-persistent checkpoint containing
+the ECU profile, current stage, next MTA address, and confirmed byte count.
+Restoring a checkpoint only restores state: reconnect, PGM unlock, ECU-state
+validation, and continuation remain explicit operator actions. Erase and data
+transfer are never repeated automatically. OEM seed-to-key logic and
+ECU-specific erase parameters remain external to the firmware. A future
+SD-backed programming orchestrator is required for unattended device-side XCP
+resume without the original browser profile.
 
 ## Network and Web Interface
 
@@ -682,6 +702,8 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] Streaming BIN, Intel HEX, Motorola S-record, and BHX readers and validators
 - [x] Stateful XCP master, block transfer, DAQ/STIM, CAL/PAG, seed/key access,
   and programming controls
+- [x] Browser-side A2L-aware XCP DAQ decoding, named ECU profiles, and
+  persistent operator-controlled programming checkpoints
 - [x] Embedded Web UI and REST API
 - [x] Device diagnostics with health analysis, task/queue telemetry, reports,
   history reset, and SD benchmark control
@@ -700,8 +722,7 @@ To exit the serial monitor, press `Ctrl+]`.
 - [ ] Multi-responder functional UDS discovery and remaining service-specific
   response decoders
 - [ ] OEM SecurityAccess provider integration without storing secrets in public firmware
-- [ ] A2L-aware XCP DAQ decoding, ECU profiles, and persistent programming
-  resume
+- [ ] SD-backed autonomous XCP programming jobs and device-side resume
 - [ ] Device registration and authentication
 - [ ] Remote backend integration
 
