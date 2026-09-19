@@ -38,6 +38,10 @@ Spectra is under active development. It is intended for diagnostics, monitoring,
 - Configurable Low and Critical battery-level thresholds
 - Configurable display dimming and backlight-off idle timers
 - Passive buzzer with configurable volume and asynchronous signals
+- GPIO0 service/BOOT and GPIO47 power/user buttons with short, double, and
+  long-press recognition
+- Queue-based button action dispatch in the GUI task with audible feedback
+- Graceful long-press power-off through the AXP313A PMIC
 - MCP23017 I/O expander with centralized pin ownership
 - Software-controlled 120-ohm termination for both CAN channels
 - Internal SPIFFS and removable SD-card storage
@@ -249,14 +253,57 @@ starts transmitting. The complete behavior and API are documented in
 | MCP2518FD oscillator | 20 MHz |
 | Power management | AXP313A PMIC |
 | Battery charger | ETA6003 |
-| Battery monitoring | ADC voltage measurement through a resistor divider |
+| Battery | Two 2200 mAh single-cell packs in parallel (1S2P, 4400 mAh nominal) |
+| Battery monitoring | ADC voltage measurement through a 10 kOhm / 10 kOhm resistor divider on the current prototype |
 | Audible feedback | Passive PWM-controlled buzzer |
+| Reset button | CHIP_PU/EN to ground; immediate hardware reset |
+| Service button | GPIO0 to ground; ROM download mode during reset and application actions after startup |
+| Power/user button | GPIO47 to ground and AXP313A PWRON; wake/power-on plus application actions |
 | I/O expansion | MCP23017 over I2C |
 | CAN termination | Independently controlled 120-ohm resistors through MCP23017 |
 | Internal storage | SPIFFS |
 | Removable storage | SD card over SPI |
 | USB connectivity | USB RNDIS network interface |
 | Flash | 16 MB |
+
+### Buttons and power control
+
+Spectra uses three distinct button paths:
+
+- The **Reset** button pulls ESP32-S3 `CHIP_PU/EN` low. It is an emergency
+  hardware reset and does not run the controlled shutdown sequence.
+- The **Service/BOOT** button pulls `GPIO0` low. Holding it during reset selects
+  the ESP32-S3 ROM download mode. After startup, the application can assign
+  short, double, and long-press actions to it.
+- The **Power/User** button is observed on `GPIO47` and is also connected to the
+  AXP313A `PWRON` input. It can power the board on from the PMIC off state and
+  provides short, double, and long-press events while the application is
+  running.
+
+`button_service` monitors both GPIO buttons from one periodic `esp_timer`; it
+does not create a dedicated FreeRTOS task. The current timing is a 10 ms poll,
+40 ms debounce, 350 ms double-press window, 2 second long press, and 1 second
+startup guard. `button_action_dispatcher` transfers events through a bounded
+eight-entry queue and executes registered callbacks in the GUI task. Short,
+double, and long presses use click, success, and warning buzzer signals.
+
+A long press of the Power/User button starts the controlled shutdown sequence.
+Services are stopped, pending settings and logs are flushed, and the SD card is
+unmounted before the AXP313A software power-off command is issued. If the PMIC
+command fails or power remains present, the firmware falls back to an ESP32-S3
+restart instead of remaining in a partially stopped state.
+
+The current prototype uses two 2200 mAh single-cell batteries in parallel. The
+ETA6003 is a single-cell charger, so a 2S series battery configuration is not
+supported. The physical 10 kOhm / 10 kOhm battery divider draws approximately
+210 uA at 4.2 V even while the processor is off. A future hardware revision can
+reduce this loss with a higher-value filtered divider or a switched divider.
+The divider values in `board_config.h` must always match the assembled hardware
+before battery-voltage calibration is evaluated.
+
+When combining `GPIO47` with the PMIC `PWRON` signal, the board must prevent
+back-powering between the ESP32-S3 and PMIC domains and must respect the voltage
+domain of the selected ESP32-S3 module.
 
 ## Architecture
 
@@ -328,6 +375,11 @@ The project separates responsibilities into layers:
 - **Web API and WebSocket** expose configuration, diagnostics, files, and live CAN events.
 - **I/O Expander service** owns MCP23017 outputs and prevents feature services
   from modifying unrelated pins.
+- **Button service** recognizes physical button gestures from a shared timer;
+  the action dispatcher moves callbacks into the GUI task and tracks queue
+  usage and drops.
+- **Shutdown service** coordinates restart and PMIC power-off paths so storage
+  and long-lived services are stopped in a defined order.
 
 Web UI files must be edited in `web_src/`. The build runs
 `scripts/build_web.py` automatically and recreates `spiffs_data/www/` before
@@ -741,7 +793,9 @@ To exit the serial monitor, press `Ctrl+]`.
 - [x] Streaming OTA firmware updates from browser or `/sdcard/updates`, with
   automatic rollback
 - [x] Startup and manual backend firmware availability checks
-- [x] Graceful shutdown and restart
+- [x] Dual-button gesture service and GUI-safe action dispatcher
+- [x] Audible button feedback
+- [x] Graceful shutdown, restart, and AXP313A software power-off
 
 ### Planned
 
