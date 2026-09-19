@@ -55,7 +55,8 @@ typedef struct
 
     toolbar_t toolbar;
 
-    lv_obj_t *filter_dropdown;
+    lv_obj_t *filter_button;
+    lv_obj_t *filter_button_label;
     lv_obj_t *pause_button;
     lv_obj_t *pause_button_label;
     lv_obj_t *clear_button;
@@ -1002,33 +1003,45 @@ static void can_monitor_screen_filter_event_cb(
 )
 {
     if (lv_event_get_code(event) !=
-        LV_EVENT_VALUE_CHANGED) {
+        LV_EVENT_CLICKED) {
 
         return;
     }
 
-    const uint32_t selected =
-        lv_dropdown_get_selected(
-            s_context.filter_dropdown
-        );
-
-    switch (selected) {
-        case 1U:
+    switch (s_context.filter) {
+        case CAN_MONITOR_FILTER_ALL:
             s_context.filter =
                 CAN_MONITOR_FILTER_PRIMARY;
             break;
 
-        case 2U:
+        case CAN_MONITOR_FILTER_PRIMARY:
             s_context.filter =
                 CAN_MONITOR_FILTER_SECONDARY;
             break;
 
-        case 0U:
+        case CAN_MONITOR_FILTER_SECONDARY:
         default:
             s_context.filter =
                 CAN_MONITOR_FILTER_ALL;
             break;
     }
+
+    const char *filter_name = "All buses";
+
+    if (s_context.filter ==
+        CAN_MONITOR_FILTER_PRIMARY) {
+
+        filter_name = "Primary";
+    } else if (s_context.filter ==
+               CAN_MONITOR_FILTER_SECONDARY) {
+
+        filter_name = "Secondary";
+    }
+
+    lv_label_set_text(
+        s_context.filter_button_label,
+        filter_name
+    );
 
     can_monitor_screen_update();
 }
@@ -1222,30 +1235,27 @@ static esp_err_t can_monitor_screen_create_controls(
         LV_FLEX_ALIGN_CENTER
     );
 
-    s_context.filter_dropdown =
-        lv_dropdown_create(controls);
+    s_context.filter_button =
+        can_monitor_screen_create_button(
+            controls,
+            "All buses",
+            can_monitor_screen_filter_event_cb
+        );
 
-    if (s_context.filter_dropdown == NULL) {
+    if (s_context.filter_button == NULL) {
         return ESP_ERR_NO_MEM;
     }
 
-    lv_obj_set_size(
-        s_context.filter_dropdown,
-        150,
-        36
+    lv_obj_set_width(
+        s_context.filter_button,
+        150
     );
 
-    lv_dropdown_set_options(
-        s_context.filter_dropdown,
-        "All buses\nPrimary\nSecondary"
-    );
-
-    lv_obj_add_event_cb(
-        s_context.filter_dropdown,
-        can_monitor_screen_filter_event_cb,
-        LV_EVENT_VALUE_CHANGED,
-        NULL
-    );
+    s_context.filter_button_label =
+        lv_obj_get_child(
+            s_context.filter_button,
+            0
+        );
 
     s_context.pause_button =
         can_monitor_screen_create_button(
