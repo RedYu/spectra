@@ -14,10 +14,10 @@ extern "C" {
 /**
  * @brief Start Spectra backend availability monitoring.
  *
- * The service checks the configured Spectra health endpoint after the
- * Station obtains an IP address and on an explicit request. It does not
- * perform periodic HTTPS requests. Firmware availability is checked once
- * after Internet first becomes available during startup.
+ * The service checks the configured firmware endpoint after the Station
+ * obtains an IP address and on an explicit request. A successfully processed
+ * firmware response also confirms backend availability, avoiding a separate
+ * health-endpoint TLS connection. It does not perform periodic HTTPS requests.
  *
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if the service is
  * already running, ESP_ERR_NO_MEM if the service task cannot be

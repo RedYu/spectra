@@ -816,6 +816,7 @@ esp_err_t ota_service_check_backend(void)
     ota_service_backend_response_t response = {
         .capacity = OTA_SERVICE_BACKEND_RESPONSE_SIZE,
     };
+    int64_t request_started_us = 0;
 
     if (result == ESP_OK) {
         response_buffer = calloc(
@@ -883,7 +884,22 @@ esp_err_t ota_service_check_backend(void)
     }
 
     if (result == ESP_OK) {
+        request_started_us = esp_timer_get_time();
         result = esp_http_client_perform(client);
+    }
+
+    if (request_started_us != 0) {
+        const uint64_t elapsed_ms = (uint64_t)(
+            (esp_timer_get_time() - request_started_us) /
+            1000LL
+        );
+
+        ESP_LOGI(
+            TAG,
+            "Backend firmware check finished: result=%s, elapsed=%llu ms",
+            esp_err_to_name(result),
+            (unsigned long long)elapsed_ms
+        );
     }
 
     if (result == ESP_OK) {

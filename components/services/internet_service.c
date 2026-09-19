@@ -14,22 +14,15 @@
 #include "freertos/task.h"
 #include "freertos/idf_additions.h"
 
-#include "esp_crt_bundle.h"
 #include "esp_event.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
-#include "esp_heap_caps.h"
 
 #include "app_task_priorities.h"
 #include "ota_service.h"
 #include "system_model.h"
 #include "wifi_service.h"
 
-#define INTERNET_SERVICE_URL \
-    ("https://api.spectra.ridel.com.ua/health")
-
-#define INTERNET_SERVICE_TIMEOUT_MS      (20000U)
 #define INTERNET_SERVICE_TASK_STACK_SIZE (6144U)
 #define INTERNET_SERVICE_TASK_PRIORITY \
     APP_TASK_PRIORITY_INTERNET
@@ -126,121 +119,6 @@ static bool internet_service_network_ready(void)
     return true;
 }
 
-static bool internet_service_check(void)
-{
-    const esp_http_client_config_t config = {
-        .url = INTERNET_SERVICE_URL,
-        .method = HTTP_METHOD_GET,
-
-        .timeout_ms =
-            INTERNET_SERVICE_TIMEOUT_MS,
-
-        /*
-         * Verify the backend certificate using the ESP-IDF trusted
-         * root certificate bundle.
-         */
-        .crt_bundle_attach =
-            esp_crt_bundle_attach,
-
-        .tls_version =
-            ESP_HTTP_CLIENT_TLS_VER_TLS_1_2,
-
-        /*
-         * Release the TLS connection after the check to preserve heap
-         * memory while the service is idle.
-         */
-        .keep_alive_enable = false,
-    };
-
-    esp_http_client_handle_t client =
-        esp_http_client_init(
-            &config
-        );
-
-    if (client == NULL) {
-        ESP_LOGW(
-            TAG,
-            "Failed to create HTTP client"
-        );
-
-        return false;
-    }
-
-    ESP_LOGI(
-        TAG,
-        "Memory before HTTPS: internal_dma=%u, largest=%u",
-        (unsigned int)heap_caps_get_free_size(
-            MALLOC_CAP_INTERNAL |
-            MALLOC_CAP_DMA |
-            MALLOC_CAP_8BIT
-        ),
-        (unsigned int)heap_caps_get_largest_free_block(
-            MALLOC_CAP_INTERNAL |
-            MALLOC_CAP_DMA |
-            MALLOC_CAP_8BIT
-        )
-    );
-
-    const esp_err_t result =
-        esp_http_client_perform(
-            client
-        );
-
-    bool available = false;
-
-    if (result == ESP_OK) {
-        const int status_code =
-            esp_http_client_get_status_code(
-                client
-            );
-
-        available =
-            (status_code >= 200) &&
-            (status_code < 300);
-
-        if (!available) {
-            ESP_LOGD(
-                TAG,
-                "Backend returned HTTP status %d",
-                status_code
-            );
-        }
-    } else {
-        ESP_LOGD(
-            TAG,
-            "Backend availability check failed: %s",
-            esp_err_to_name(result)
-        );
-    }
-
-    esp_http_client_cleanup(
-        client
-    );
-
-    ESP_LOGI(
-        TAG,
-        "Memory after HTTPS: internal_dma=%u, "
-        "minimum=%u, largest=%u",
-        (unsigned int)heap_caps_get_free_size(
-            MALLOC_CAP_INTERNAL |
-            MALLOC_CAP_DMA |
-            MALLOC_CAP_8BIT
-        ),
-        (unsigned int)heap_caps_get_minimum_free_size(
-            MALLOC_CAP_INTERNAL |
-            MALLOC_CAP_DMA |
-            MALLOC_CAP_8BIT
-        ),
-        (unsigned int)heap_caps_get_largest_free_block(
-            MALLOC_CAP_INTERNAL |
-            MALLOC_CAP_DMA |
-            MALLOC_CAP_8BIT
-        )
-    );
-
-    return available;
-}
-
 static void internet_service_event_handler(
     void *argument,
     esp_event_base_t event_base,
@@ -314,8 +192,6 @@ static void internet_service_task(
 
     bool previous_available = false;
     bool availability_known = false;
-    bool initial_ota_check_pending = true;
-
     while (true) {
         uint32_t notification = 0U;
 
@@ -356,40 +232,34 @@ static void internet_service_task(
         if ((notification &
              INTERNET_SERVICE_NOTIFY_CHECK) != 0U) {
 
-            available =
-                internet_service_network_ready()
-                    ? internet_service_check()
-                    : false;
+            if (internet_service_network_ready()) {
+                const esp_err_t ota_result =
+                    ota_service_check_backend();
+
+                available = (ota_result == ESP_OK)
+                    ? true
+                    : (ota_result == ESP_ERR_INVALID_STATE)
+                        ? previous_available
+                        : false;
+
+                if ((ota_result != ESP_OK) &&
+                    (ota_result != ESP_ERR_INVALID_STATE)) {
+
+                    ESP_LOGD(
+                        TAG,
+                        "Backend firmware check failed: %s",
+                        esp_err_to_name(ota_result)
+                    );
+                }
+            } else {
+                available = false;
+            }
 
             update_required = true;
         }
 
         if (!update_required) {
             continue;
-        }
-
-        const bool ota_check_requested =
-            (notification &
-             INTERNET_SERVICE_NOTIFY_OTA_CHECK) != 0U;
-
-        if (available &&
-            (initial_ota_check_pending ||
-             ota_check_requested)) {
-
-            initial_ota_check_pending = false;
-
-            const esp_err_t ota_result =
-                ota_service_check_backend();
-
-            if ((ota_result != ESP_OK) &&
-                (ota_result != ESP_ERR_INVALID_STATE)) {
-
-                ESP_LOGD(
-                    TAG,
-                    "Firmware availability check failed: %s",
-                    esp_err_to_name(ota_result)
-                );
-            }
         }
 
         const esp_err_t result =
