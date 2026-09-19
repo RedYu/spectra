@@ -47,6 +47,9 @@ esp_err_t web_service_start(void)
     config.ctrl_port = 32768U;
     config.max_uri_handlers = WEB_SERVICE_MAX_URI_HANDLERS;
     config.stack_size = 8192U;
+    config.task_caps =
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT;
     config.max_open_sockets = 4U;
     config.backlog_conn = 2U;
     config.lru_purge_enable = true;
