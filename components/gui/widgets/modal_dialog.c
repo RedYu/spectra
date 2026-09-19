@@ -159,19 +159,22 @@ bool modal_dialog_create(
         LV_PART_MAIN
     );
 
+    const lv_color_t modal_background =
+        lv_color_mix(
+            theme->modal.overlay,
+            theme->colors.background,
+            LV_OPA_60
+        );
+
     lv_obj_set_style_bg_color(
         dialog->overlay,
-        config->opaque_background
-            ? theme->colors.background
-            : theme->modal.overlay,
+        modal_background,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_bg_opa(
         dialog->overlay,
-        config->opaque_background
-            ? LV_OPA_COVER
-            : LV_OPA_60,
+        LV_OPA_COVER,
         LV_PART_MAIN
     );
 
