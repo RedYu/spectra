@@ -804,6 +804,28 @@ To exit the serial monitor, press `Ctrl+]`.
 - [ ] Device registration and authentication
 - [ ] Remote backend integration
 
+### Single-wire vehicle networks
+
+- [ ] Add an external I2C-to-UART bridge with FIFO and UART Break support
+- [ ] Add an automotive LIN physical-layer transceiver
+- [ ] Control transceiver enable, sleep, and commander pull-up through MCP23017
+- [ ] Implement configurable LIN bit rates from 2.4 kbit/s to 20 kbit/s
+- [ ] Implement LIN commander and responder operation
+- [ ] Add LIN frame monitoring, transmission, logging, and replay
+- [ ] Add a protected ISO 9141 / ISO 14230 K-Line physical interface
+- [ ] Implement K-Line 5-baud initialization and Fast Init
+- [ ] Implement ISO 9141 and KWP2000 transport and diagnostics
+- [ ] Add BMW and early Range Rover K-Bus / I-Bus monitoring
+- [ ] Implement K-Bus message decoding, XOR checksum, bus-idle detection,
+  transmit echo verification, collision detection, and retry handling
+- [ ] Add hardware routing between K-Line and K-Bus / I-Bus connectors
+- [ ] Expose LIN, K-Line, KWP2000, and K-Bus tools through the Web UI and API
+
+The first prototype is planned around an SC16IS740-class single UART bridge for
+LIN. A dual-UART SC16IS752-class bridge should be considered when simultaneous
+LIN and K-Line operation is required. K-Bus / I-Bus needs either a third UART
+or exclusive use of the K-Line UART through protected hardware routing.
+
 ## License
 
 Copyright (C) 2026 Yurii Ridkovets.
