@@ -14,6 +14,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -86,6 +87,8 @@ static xcp_service_session_t s_sessions[
 
 static SemaphoreHandle_t s_lock = NULL;
 static QueueHandle_t s_queue = NULL;
+static StaticQueue_t s_queue_control;
+static uint8_t *s_queue_storage = NULL;
 static TaskHandle_t s_task = NULL;
 static uint32_t s_subscription_id =
     CAN_ROUTER_SUBSCRIPTION_ID_NONE;
@@ -201,12 +204,40 @@ esp_err_t xcp_service_start(
         return ESP_ERR_NO_MEM;
     }
 
-    s_queue = xQueueCreate(
+    if (queue_depth >
+        (SIZE_MAX / sizeof(xcp_service_command_t))) {
+
+        vSemaphoreDelete(s_lock);
+        s_lock = NULL;
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    const size_t queue_storage_size =
+        (size_t)queue_depth *
+        sizeof(xcp_service_command_t);
+
+    s_queue_storage = heap_caps_malloc(
+        queue_storage_size,
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+
+    if (s_queue_storage == NULL) {
+        vSemaphoreDelete(s_lock);
+        s_lock = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_queue = xQueueCreateStatic(
         queue_depth,
-        sizeof(xcp_service_command_t)
+        sizeof(xcp_service_command_t),
+        s_queue_storage,
+        &s_queue_control
     );
 
     if (s_queue == NULL) {
+        heap_caps_free(s_queue_storage);
+        s_queue_storage = NULL;
         vSemaphoreDelete(s_lock);
         s_lock = NULL;
         return ESP_ERR_NO_MEM;
@@ -237,8 +268,10 @@ esp_err_t xcp_service_start(
             }
 
             vQueueDelete(s_queue);
+            heap_caps_free(s_queue_storage);
             vSemaphoreDelete(s_lock);
             s_queue = NULL;
+            s_queue_storage = NULL;
             s_lock = NULL;
             return ESP_ERR_NO_MEM;
         }
@@ -271,8 +304,10 @@ esp_err_t xcp_service_start(
         }
 
         vQueueDelete(s_queue);
+        heap_caps_free(s_queue_storage);
         vSemaphoreDelete(s_lock);
         s_queue = NULL;
+        s_queue_storage = NULL;
         s_lock = NULL;
         return ESP_ERR_NO_MEM;
     }
@@ -357,8 +392,10 @@ esp_err_t xcp_service_stop(void)
     }
 
     vQueueDelete(s_queue);
+    heap_caps_free(s_queue_storage);
     vSemaphoreDelete(s_lock);
     s_queue = NULL;
+    s_queue_storage = NULL;
     s_lock = NULL;
     s_task = NULL;
     s_queue_capacity = 0U;
