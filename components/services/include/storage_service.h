@@ -23,7 +23,34 @@ extern "C" {
 #define STORAGE_LIST_MAX_RESULT_COUNT      (128U)
 
 /**
+ * @brief Internal SPIFFS partition identifier.
+ */
+typedef enum
+{
+    STORAGE_SERVICE_PARTITION_0 = 0,
+    STORAGE_SERVICE_PARTITION_1,
+
+} storage_service_partition_t;
+
+/**
+ * @brief Current internal-storage A/B selection state.
+ */
+typedef struct
+{
+    storage_service_partition_t active_partition;
+    storage_service_partition_t selected_partition;
+
+    bool mounted;
+    bool fallback_used;
+
+} storage_service_partition_info_t;
+
+/**
  * @brief Initialize and mount the internal storage filesystem.
+ *
+ * The partition selected in NVS is mounted first and its required web
+ * resources are validated. If it cannot be used, the service attempts the
+ * other A/B partition and persists the successful fallback selection.
  *
  * @return ESP_OK on success, ESP_ERR_NO_MEM if synchronization
  * resources cannot be created, otherwise an ESP-IDF error code.
@@ -52,6 +79,60 @@ esp_err_t storage_service_deinit(void);
  */
 esp_err_t storage_service_get_mounted(
     bool *mounted
+);
+
+/**
+ * @brief Get the current and next-boot internal-storage partitions.
+ *
+ * The selected partition is stored in NVS. It becomes active during the
+ * next storage-service initialization. When the selected image cannot be
+ * mounted or does not contain the required web resources, initialization
+ * automatically falls back to the other partition.
+ *
+ * @param[out] info Destination partition information.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if info is NULL,
+ * ESP_ERR_INVALID_STATE if the service is not initialized, or
+ * ESP_ERR_TIMEOUT if the service lock cannot be acquired.
+ */
+esp_err_t storage_service_get_partition_info(
+    storage_service_partition_info_t *info
+);
+
+/**
+ * @brief Validate an internal-storage partition image.
+ *
+ * Validation mounts the requested SPIFFS partition temporarily when it is
+ * not active and verifies that the required web resources exist and are
+ * non-empty.
+ *
+ * @param[in] partition Partition to validate.
+ *
+ * @return ESP_OK when the image is valid, ESP_ERR_INVALID_ARG for an
+ * invalid partition, ESP_ERR_INVALID_STATE if the service is not
+ * initialized, ESP_ERR_TIMEOUT if the service lock cannot be acquired,
+ * or an SPIFFS/file validation error.
+ */
+esp_err_t storage_service_validate_partition(
+    storage_service_partition_t partition
+);
+
+/**
+ * @brief Select a validated internal-storage partition for the next boot.
+ *
+ * The currently mounted filesystem is not replaced while services may be
+ * using it. The selection is persisted in NVS and takes effect after a
+ * reboot or a complete storage-service deinitialization and initialization.
+ *
+ * @param[in] partition Partition to select.
+ *
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG for an invalid partition,
+ * ESP_ERR_INVALID_STATE if the service is not initialized,
+ * ESP_ERR_TIMEOUT if the service lock cannot be acquired, or an error from
+ * image validation or NVS persistence.
+ */
+esp_err_t storage_service_select_partition(
+    storage_service_partition_t partition
 );
 
 /**

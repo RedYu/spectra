@@ -19,19 +19,52 @@
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "nvs.h"
+#include "sdkconfig.h"
 
 #include "system_model.h"
 
 #define STORAGE_LOCK_TIMEOUT_MS        (1000U)
 #define STORAGE_STREAM_BUFFER_SIZE     (1024U)
+#define STORAGE_PARTITION_COUNT        (2U)
+
+#define STORAGE_NVS_NAMESPACE          "storage_ab"
+#define STORAGE_NVS_SELECTED_KEY       "selected"
+
+#define STORAGE_VALIDATION_BASE_PATH   "/storage-check"
+
+#if CONFIG_SPECTRA_WEB_CONTENT_GZIP
+#define STORAGE_VALIDATION_SUFFIX      ".gz"
+#else
+#define STORAGE_VALIDATION_SUFFIX      ""
+#endif
 
 static const char *TAG = "storage_service";
 
-static const char STORAGE_PARTITION_LABEL[] = "storage_0";
 static const char STORAGE_BASE_PATH[] = "/storage";
+
+static const char *const STORAGE_PARTITION_LABELS[
+    STORAGE_PARTITION_COUNT
+] = {
+    "storage_0",
+    "storage_1",
+};
+
+static const char *const STORAGE_REQUIRED_FILES[] = {
+    "/www/index.html" STORAGE_VALIDATION_SUFFIX,
+    "/www/spectra.css" STORAGE_VALIDATION_SUFFIX,
+    "/www/spectra.js" STORAGE_VALIDATION_SUFFIX,
+};
 
 static SemaphoreHandle_t s_mutex = NULL;
 static bool s_is_mounted = false;
+static bool s_fallback_used = false;
+
+static storage_service_partition_t s_active_partition =
+    STORAGE_SERVICE_PARTITION_0;
+
+static storage_service_partition_t s_selected_partition =
+    STORAGE_SERVICE_PARTITION_0;
 
 /*
  * TODO:
@@ -80,6 +113,293 @@ static void storage_service_unlock(void)
     (void)xSemaphoreGive(s_mutex);
 }
 
+static bool storage_service_partition_valid(
+    storage_service_partition_t partition
+)
+{
+    return
+        ((uint32_t)partition <
+         STORAGE_PARTITION_COUNT);
+}
+
+static storage_service_partition_t
+storage_service_other_partition(
+    storage_service_partition_t partition
+)
+{
+    return
+        partition ==
+        STORAGE_SERVICE_PARTITION_0
+            ? STORAGE_SERVICE_PARTITION_1
+            : STORAGE_SERVICE_PARTITION_0;
+}
+
+static const char *storage_service_partition_label(
+    storage_service_partition_t partition
+)
+{
+    if (!storage_service_partition_valid(
+            partition
+        )) {
+
+        return NULL;
+    }
+
+    return
+        STORAGE_PARTITION_LABELS[
+            (uint32_t)partition
+        ];
+}
+
+static esp_err_t storage_service_load_selection(
+    storage_service_partition_t *partition
+)
+{
+    if (partition == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *partition =
+        STORAGE_SERVICE_PARTITION_0;
+
+    nvs_handle_t handle;
+
+    esp_err_t result =
+        nvs_open(
+            STORAGE_NVS_NAMESPACE,
+            NVS_READONLY,
+            &handle
+        );
+
+    if (result == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    uint8_t value =
+        (uint8_t)STORAGE_SERVICE_PARTITION_0;
+
+    result =
+        nvs_get_u8(
+            handle,
+            STORAGE_NVS_SELECTED_KEY,
+            &value
+        );
+
+    nvs_close(handle);
+
+    if (result == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    if (value >= STORAGE_PARTITION_COUNT) {
+        ESP_LOGW(
+            TAG,
+            "Ignoring invalid stored partition: %u",
+            (unsigned int)value
+        );
+
+        return ESP_OK;
+    }
+
+    *partition =
+        (storage_service_partition_t)value;
+
+    return ESP_OK;
+}
+
+static esp_err_t storage_service_save_selection(
+    storage_service_partition_t partition
+)
+{
+    if (!storage_service_partition_valid(
+            partition
+        )) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    nvs_handle_t handle;
+
+    esp_err_t result =
+        nvs_open(
+            STORAGE_NVS_NAMESPACE,
+            NVS_READWRITE,
+            &handle
+        );
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        nvs_set_u8(
+            handle,
+            STORAGE_NVS_SELECTED_KEY,
+            (uint8_t)partition
+        );
+
+    if (result == ESP_OK) {
+        result = nvs_commit(handle);
+    }
+
+    nvs_close(handle);
+
+    return result;
+}
+
+static esp_err_t storage_service_validate_mounted_image(
+    const char *base_path
+)
+{
+    if (base_path == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    for (size_t index = 0U;
+         index <
+         (sizeof(STORAGE_REQUIRED_FILES) /
+          sizeof(STORAGE_REQUIRED_FILES[0]));
+         index++) {
+
+        char path[PATH_MAX];
+
+        const int length =
+            snprintf(
+                path,
+                sizeof(path),
+                "%s%s",
+                base_path,
+                STORAGE_REQUIRED_FILES[index]
+            );
+
+        if ((length < 0) ||
+            ((size_t)length >= sizeof(path))) {
+
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        struct stat information;
+
+        if (stat(
+                path,
+                &information
+            ) != 0) {
+
+            ESP_LOGW(
+                TAG,
+                "Storage image is missing '%s'",
+                path
+            );
+
+            return
+                errno == ENOENT
+                    ? ESP_ERR_NOT_FOUND
+                    : ESP_FAIL;
+        }
+
+        if ((information.st_size <= 0) ||
+            !S_ISREG(information.st_mode)) {
+
+            ESP_LOGW(
+                TAG,
+                "Storage image contains invalid '%s'",
+                path
+            );
+
+            return ESP_ERR_INVALID_SIZE;
+        }
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t storage_service_mount_partition(
+    storage_service_partition_t partition,
+    const char *base_path,
+    size_t maximum_open_files
+)
+{
+    const char *label =
+        storage_service_partition_label(
+            partition
+        );
+
+    if ((label == NULL) ||
+        (base_path == NULL)) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_vfs_spiffs_conf_t config = {
+        .base_path = base_path,
+        .partition_label = label,
+        .max_files = maximum_open_files,
+        .format_if_mount_failed = false,
+    };
+
+    return esp_vfs_spiffs_register(
+        &config
+    );
+}
+
+static esp_err_t storage_service_validate_partition_locked(
+    storage_service_partition_t partition
+)
+{
+    if (!storage_service_partition_valid(
+            partition
+        )) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_is_mounted &&
+        (partition == s_active_partition)) {
+
+        return
+            storage_service_validate_mounted_image(
+                STORAGE_BASE_PATH
+            );
+    }
+
+    const esp_err_t mount_result =
+        storage_service_mount_partition(
+            partition,
+            STORAGE_VALIDATION_BASE_PATH,
+            2U
+        );
+
+    if (mount_result != ESP_OK) {
+        return mount_result;
+    }
+
+    const esp_err_t validation_result =
+        storage_service_validate_mounted_image(
+            STORAGE_VALIDATION_BASE_PATH
+        );
+
+    const esp_err_t unmount_result =
+        esp_vfs_spiffs_unregister(
+            storage_service_partition_label(
+                partition
+            )
+        );
+
+    if (validation_result != ESP_OK) {
+        return validation_result;
+    }
+
+    return unmount_result;
+}
+
 esp_err_t storage_service_init(void)
 {
     if (s_mutex == NULL) {
@@ -102,16 +422,9 @@ esp_err_t storage_service_init(void)
         return ESP_OK;
     }
 
-    const esp_vfs_spiffs_conf_t config = {
-        .base_path = STORAGE_BASE_PATH,
-        .partition_label = STORAGE_PARTITION_LABEL,
-        .max_files = 8U,
-        .format_if_mount_failed = false,
-    };
-
     esp_err_t result =
-        esp_vfs_spiffs_register(
-            &config
+        storage_service_load_selection(
+            &s_selected_partition
         );
 
     if (result != ESP_OK) {
@@ -119,29 +432,128 @@ esp_err_t storage_service_init(void)
 
         ESP_LOGE(
             TAG,
-            "Failed to mount SPIFFS: %s",
+            "Failed to load storage selection: %s",
             esp_err_to_name(result)
         );
 
-        const esp_err_t model_result =
-            system_model_set_storage_ready(false);
+        return result;
+    }
 
-        if (model_result != ESP_OK) {
-            ESP_LOGW(
-                TAG,
-                "Failed to update storage model: %s",
-                esp_err_to_name(model_result)
+    const storage_service_partition_t candidates[] = {
+        s_selected_partition,
+        storage_service_other_partition(
+            s_selected_partition
+        ),
+    };
+
+    s_fallback_used = false;
+
+    esp_err_t first_error = ESP_FAIL;
+
+    for (size_t index = 0U;
+         index <
+         (sizeof(candidates) /
+          sizeof(candidates[0]));
+         index++) {
+
+        const storage_service_partition_t candidate =
+            candidates[index];
+
+        const char *label =
+            storage_service_partition_label(
+                candidate
             );
+
+        result =
+            storage_service_mount_partition(
+                candidate,
+                STORAGE_BASE_PATH,
+                8U
+            );
+
+        if (result == ESP_OK) {
+            result =
+                storage_service_validate_mounted_image(
+                    STORAGE_BASE_PATH
+                );
         }
 
-        return result;
+        if (result == ESP_OK) {
+            s_active_partition = candidate;
+            s_is_mounted = true;
+            s_fallback_used = index > 0U;
+            break;
+        }
+
+        if (index == 0U) {
+            first_error = result;
+        }
+
+        ESP_LOGW(
+            TAG,
+            "Storage partition '%s' is not usable: %s",
+            label,
+            esp_err_to_name(result)
+        );
+
+        const esp_err_t unregister_result =
+            esp_vfs_spiffs_unregister(
+                label
+            );
+
+        if ((unregister_result != ESP_OK) &&
+            (unregister_result !=
+             ESP_ERR_INVALID_STATE)) {
+
+            ESP_LOGE(
+                TAG,
+                "Failed to unmount rejected partition '%s': %s",
+                label,
+                esp_err_to_name(unregister_result)
+            );
+
+            result = unregister_result;
+            break;
+        }
+    }
+
+    if (!s_is_mounted) {
+        storage_service_unlock();
+
+        (void)system_model_set_storage_ready(false);
+
+        return
+            result != ESP_OK
+                ? result
+                : first_error;
+    }
+
+    if (s_fallback_used) {
+        const esp_err_t save_result =
+            storage_service_save_selection(
+                s_active_partition
+            );
+
+        if (save_result == ESP_OK) {
+            s_selected_partition =
+                s_active_partition;
+
+        } else {
+            ESP_LOGW(
+                TAG,
+                "Failed to persist fallback partition: %s",
+                esp_err_to_name(save_result)
+            );
+        }
     }
 
     size_t total_bytes = 0U;
     size_t used_bytes = 0U;
 
     result = esp_spiffs_info(
-        STORAGE_PARTITION_LABEL,
+        storage_service_partition_label(
+            s_active_partition
+        ),
         &total_bytes,
         &used_bytes
     );
@@ -155,10 +567,15 @@ esp_err_t storage_service_init(void)
 
         const esp_err_t unregister_result =
             esp_vfs_spiffs_unregister(
-                STORAGE_PARTITION_LABEL
+                storage_service_partition_label(
+                    s_active_partition
+                )
             );
 
-        if (unregister_result != ESP_OK) {
+        if (unregister_result == ESP_OK) {
+            s_is_mounted = false;
+
+        } else {
             /*
              * Registration remains active because cleanup failed.
              */
@@ -189,15 +606,18 @@ esp_err_t storage_service_init(void)
         return result;
     }
 
-    s_is_mounted = true;
-
     storage_service_unlock();
 
     ESP_LOGI(
         TAG,
-        "SPIFFS mounted: total=%u, used=%u",
+        "SPIFFS mounted: partition=%s, total=%u, used=%u, "
+        "fallback=%u",
+        storage_service_partition_label(
+            s_active_partition
+        ),
         (unsigned int)total_bytes,
-        (unsigned int)used_bytes
+        (unsigned int)used_bytes,
+        (unsigned int)s_fallback_used
     );
 
     const esp_err_t model_result =
@@ -230,7 +650,9 @@ esp_err_t storage_service_deinit(void)
 
     const esp_err_t result =
         esp_vfs_spiffs_unregister(
-            STORAGE_PARTITION_LABEL
+            storage_service_partition_label(
+                s_active_partition
+            )
         );
 
     if (result == ESP_OK) {
@@ -285,6 +707,116 @@ esp_err_t storage_service_get_mounted(
     storage_service_unlock();
 
     return ESP_OK;
+}
+
+esp_err_t storage_service_get_partition_info(
+    storage_service_partition_info_t *info
+)
+{
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(
+        info,
+        0,
+        sizeof(*info)
+    );
+
+    const esp_err_t result =
+        storage_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    info->active_partition =
+        s_active_partition;
+
+    info->selected_partition =
+        s_selected_partition;
+
+    info->mounted = s_is_mounted;
+    info->fallback_used = s_fallback_used;
+
+    storage_service_unlock();
+
+    return ESP_OK;
+}
+
+esp_err_t storage_service_validate_partition(
+    storage_service_partition_t partition
+)
+{
+    if (!storage_service_partition_valid(
+            partition
+        )) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t lock_result =
+        storage_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    const esp_err_t result =
+        storage_service_validate_partition_locked(
+            partition
+        );
+
+    storage_service_unlock();
+
+    return result;
+}
+
+esp_err_t storage_service_select_partition(
+    storage_service_partition_t partition
+)
+{
+    if (!storage_service_partition_valid(
+            partition
+        )) {
+
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_err_t lock_result =
+        storage_service_lock();
+
+    if (lock_result != ESP_OK) {
+        return lock_result;
+    }
+
+    esp_err_t result =
+        storage_service_validate_partition_locked(
+            partition
+        );
+
+    if (result == ESP_OK) {
+        result =
+            storage_service_save_selection(
+                partition
+            );
+    }
+
+    if (result == ESP_OK) {
+        s_selected_partition = partition;
+
+        ESP_LOGI(
+            TAG,
+            "Storage partition selected for next boot: %s",
+            storage_service_partition_label(
+                partition
+            )
+        );
+    }
+
+    storage_service_unlock();
+
+    return result;
 }
 
 static bool storage_service_is_valid_path(

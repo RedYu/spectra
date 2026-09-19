@@ -218,4 +218,12 @@ if(NOT SPECTRA_TEST_BUILD)
         DEPENDS
             spectra_web_content
     )
+
+    spiffs_create_partition_image(
+        storage_1
+        ${PROJECT_DIR}/spiffs_data
+        FLASH_IN_PROJECT
+        DEPENDS
+            spectra_web_content
+    )
 endif()
