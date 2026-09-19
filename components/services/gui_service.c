@@ -26,6 +26,7 @@
 #include "app_task_priorities.h"
 #include "gui_theme.h"
 #include "gui_styles.h"
+#include "gui_feedback.h"
 #include "screen_manager.h"
 #include "settings_model.h"
 #include "settings_service.h"
@@ -391,6 +392,27 @@ static void gui_task(
         ESP_LOGE(
             TAG,
             "Failed to initialize LVGL port: %s",
+            esp_err_to_name(result)
+        );
+
+        atomic_store(
+            &s_started,
+            false
+        );
+
+        vTaskDelete(NULL);
+        return;
+    }
+
+    result =
+        gui_feedback_init(
+            lvgl_port_get_touch()
+        );
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize GUI feedback: %s",
             esp_err_to_name(result)
         );
 
