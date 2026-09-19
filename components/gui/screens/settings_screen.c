@@ -240,6 +240,10 @@ static void settings_screen_set_disabled_state(
     bool disabled
 );
 
+static void settings_screen_prepare_dropdown(
+    lv_obj_t *dropdown
+);
+
 static void settings_screen_refresh_storage_info(void);
 
 static void settings_screen_refresh_system_info(void);
@@ -3797,6 +3801,10 @@ static esp_err_t settings_screen_create_theme_card(
         return ESP_ERR_NO_MEM;
     }
 
+    settings_screen_prepare_dropdown(
+        s_theme_dropdown
+    );
+
     gui_feedback_attach(
         s_theme_dropdown
     );
@@ -4670,6 +4678,33 @@ static void settings_screen_set_disabled_state(
     }
 }
 
+static void settings_screen_prepare_dropdown(
+    lv_obj_t *dropdown
+)
+{
+    if (dropdown == NULL) {
+        return;
+    }
+
+    lv_obj_t *list =
+        lv_dropdown_get_list(dropdown);
+
+    if (list == NULL) {
+        return;
+    }
+
+    /*
+     * Rounded child clipping creates temporary ARGB draw layers. Keep the
+     * rounded list background, but draw its contents without layer-backed
+     * corner clipping so opening a selector does not pressure the LVGL pool.
+     */
+    lv_obj_set_style_clip_corner(
+        list,
+        false,
+        LV_PART_MAIN
+    );
+}
+
 static lv_obj_t *settings_screen_create_dropdown_card(
     lv_obj_t *parent,
     const char *title,
@@ -4734,6 +4769,10 @@ static lv_obj_t *settings_screen_create_dropdown_card(
         lv_obj_delete(card);
         return NULL;
     }
+
+    settings_screen_prepare_dropdown(
+        dropdown
+    );
 
     lv_dropdown_set_options(
         dropdown,
@@ -4849,6 +4888,10 @@ static esp_err_t settings_screen_create_can_tab(
     if (s_can_bitrate_dropdown == NULL) {
         return ESP_ERR_NO_MEM;
     }
+
+    settings_screen_prepare_dropdown(
+        s_can_bitrate_dropdown
+    );
 
     lv_dropdown_set_options(
         s_can_bitrate_dropdown,
