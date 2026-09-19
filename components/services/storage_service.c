@@ -27,7 +27,7 @@
 
 static const char *TAG = "storage_service";
 
-static const char STORAGE_PARTITION_LABEL[] = "storage";
+static const char STORAGE_PARTITION_LABEL[] = "storage_0";
 static const char STORAGE_BASE_PATH[] = "/storage";
 
 static SemaphoreHandle_t s_mutex = NULL;

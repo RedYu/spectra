@@ -212,7 +212,7 @@ if(NOT SPECTRA_TEST_BUILD)
     )
 
     spiffs_create_partition_image(
-        storage
+        storage_0
         ${PROJECT_DIR}/spiffs_data
         FLASH_IN_PROJECT
         DEPENDS

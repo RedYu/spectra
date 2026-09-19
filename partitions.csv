@@ -11,6 +11,10 @@ ota_1,              app,         ota_1,             ,  4M,
 
 nvs_keys,           data,        nvs_keys,          ,  0x1000,
 
-storage,            data,        spiffs,            ,  1M,
+# Keep the first storage partition at the previous storage address so an
+# existing SPIFFS image can remain readable after the partition-table update.
+# storage_1 is reserved for a future transactional A/B web-content update.
+storage_0,          data,        spiffs,            ,  1M,
+storage_1,          data,        spiffs,            ,  1M,
 
 coredump,           data,        coredump,          ,  256K
