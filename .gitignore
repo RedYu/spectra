@@ -1,5 +1,12 @@
 # macOS
 .DS_Store
+
+# Private manufacturing and device-provisioning documentation
+#
+# This directory may describe eFuse allocation, certificate enrollment,
+# backend provisioning and recovery procedures. Never store production
+# private keys, unencrypted credentials or registration tokens in Git.
+/private_docs/
 .AppleDouble
 .LSOverride
 
