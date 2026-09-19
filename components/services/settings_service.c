@@ -4861,48 +4861,58 @@ esp_err_t settings_service_set_sound(
         return ESP_ERR_INVALID_STATE;
     }
 
-    app_settings_t previous;
+    app_settings_t *updated =
+        settings_service_allocate_settings();
+
+    if (updated == NULL) {
+        settings_service_unlock();
+        return ESP_ERR_NO_MEM;
+    }
 
     esp_err_t result =
         settings_model_get(
-            &previous
+            updated
         );
 
     if (result != ESP_OK) {
+        heap_caps_free(updated);
         settings_service_unlock();
         return result;
     }
 
-    app_settings_t updated =
-        previous;
+    const sound_settings_t previous =
+        updated->sound;
 
-    updated.sound.enabled =
+    updated->sound.enabled =
         enabled;
 
-    updated.sound.volume_percent =
+    updated->sound.volume_percent =
         volume_percent;
 
     result =
         settings_model_set(
-            &updated
+            updated
         );
 
     if (result == ESP_OK) {
         result =
             settings_service_apply_sound(
-                &updated.sound
+                &updated->sound
             );
     }
 
     if (result != ESP_OK) {
+        updated->sound =
+            previous;
+
         (void)settings_model_set(
-            &previous
+            updated
         );
 
         if (buzzer_service_is_running()) {
             const esp_err_t rollback_result =
                 settings_service_apply_sound(
-                    &previous.sound
+                    &previous
                 );
 
             if (rollback_result != ESP_OK) {
@@ -4914,6 +4924,8 @@ esp_err_t settings_service_set_sound(
             }
         }
     }
+
+    heap_caps_free(updated);
 
     settings_service_unlock();
 

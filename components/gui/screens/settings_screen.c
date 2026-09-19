@@ -371,20 +371,21 @@ static void sound_enabled_switch_event_cb(
             LV_STATE_CHECKED
         );
 
-    app_settings_t settings;
+    uint8_t volume_percent =
+        SETTINGS_SOUND_VOLUME_DEFAULT;
 
-    esp_err_t result =
-        settings_model_get(
-            &settings
-        );
-
-    if (result == ESP_OK) {
-        result =
-            settings_service_set_sound(
-                enabled,
-                settings.sound.volume_percent
+    if (s_buzzer_volume_slider != NULL) {
+        volume_percent =
+            (uint8_t)lv_slider_get_value(
+                s_buzzer_volume_slider
             );
     }
+
+    const esp_err_t result =
+        settings_service_set_sound(
+            enabled,
+            volume_percent
+        );
 
     if (result != ESP_OK) {
         ESP_LOGE(
@@ -432,20 +433,18 @@ static void buzzer_volume_slider_event_cb(
             slider
         );
 
-    app_settings_t settings;
-
-    esp_err_t result =
-        settings_model_get(
-            &settings
+    const bool enabled =
+        (s_sound_enabled_switch != NULL) &&
+        lv_obj_has_state(
+            s_sound_enabled_switch,
+            LV_STATE_CHECKED
         );
 
-    if (result == ESP_OK) {
-        result =
-            settings_service_set_sound(
-                settings.sound.enabled,
-                (uint8_t)value
-            );
-    }
+    const esp_err_t result =
+        settings_service_set_sound(
+            enabled,
+            (uint8_t)value
+        );
 
     if (result != ESP_OK) {
         ESP_LOGE(
