@@ -431,9 +431,6 @@ static void can_monitor_screen_table_event_cb(
         .initial_progress = 0U,
         .progress_text = NULL,
 
-        .animate_open =
-            gui_config_get_animations_enabled(),
-
         .close_on_overlay_click = true,
     };
 

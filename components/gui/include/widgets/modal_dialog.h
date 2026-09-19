@@ -88,11 +88,6 @@ typedef struct
     const char *progress_text;
 
     /**
-     * Animate the dialog when it appears.
-     */
-    bool animate_open;
-
-    /**
      * Allow closing the dialog by pressing the modal background.
      */
     bool close_on_overlay_click;

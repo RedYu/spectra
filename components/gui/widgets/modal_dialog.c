@@ -18,10 +18,6 @@
 #define MODAL_DIALOG_BUTTON_HEIGHT      42
 #define MODAL_DIALOG_BUTTON_GAP         10
 
-#define MODAL_DIALOG_ANIMATION_TIME_MS  180
-#define MODAL_DIALOG_SCALE_START        220
-#define MODAL_DIALOG_SCALE_END          256
-
 static void modal_dialog_delete_event_cb(
     lv_event_t *event
 );
@@ -36,11 +32,6 @@ static void modal_dialog_secondary_event_cb(
 
 static void modal_dialog_overlay_event_cb(
     lv_event_t *event
-);
-
-static void modal_dialog_open_animation_cb(
-    void *object,
-    int32_t value
 );
 
 static lv_obj_t *modal_dialog_button_create(
@@ -713,67 +704,11 @@ bool modal_dialog_create(
         );
     }
 
-    lv_obj_set_style_transform_scale(
-        dialog->dialog,
-        256,
-        LV_PART_MAIN
-    );
-
     lv_obj_set_style_opa(
         dialog->dialog,
         LV_OPA_COVER,
         LV_PART_MAIN
     );
-
-    if (config->animate_open) {
-        lv_obj_set_style_transform_scale(
-            dialog->dialog,
-            MODAL_DIALOG_SCALE_START,
-            LV_PART_MAIN
-        );
-
-        lv_obj_set_style_opa(
-            dialog->dialog,
-            LV_OPA_0,
-            LV_PART_MAIN
-        );
-
-        lv_anim_t animation;
-
-        lv_anim_init(
-            &animation
-        );
-
-        lv_anim_set_var(
-            &animation,
-            dialog->dialog
-        );
-
-        lv_anim_set_values(
-            &animation,
-            MODAL_DIALOG_SCALE_START,
-            MODAL_DIALOG_SCALE_END
-        );
-
-        lv_anim_set_time(
-            &animation,
-            MODAL_DIALOG_ANIMATION_TIME_MS
-        );
-
-        lv_anim_set_exec_cb(
-            &animation,
-            modal_dialog_open_animation_cb
-        );
-
-        lv_anim_set_path_cb(
-            &animation,
-            lv_anim_path_ease_out
-        );
-
-        lv_anim_start(
-            &animation
-        );
-    }
 
     return true;
 }
@@ -1252,40 +1187,6 @@ static void modal_dialog_overlay_event_cb(
             dialog
         );
     }
-}
-
-static void modal_dialog_open_animation_cb(
-    void *object,
-    int32_t value
-)
-{
-    lv_obj_t *dialog =
-        (lv_obj_t *)object;
-
-    if (dialog == NULL) {
-        return;
-    }
-
-    lv_obj_set_style_transform_scale(
-        dialog,
-        value,
-        LV_PART_MAIN
-    );
-
-    const int32_t opacity =
-        lv_map(
-            value,
-            MODAL_DIALOG_SCALE_START,
-            MODAL_DIALOG_SCALE_END,
-            LV_OPA_0,
-            LV_OPA_COVER
-        );
-
-    lv_obj_set_style_opa(
-        dialog,
-        (lv_opa_t)opacity,
-        LV_PART_MAIN
-    );
 }
 
 static void modal_dialog_reset(

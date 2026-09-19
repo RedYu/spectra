@@ -116,13 +116,6 @@ bool sd_card_modal_open(
         .progress_text =
             NULL,
 
-        /*
-         * Keep this dialog static. Its full-screen translucent overlay
-         * otherwise makes LVGL repeatedly redraw and recolor the complete
-         * main screen while the scale/opacity animation is running.
-         */
-        .animate_open = false,
-
         .close_on_overlay_click =
             false,
     };

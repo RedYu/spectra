@@ -1943,12 +1943,6 @@ static void ota_button_action(void)
         .initial_progress = 0U,
         .progress_text = "Waiting for server response",
 
-        /*
-         * Keep the full-screen OTA dialog static. Animating its scale and
-         * opacity repeatedly redraws the main screen below the translucent
-         * overlay and can starve the CPU 1 idle task.
-         */
-        .animate_open = false,
         .close_on_overlay_click = false,
     };
 

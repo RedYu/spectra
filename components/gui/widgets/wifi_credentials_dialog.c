@@ -338,7 +338,6 @@ bool wifi_credentials_dialog_open(
         .initial_progress = 0U,
         .progress_text = NULL,
 
-        .animate_open = true,
         .close_on_overlay_click = false,
     };
 
