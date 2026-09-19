@@ -10,6 +10,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+#include "esp_heap_caps.h"
+
 #include "app_config.h"
 
 #define SETTINGS_LOCK_TIMEOUT_MS (100U)
@@ -31,7 +33,7 @@ _Static_assert(
     "Sound volume does not fit into uint8_t"
 );
 
-static app_settings_t s_settings;
+static app_settings_t *s_settings = NULL;
 static SemaphoreHandle_t s_mutex = NULL;
 
 static bool settings_model_nominal_can_bitrate_valid(
@@ -351,13 +353,34 @@ static esp_err_t settings_model_validate(
 
 esp_err_t settings_model_init(void)
 {
-    if (s_mutex != NULL) {
+    if ((s_mutex != NULL) &&
+        (s_settings != NULL)) {
+
         return ESP_OK;
+    }
+
+    if ((s_mutex != NULL) ||
+        (s_settings != NULL)) {
+
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_settings = heap_caps_malloc(
+        sizeof(*s_settings),
+        MALLOC_CAP_SPIRAM |
+        MALLOC_CAP_8BIT
+    );
+
+    if (s_settings == NULL) {
+        return ESP_ERR_NO_MEM;
     }
 
     s_mutex = xSemaphoreCreateMutex();
 
     if (s_mutex == NULL) {
+        heap_caps_free(s_settings);
+        s_settings = NULL;
+
         return ESP_ERR_NO_MEM;
     }
 
@@ -372,10 +395,13 @@ esp_err_t settings_model_init(void)
         vSemaphoreDelete(s_mutex);
         s_mutex = NULL;
 
+        heap_caps_free(s_settings);
+        s_settings = NULL;
+
         return result;
     }
 
-    s_settings = defaults;
+    *s_settings = defaults;
 
     return ESP_OK;
 }
@@ -552,7 +578,9 @@ esp_err_t settings_model_set(
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (s_mutex == NULL) {
+    if ((s_mutex == NULL) ||
+        (s_settings == NULL)) {
+
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -580,7 +608,7 @@ esp_err_t settings_model_set(
         return ESP_ERR_TIMEOUT;
     }
 
-    s_settings = validated;
+    *s_settings = validated;
 
     (void)xSemaphoreGive(s_mutex);
 
@@ -604,7 +632,9 @@ esp_err_t settings_model_get(
         sizeof(*settings)
     );
 
-    if (s_mutex == NULL) {
+    if ((s_mutex == NULL) ||
+        (s_settings == NULL)) {
+
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -618,7 +648,7 @@ esp_err_t settings_model_get(
         return ESP_ERR_TIMEOUT;
     }
 
-    *settings = s_settings;
+    *settings = *s_settings;
 
     (void)xSemaphoreGive(s_mutex);
 
