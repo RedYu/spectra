@@ -161,13 +161,17 @@ bool modal_dialog_create(
 
     lv_obj_set_style_bg_color(
         dialog->overlay,
-        theme->modal.overlay,
+        config->opaque_background
+            ? theme->colors.background
+            : theme->modal.overlay,
         LV_PART_MAIN
     );
 
     lv_obj_set_style_bg_opa(
         dialog->overlay,
-        LV_OPA_60,
+        config->opaque_background
+            ? LV_OPA_COVER
+            : LV_OPA_60,
         LV_PART_MAIN
     );
 
@@ -1352,4 +1356,3 @@ void modal_dialog_set_secondary_text(
             : ""
     );
 }
-

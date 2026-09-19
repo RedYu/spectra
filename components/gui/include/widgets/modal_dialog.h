@@ -93,6 +93,13 @@ typedef struct
     bool animate_open;
 
     /**
+     * Cover the parent screen with the theme background while the dialog is
+     * open. Use this for frequently updated dialogs on software-rendered
+     * displays so LVGL does not redraw the complete screen below them.
+     */
+    bool opaque_background;
+
+    /**
      * Allow closing the dialog by pressing the dark overlay.
      */
     bool close_on_overlay_click;

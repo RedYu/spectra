@@ -1949,6 +1949,7 @@ static void ota_button_action(void)
          * overlay and can starve the CPU 1 idle task.
          */
         .animate_open = false,
+        .opaque_background = true,
         .close_on_overlay_click = false,
     };
 
