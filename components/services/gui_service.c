@@ -34,7 +34,7 @@
 #include "button_action_dispatcher.h"
 #include "shutdown_service.h"
 
-#define GUI_TASK_STACK_SIZE       (8192U)
+#define GUI_TASK_STACK_SIZE       (10U * 1024U)
 #define GUI_TASK_PRIORITY \
     APP_TASK_PRIORITY_GUI
 #define GUI_BOOT_STATUS_LENGTH    (48U)
