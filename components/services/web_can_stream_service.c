@@ -1029,6 +1029,8 @@ static esp_err_t web_can_stream_websocket_handler(
             &s_client_socket
         );
 
+    bool client_registered = false;
+
     /*
      * ESP-IDF may invoke this handler for the first time only after
      * completing the WebSocket handshake. Register the client on its
@@ -1038,8 +1040,9 @@ static esp_err_t web_can_stream_websocket_handler(
         WEB_CAN_STREAM_CLIENT_NONE) {
 
         /*
-         * Clear data left by a previously disconnected client before
-         * publishing the new socket.
+         * No producer publishes events while no client is registered,
+         * so stale data can be discarded safely before the socket is
+         * made visible to the router callback.
          */
         if (s_event_queue != NULL) {
             (void)xQueueReset(
@@ -1047,6 +1050,64 @@ static esp_err_t web_can_stream_websocket_handler(
             );
         }
 
+        int expected =
+            WEB_CAN_STREAM_CLIENT_NONE;
+
+        if (atomic_compare_exchange_strong(
+                &s_client_socket,
+                &expected,
+                socket
+            )) {
+
+            current_socket =
+                socket;
+            client_registered = true;
+        } else {
+            current_socket =
+                expected;
+        }
+    }
+
+    /*
+     * Only one CAN stream client is supported. A newly completed
+     * WebSocket handshake replaces the previous client so navigation
+     * between web pages cannot leave the stream attached to a closing
+     * browser socket.
+     */
+    if (current_socket != socket) {
+        if (request->method != HTTP_GET) {
+            return ESP_OK;
+        }
+
+        const int previous_socket =
+            atomic_exchange(
+                &s_client_socket,
+                socket
+            );
+
+        current_socket = socket;
+        client_registered = true;
+
+        if ((previous_socket !=
+             WEB_CAN_STREAM_CLIENT_NONE) &&
+            (previous_socket != socket) &&
+            (s_server != NULL)) {
+
+            (void)httpd_sess_trigger_close(
+                s_server,
+                previous_socket
+            );
+
+            ESP_LOGI(
+                TAG,
+                "CAN WebSocket client replaced: old=%d, new=%d",
+                previous_socket,
+                socket
+            );
+        }
+    }
+
+    if (client_registered) {
         atomic_store(
             &s_primary_enabled,
             true
@@ -1072,50 +1133,11 @@ static esp_err_t web_can_stream_websocket_handler(
             false
         );
 
-        int expected =
-            WEB_CAN_STREAM_CLIENT_NONE;
-
-        if (atomic_compare_exchange_strong(
-                &s_client_socket,
-                &expected,
-                socket
-            )) {
-
-            current_socket =
-                socket;
-
-            ESP_LOGI(
-                TAG,
-                "CAN WebSocket client registered: socket=%d",
-                socket
-            );
-        } else {
-            current_socket =
-                expected;
-        }
-    }
-
-    /*
-     * Only one CAN stream client is supported. Reject an additional
-     * socket without disturbing the active client.
-     */
-    if (current_socket != socket) {
-        ESP_LOGW(
+        ESP_LOGI(
             TAG,
-            "Rejecting additional CAN WebSocket client: "
-            "socket=%d, active=%d",
-            socket,
-            current_socket
+            "CAN WebSocket client registered: socket=%d",
+            socket
         );
-
-        if (s_server != NULL) {
-            (void)httpd_sess_trigger_close(
-                s_server,
-                socket
-            );
-        }
-
-        return ESP_OK;
     }
 
     /*

@@ -1328,13 +1328,15 @@ esp_err_t storage_sd_service_stat(
             sizeof(*out_stat)
         );
 
-        ESP_LOGE(
-            TAG,
-            "Failed to stat '%s': errno=%d (%s)",
-            full_path,
-            saved_errno,
-            strerror(saved_errno)
-        );
+        if (saved_errno != ENOENT) {
+            ESP_LOGE(
+                TAG,
+                "Failed to stat '%s': errno=%d (%s)",
+                full_path,
+                saved_errno,
+                strerror(saved_errno)
+            );
+        }
 
         return storage_sd_service_errno_to_error(
             saved_errno
