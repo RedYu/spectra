@@ -4658,6 +4658,29 @@ static void settings_screen_set_disabled_state(
         return;
     }
 
+    /*
+     * The default LVGL theme installs state transitions on controls.
+     * Settings refresh changes several dependent controls together and
+     * must apply their state immediately instead of allocating animations.
+     */
+    lv_obj_set_style_transition(
+        object,
+        NULL,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_transition(
+        object,
+        NULL,
+        LV_PART_INDICATOR
+    );
+
+    lv_obj_set_style_transition(
+        object,
+        NULL,
+        LV_PART_KNOB
+    );
+
     if (disabled) {
         lv_obj_add_state(
             object,
