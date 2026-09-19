@@ -20,6 +20,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 
 #include "app_task_priorities.h"
 #include "can_logger_binary_format.h"
@@ -950,7 +951,7 @@ static void can_replay_task(
         (unsigned long)repeat
     );
 
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 esp_err_t can_replay_service_init(void)

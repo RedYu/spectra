@@ -16,6 +16,7 @@
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -856,9 +857,11 @@ esp_err_t ota_service_check_backend(void)
     int64_t request_started_us = 0;
 
     if (result == ESP_OK) {
-        response_buffer = calloc(
+        response_buffer = heap_caps_calloc(
             1U,
-            response.capacity
+            response.capacity,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
         );
 
         if (response_buffer == NULL) {
@@ -1037,7 +1040,7 @@ esp_err_t ota_service_check_backend(void)
         esp_http_client_cleanup(client);
     }
 
-    free(response_buffer);
+    heap_caps_free(response_buffer);
 
     const esp_err_t lock_result =
         ota_service_lock();

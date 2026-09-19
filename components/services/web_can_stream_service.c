@@ -16,6 +16,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -868,7 +869,7 @@ static void web_can_stream_task(
         );
     }
 
-    vTaskDelete(
+    vTaskDeleteWithCaps(
         NULL
     );
 }
@@ -1447,13 +1448,15 @@ esp_err_t web_can_stream_service_start(
     }
 
     const BaseType_t task_result =
-        xTaskCreate(
+        xTaskCreateWithCaps(
             web_can_stream_task,
             "web_can_stream",
             WEB_CAN_STREAM_TASK_STACK_SIZE,
             NULL,
             WEB_CAN_STREAM_TASK_PRIORITY,
-            &s_stream_task
+            &s_stream_task,
+            MALLOC_CAP_SPIRAM |
+            MALLOC_CAP_8BIT
         );
 
     if (task_result != pdPASS) {
