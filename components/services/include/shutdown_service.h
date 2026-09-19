@@ -34,6 +34,24 @@ esp_err_t shutdown_service_schedule_restart(
 );
 
 /**
+ * @brief Schedule a graceful device power-off.
+ *
+ * Runs the same coordinated service shutdown used for restart, then
+ * requests software power-off from the AXP313A PMIC.
+ *
+ * Only one restart or power-off request can be scheduled per boot.
+ *
+ * @param[in] delay_ms Delay before shutdown starts, in milliseconds.
+ *
+ * @return ESP_OK when scheduled, ESP_ERR_INVALID_STATE if another
+ * shutdown request is already scheduled, or ESP_ERR_NO_MEM if the
+ * shutdown task cannot be created.
+ */
+esp_err_t shutdown_service_schedule_power_off(
+    uint32_t delay_ms
+);
+
+/**
  * @brief Check whether a graceful restart has been scheduled.
  */
 bool shutdown_service_is_restart_scheduled(void);

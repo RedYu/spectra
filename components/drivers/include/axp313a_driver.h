@@ -253,6 +253,21 @@ esp_err_t axp313a_driver_set_dldo1_enabled(
     bool enabled
 );
 
+/**
+ * @brief Request software-controlled PMIC power-off.
+ *
+ * Sets bit 7 of the AXP313A shutdown/restart control register. The PMIC
+ * clears the command bit automatically while disabling its outputs.
+ * On success the caller should expect execution to stop immediately.
+ *
+ * @warning Call only after persistent data has been synchronized and
+ * all services that use powered peripherals have stopped.
+ *
+ * @return ESP_OK if the command was transmitted, otherwise an ESP-IDF
+ * I2C or driver state error code.
+ */
+esp_err_t axp313a_driver_power_off(void);
+
 #ifdef __cplusplus
 }
 #endif

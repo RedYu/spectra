@@ -30,6 +30,8 @@
 #include "settings_model.h"
 #include "settings_service.h"
 #include "display_backlight.h"
+#include "button_action_dispatcher.h"
+#include "shutdown_service.h"
 
 #define GUI_TASK_STACK_SIZE       (8192U)
 #define GUI_TASK_PRIORITY \
@@ -67,6 +69,30 @@ static atomic_uint s_off_timeout_s =
  */
 
 static void gui_service_process_boot_progress(void);
+
+static void gui_service_power_button_long_action(
+    button_id_t button,
+    button_event_t event,
+    void *context
+)
+{
+    (void)button;
+    (void)event;
+    (void)context;
+
+    const esp_err_t result =
+        shutdown_service_schedule_power_off(0U);
+
+    if ((result != ESP_OK) &&
+        (result != ESP_ERR_INVALID_STATE)) {
+
+        ESP_LOGE(
+            TAG,
+            "Failed to schedule power-off: %s",
+            esp_err_to_name(result)
+        );
+    }
+}
 
 static void gui_service_process_display_idle(void)
 {
@@ -277,6 +303,43 @@ esp_err_t gui_service_init(void)
         return ESP_ERR_NO_MEM;
     }
 
+    esp_err_t button_result =
+        button_action_dispatcher_init();
+
+    if (button_result != ESP_OK) {
+        vQueueDelete(s_boot_queue);
+        s_boot_queue = NULL;
+
+        ESP_LOGE(
+            TAG,
+            "Failed to initialize button actions: %s",
+            esp_err_to_name(button_result)
+        );
+
+        return button_result;
+    }
+
+    button_result =
+        button_action_dispatcher_set_action(
+            BUTTON_ID_POWER,
+            BUTTON_EVENT_LONG_PRESS,
+            gui_service_power_button_long_action,
+            NULL
+        );
+
+    if (button_result != ESP_OK) {
+        vQueueDelete(s_boot_queue);
+        s_boot_queue = NULL;
+
+        ESP_LOGE(
+            TAG,
+            "Failed to register power-button action: %s",
+            esp_err_to_name(button_result)
+        );
+
+        return button_result;
+    }
+
     s_initialized = true;
 
     return ESP_OK;
@@ -426,6 +489,7 @@ static void gui_task(
 
     while (true) {
         gui_service_process_boot_progress();
+        button_action_dispatcher_process();
         gui_service_process_display_idle();
 
         uint32_t delay_ms =

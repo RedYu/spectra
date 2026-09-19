@@ -31,6 +31,8 @@
 #define AXP313A_OUTPUT_ALDO1_MASK   (1U << 3U)
 #define AXP313A_OUTPUT_DLDO1_MASK   (1U << 4U)
 
+#define AXP313A_SOFTWARE_POWER_OFF_MASK  (1U << 7U)
+
 static const char *TAG =
     "axp313a_driver";
 
@@ -573,6 +575,15 @@ esp_err_t axp313a_driver_set_dldo1_enabled(
         enabled
             ? AXP313A_OUTPUT_DLDO1_MASK
             : 0U
+    );
+}
+
+esp_err_t axp313a_driver_power_off(void)
+{
+    return axp313a_driver_update_register(
+        AXP313A_REG_POWER_CONTROL,
+        AXP313A_SOFTWARE_POWER_OFF_MASK,
+        AXP313A_SOFTWARE_POWER_OFF_MASK
     );
 }
 

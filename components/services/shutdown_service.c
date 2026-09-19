@@ -40,12 +40,21 @@
 #include "xcp_programming_service.h"
 #include "network_service.h"
 #include "time_service.h"
+#include "power_service.h"
 
 #define SHUTDOWN_SERVICE_TASK_STACK_SIZE  (4096U)
 #define SHUTDOWN_SERVICE_TASK_PRIORITY \
     APP_TASK_PRIORITY_SHUTDOWN
 
 #define SHUTDOWN_SERVICE_BUZZER_WAIT_MS   (700U)
+#define SHUTDOWN_SERVICE_POWER_OFF_WAIT_MS (500U)
+
+typedef enum
+{
+    SHUTDOWN_SERVICE_MODE_RESTART = 0,
+    SHUTDOWN_SERVICE_MODE_POWER_OFF,
+
+} shutdown_service_mode_t;
 
 static const char *TAG =
     "shutdown_service";
@@ -53,12 +62,22 @@ static const char *TAG =
 static atomic_bool s_restart_scheduled =
     ATOMIC_VAR_INIT(false);
 
+static shutdown_service_mode_t s_mode =
+    SHUTDOWN_SERVICE_MODE_RESTART;
+
+static uint32_t s_delay_ms = 0U;
+
 static void shutdown_service_task(
     void *argument
 )
 {
+    (void)argument;
+
     const uint32_t delay_ms =
-        (uint32_t)(uintptr_t)argument;
+        s_delay_ms;
+
+    const shutdown_service_mode_t mode =
+        s_mode;
 
     if (delay_ms > 0U) {
         vTaskDelay(
@@ -70,7 +89,10 @@ static void shutdown_service_task(
 
     ESP_LOGI(
         TAG,
-        "Graceful restart started"
+        "Graceful %s started",
+        mode == SHUTDOWN_SERVICE_MODE_POWER_OFF
+            ? "power-off"
+            : "restart"
     );
 
     /*
@@ -510,13 +532,46 @@ static void shutdown_service_task(
      */
     ESP_LOGI(
         TAG,
-        "Graceful restart completed"
+        "Graceful %s completed",
+        mode == SHUTDOWN_SERVICE_MODE_POWER_OFF
+            ? "power-off"
+            : "restart"
     );
+
+    if (mode == SHUTDOWN_SERVICE_MODE_POWER_OFF) {
+        const esp_err_t power_result =
+            power_service_power_off();
+
+        if (power_result == ESP_OK) {
+            vTaskDelay(
+                pdMS_TO_TICKS(
+                    SHUTDOWN_SERVICE_POWER_OFF_WAIT_MS
+                )
+            );
+
+            ESP_LOGE(
+                TAG,
+                "PMIC accepted power-off but power remains active"
+            );
+        } else {
+            ESP_LOGE(
+                TAG,
+                "PMIC power-off failed: %s",
+                esp_err_to_name(power_result)
+            );
+        }
+
+        ESP_LOGW(
+            TAG,
+            "Falling back to software restart"
+        );
+    }
 
     esp_restart();
 }
 
-esp_err_t shutdown_service_schedule_restart(
+static esp_err_t shutdown_service_schedule(
+    shutdown_service_mode_t mode,
     uint32_t delay_ms
 )
 {
@@ -531,12 +586,18 @@ esp_err_t shutdown_service_schedule_restart(
         return ESP_ERR_INVALID_STATE;
     }
 
+    s_mode =
+        mode;
+
+    s_delay_ms =
+        delay_ms;
+
     const BaseType_t result =
         xTaskCreate(
             shutdown_service_task,
             "shutdown_service",
             SHUTDOWN_SERVICE_TASK_STACK_SIZE,
-            (void *)(uintptr_t)delay_ms,
+            NULL,
             SHUTDOWN_SERVICE_TASK_PRIORITY,
             NULL
         );
@@ -557,11 +618,34 @@ esp_err_t shutdown_service_schedule_restart(
 
     ESP_LOGI(
         TAG,
-        "Graceful restart scheduled in %lu ms",
+        "Graceful %s scheduled in %lu ms",
+        mode == SHUTDOWN_SERVICE_MODE_POWER_OFF
+            ? "power-off"
+            : "restart",
         (unsigned long)delay_ms
     );
 
     return ESP_OK;
+}
+
+esp_err_t shutdown_service_schedule_restart(
+    uint32_t delay_ms
+)
+{
+    return shutdown_service_schedule(
+        SHUTDOWN_SERVICE_MODE_RESTART,
+        delay_ms
+    );
+}
+
+esp_err_t shutdown_service_schedule_power_off(
+    uint32_t delay_ms
+)
+{
+    return shutdown_service_schedule(
+        SHUTDOWN_SERVICE_MODE_POWER_OFF,
+        delay_ms
+    );
 }
 
 bool shutdown_service_is_restart_scheduled(void)

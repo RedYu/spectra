@@ -126,6 +126,19 @@ esp_err_t power_service_set_dldo1_enabled(
     bool enabled
 );
 
+/**
+ * @brief Request software-controlled shutdown of the AXP313A outputs.
+ *
+ * The application must stop services and synchronize persistent data
+ * before calling this function. A successful request normally removes
+ * processor power before the function's caller can continue.
+ *
+ * @return ESP_OK if the command was transmitted, ESP_ERR_INVALID_STATE
+ * if the service is unavailable, ESP_ERR_TIMEOUT if its lock cannot be
+ * acquired, otherwise an ESP-IDF error code.
+ */
+esp_err_t power_service_power_off(void);
+
 #ifdef __cplusplus
 }
 #endif

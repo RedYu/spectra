@@ -259,3 +259,28 @@ esp_err_t power_service_set_dldo1_enabled(
 
     return result;
 }
+
+esp_err_t power_service_power_off(void)
+{
+    esp_err_t result =
+        power_service_lock();
+
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    result =
+        axp313a_driver_power_off();
+
+    power_service_unlock();
+
+    if (result != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Failed to request PMIC power-off: %s",
+            esp_err_to_name(result)
+        );
+    }
+
+    return result;
+}

@@ -21,6 +21,7 @@ idf_component_register(
         "battery_service.c"
         "buzzer_service.c"
         "button_service.c"
+        "button_action_dispatcher.c"
         "can_service.c"
         "can_fd_service.c"
         "can_twai_frame_adapter.c"
