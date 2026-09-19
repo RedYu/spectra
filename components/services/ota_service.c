@@ -52,24 +52,61 @@ typedef struct
     size_t capacity;
     size_t size;
 
+    int64_t request_started_us;
+    int64_t connected_us;
+    int64_t headers_sent_us;
+    int64_t first_data_us;
+    int64_t finished_us;
+
 } ota_service_backend_response_t;
 
 static esp_err_t ota_service_backend_event_handler(
     esp_http_client_event_t *event
 )
 {
-    if ((event == NULL) ||
-        (event->event_id != HTTP_EVENT_ON_DATA) ||
-        (event->data_len <= 0)) {
-
+    if (event == NULL) {
         return ESP_OK;
     }
 
     ota_service_backend_response_t *response =
         event->user_data;
 
-    if ((response == NULL) ||
-        (response->data == NULL)) {
+    if (response == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const int64_t now_us = esp_timer_get_time();
+
+    switch (event->event_id) {
+        case HTTP_EVENT_ON_CONNECTED:
+            response->connected_us = now_us;
+            break;
+
+        case HTTP_EVENT_HEADERS_SENT:
+            response->headers_sent_us = now_us;
+            break;
+
+        case HTTP_EVENT_ON_DATA:
+            if (response->first_data_us == 0) {
+                response->first_data_us = now_us;
+            }
+            break;
+
+        case HTTP_EVENT_ON_FINISH:
+            response->finished_us = now_us;
+            break;
+
+        default:
+            break;
+    }
+
+    if ((event->event_id != HTTP_EVENT_ON_DATA) ||
+        (event->data_len <= 0)) {
+
+        return ESP_OK;
+    }
+
+    if (response->data == NULL) {
 
         return ESP_ERR_INVALID_STATE;
     }
@@ -885,6 +922,7 @@ esp_err_t ota_service_check_backend(void)
 
     if (result == ESP_OK) {
         request_started_us = esp_timer_get_time();
+        response.request_started_us = request_started_us;
         result = esp_http_client_perform(client);
     }
 
@@ -900,6 +938,47 @@ esp_err_t ota_service_check_backend(void)
             esp_err_to_name(result),
             (unsigned long long)elapsed_ms
         );
+
+        if ((response.connected_us != 0) &&
+            (response.first_data_us != 0)) {
+
+            const uint64_t connect_ms = (uint64_t)(
+                (response.connected_us -
+                 response.request_started_us) /
+                1000LL
+            );
+
+            const int64_t response_started_us =
+                (response.headers_sent_us != 0) ?
+                response.headers_sent_us :
+                response.connected_us;
+
+            const uint64_t server_ms = (uint64_t)(
+                (response.first_data_us -
+                 response_started_us) /
+                1000LL
+            );
+
+            const int64_t response_finished_us =
+                (response.finished_us != 0) ?
+                response.finished_us :
+                esp_timer_get_time();
+
+            const uint64_t receive_ms = (uint64_t)(
+                (response_finished_us -
+                 response.first_data_us) /
+                1000LL
+            );
+
+            ESP_LOGI(
+                TAG,
+                "Backend timing: connect_tls=%llu ms, "
+                "server=%llu ms, receive=%llu ms",
+                (unsigned long long)connect_ms,
+                (unsigned long long)server_ms,
+                (unsigned long long)receive_ms
+            );
+        }
     }
 
     if (result == ESP_OK) {
