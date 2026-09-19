@@ -26,6 +26,7 @@
 #include "system_service.h"
 #include "battery_service.h"
 #include "buzzer_service.h"
+#include "user_button_service.h"
 #include "settings_service.h"
 #include "can_service.h"
 #include "can_fd_service.h"
@@ -108,6 +109,21 @@ static void shutdown_service_task(
              */
             vTaskDelay(
                 pdMS_TO_TICKS(SHUTDOWN_SERVICE_BUZZER_WAIT_MS)
+            );
+        }
+    }
+
+    if (user_button_service_is_running()) {
+        const esp_err_t button_result =
+            user_button_service_stop();
+
+        if ((button_result != ESP_OK) &&
+            (button_result != ESP_ERR_INVALID_STATE)) {
+
+            ESP_LOGW(
+                TAG,
+                "Failed to stop user button service: %s",
+                esp_err_to_name(button_result)
             );
         }
     }

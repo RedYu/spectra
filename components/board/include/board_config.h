@@ -38,6 +38,14 @@
 #define TOUCH_PIN_RST          GPIO_NUM_NC
 
 /*
+ * BOOT button shared with the ESP32-S3 download-mode strapping input.
+ * The pin is sampled by the ROM during reset and is used as a regular
+ * active-low input only after the application has started.
+ */
+#define USER_BUTTON_PIN               GPIO_NUM_0
+#define USER_BUTTON_ACTIVE_LEVEL      (0)
+
+/*
  * MCP23017 GPIO-expander assignments.
  *
  * Each output controls an external switch or transistor that connects a

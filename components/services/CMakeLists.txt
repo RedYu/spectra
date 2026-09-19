@@ -20,6 +20,7 @@ idf_component_register(
         "shutdown_service.c"
         "battery_service.c"
         "buzzer_service.c"
+        "user_button_service.c"
         "can_service.c"
         "can_fd_service.c"
         "can_twai_frame_adapter.c"
