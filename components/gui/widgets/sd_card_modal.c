@@ -17,7 +17,6 @@
 #include "storage_sd_service.h"
 
 #include "sd_card_driver.h"
-#include "gui_config.h"
 
 #define SD_CARD_MODAL_INFO_BUFFER_SIZE  (768U)
 
@@ -117,8 +116,12 @@ bool sd_card_modal_open(
         .progress_text =
             NULL,
 
-        .animate_open =
-            gui_config_get_animations_enabled(),
+        /*
+         * Keep this dialog static. Its full-screen translucent overlay
+         * otherwise makes LVGL repeatedly redraw and recolor the complete
+         * main screen while the scale/opacity animation is running.
+         */
+        .animate_open = false,
 
         .close_on_overlay_click =
             false,
