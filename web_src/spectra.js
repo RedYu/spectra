@@ -15657,6 +15657,29 @@
         const currentPath = location.pathname.replace(/\/$/, '') || '/';
 
         for (const navigation of document.querySelectorAll('.spectra-nav')) {
+            const existing = Array.from(
+                navigation.querySelectorAll(':scope > a')
+            );
+
+            const matches =
+                existing.length === entries.length &&
+                entries.every(([path, label], index) =>
+                    existing[index].getAttribute('href') === path &&
+                    existing[index].textContent.trim() === label
+                );
+
+            if (matches) {
+                existing.forEach(link => {
+                    if (link.getAttribute('href') === currentPath) {
+                        link.setAttribute('aria-current', 'page');
+                    } else {
+                        link.removeAttribute('aria-current');
+                    }
+                });
+
+                continue;
+            }
+
             const links = entries.map(([path, label]) => {
                 const link = document.createElement('a');
                 link.href = path;
