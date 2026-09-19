@@ -25,7 +25,7 @@
 #include "power_service.h"
 #include "battery_service.h"
 #include "buzzer_service.h"
-#include "user_button_service.h"
+#include "button_service.h"
 #include "storage_service.h"
 #include "storage_sd_service.h"
 #include "settings_model.h"
@@ -618,8 +618,8 @@ static void startup_task(
     }
 
     result = start_service(
-        "User button",
-        user_button_service_start,
+        "Buttons",
+        button_service_start,
         SERVICE_OPTIONAL
     );
 

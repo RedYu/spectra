@@ -38,12 +38,19 @@
 #define TOUCH_PIN_RST          GPIO_NUM_NC
 
 /*
- * BOOT button shared with the ESP32-S3 download-mode strapping input.
- * The pin is sampled by the ROM during reset and is used as a regular
- * active-low input only after the application has started.
+ * Application buttons.
+ *
+ * The service button shares GPIO0 with the ESP32-S3 download-mode
+ * strapping input. It is treated as an application input only after
+ * startup. The power button is also connected to the AXP313A PWRON
+ * input; the hardware must prevent either input from back-powering
+ * the other power domain.
  */
-#define USER_BUTTON_PIN               GPIO_NUM_0
-#define USER_BUTTON_ACTIVE_LEVEL      (0)
+#define SERVICE_BUTTON_PIN               GPIO_NUM_0
+#define SERVICE_BUTTON_ACTIVE_LEVEL      (0)
+
+#define POWER_BUTTON_PIN                 GPIO_NUM_47
+#define POWER_BUTTON_ACTIVE_LEVEL        (0)
 
 /*
  * MCP23017 GPIO-expander assignments.
